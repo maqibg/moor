@@ -5,10 +5,13 @@ import { createInterface } from "node:readline";
 export class StdioTransport implements Transport {
   private process: ChildProcess | null = null;
   private connected = false;
-  private pendingRequests: Map<string | number, {
-    resolve: (response: JsonRpcResponse) => void;
-    reject: (error: Error) => void;
-  }> = new Map();
+  private pendingRequests: Map<
+    string | number,
+    {
+      resolve: (response: JsonRpcResponse) => void;
+      reject: (error: Error) => void;
+    }
+  > = new Map();
   private notificationHandlers: Set<(notification: JsonRpcNotification) => void> = new Set();
   private messageBuffer = "";
   private nextId = 1;
@@ -17,7 +20,7 @@ export class StdioTransport implements Transport {
     private command: string,
     private args: string[] = [],
     private env: Record<string, string> = {},
-    private workingDir?: string
+    private workingDir?: string,
   ) {}
 
   async connect(): Promise<void> {
@@ -50,7 +53,7 @@ export class StdioTransport implements Transport {
         reject(err);
       });
 
-      this.process.on("exit", (code) => {
+      this.process.on("exit", (_code) => {
         this.connected = false;
       });
 

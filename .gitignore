@@ -60,6 +60,7 @@ docs/archived/*
 ############################
 src-tauri/target/
 src-tauri/gen/
+src-tauri/binaries/*
 
 ############################
 # Sidecar

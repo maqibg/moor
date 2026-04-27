@@ -22,7 +22,12 @@ export interface LogStats {
   topServers: Array<{ server_id: string; count: number }>;
 }
 
-export function useLogs(filters?: { server_id?: string; tool_name?: string; from?: string; to?: string }) {
+export function useLogs(filters?: {
+  server_id?: string;
+  tool_name?: string;
+  from?: string;
+  to?: string;
+}) {
   const params = new URLSearchParams();
   if (filters?.server_id) params.set("server_id", filters.server_id);
   if (filters?.tool_name) params.set("tool_name", filters.tool_name);
@@ -37,7 +42,12 @@ export function useLogs(filters?: { server_id?: string; tool_name?: string; from
 }
 
 export function useLogStats() {
-  const { data: stats, loading, error, refresh } = useApi<LogStats>("/api/logs/stats", {
+  const {
+    data: stats,
+    loading,
+    error,
+    refresh,
+  } = useApi<LogStats>("/api/logs/stats", {
     totalCalls: 0,
     errorCalls: 0,
     errorRate: 0,

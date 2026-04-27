@@ -35,13 +35,20 @@ export function Header() {
               {profiles.map((profile) => (
                 <button
                   key={profile.id}
-                  onClick={() => { activateProfile(profile.id); setOpen(false); }}
+                  onClick={() => {
+                    activateProfile(profile.id);
+                    setOpen(false);
+                  }}
                   className={`w-full text-left px-3 py-2 text-sm font-headline hover:bg-surface-300 transition-colors ${
-                    profile.is_active ? "text-cursor-dark font-medium" : "text-[rgba(38,37,30,0.55)]"
+                    profile.is_active
+                      ? "text-cursor-dark font-medium"
+                      : "text-[rgba(38,37,30,0.55)]"
                   }`}
                 >
                   <div className="flex items-center gap-2">
-                    {profile.is_active && <div className="h-1.5 w-1.5 rounded-full bg-success-muted" />}
+                    {profile.is_active && (
+                      <div className="h-1.5 w-1.5 rounded-full bg-success-muted" />
+                    )}
                     {profile.name}
                   </div>
                 </button>

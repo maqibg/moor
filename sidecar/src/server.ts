@@ -1,24 +1,38 @@
 import { Hono } from "hono";
-import { cors } from "hono/cors";
 import { servers } from "./api/servers.js";
 import { profiles } from "./api/profiles.js";
 import { logs } from "./api/logs.js";
 import { setupSSE } from "./api/events.js";
+import { importApi } from "./api/import.js";
+import { gateway } from "./mcp/gateway.js";
+import { createSecurityMiddleware } from "./services/security.js";
 
-const app = new Hono();
+export interface AppOptions {
+  apiToken: string;
+  port: number;
+  host: string;
+}
 
-app.use("*", cors());
+export function createApp(options: AppOptions) {
+  const app = new Hono();
+  const baseUrl = `http://${options.host}:${options.port}`;
 
-app.get("/api/health", (c) => {
-  return c.json({ status: "ok", timestamp: new Date().toISOString() });
-});
+  app.use("*", createSecurityMiddleware({ apiToken: options.apiToken }));
 
-app.route("/api/servers", servers);
-app.route("/api/profiles", profiles);
-app.route("/api/logs", logs);
+  app.get("/api/health", (c) => {
+    return c.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
 
-app.get("/api/events", (c) => {
-  return setupSSE(c);
-});
+  app.get("/api/runtime", (c) => {
+    return c.json({ port: options.port, baseUrl, apiTokenConfigured: Boolean(options.apiToken) });
+  });
 
-export { app };
+  app.route("/api/servers", servers);
+  app.route("/api/profiles", profiles);
+  app.route("/api/logs", logs);
+  app.route("/api/import", importApi);
+  app.get("/api/events", (c) => setupSSE(c));
+  app.route("/", gateway);
+
+  return app;
+}

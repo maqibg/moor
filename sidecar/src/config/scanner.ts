@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-interface ScannedServer {
+export interface ScannedServer {
   name: string;
   connectionType: "stdio" | "http";
   command?: string;
@@ -22,7 +22,9 @@ export function scanClaudeCodeConfig(): ScannedServer[] {
     const servers: ScannedServer[] = [];
 
     const mcpServers = config.mcpServers || {};
-    for (const [name, serverConfig] of Object.entries(mcpServers) as Array<[string, Record<string, unknown>]>) {
+    for (const [name, serverConfig] of Object.entries(mcpServers) as Array<
+      [string, Record<string, unknown>]
+    >) {
       if (serverConfig.command) {
         servers.push({
           name,
@@ -63,7 +65,9 @@ export function scanCursorConfig(): ScannedServer[] {
       const servers: ScannedServer[] = [];
 
       const mcpServers = config.mcpServers || {};
-      for (const [name, serverConfig] of Object.entries(mcpServers) as Array<[string, Record<string, unknown>]>) {
+      for (const [name, serverConfig] of Object.entries(mcpServers) as Array<
+        [string, Record<string, unknown>]
+      >) {
         if (serverConfig.command) {
           servers.push({
             name,

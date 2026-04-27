@@ -80,6 +80,7 @@ pnpm tauri build
 ```
 
 输出：
+
 - `src-tauri/target/release/bundle/macos/Moor.app`
 - `src-tauri/target/release/bundle/dmg/Moor_0.1.0_aarch64.dmg`
 
@@ -129,49 +130,49 @@ moor/
 
 ### MCP 网关
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
+| 方法  | 路径   | 说明                            |
+| ----- | ------ | ------------------------------- |
 | `ALL` | `/mcp` | MCP 协议端点（Streamable HTTP） |
 
 ### Server 管理
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/api/servers` | 列出所有 Server |
-| `POST` | `/api/servers` | 添加 Server |
-| `GET` | `/api/servers/:id` | Server 详情 |
-| `PUT` | `/api/servers/:id` | 更新 Server 配置 |
-| `DELETE` | `/api/servers/:id` | 删除 Server |
-| `POST` | `/api/servers/:id/start` | 启动 Server |
-| `POST` | `/api/servers/:id/stop` | 停止 Server |
-| `GET` | `/api/servers/:id/tools` | 获取已发现工具 |
+| 方法     | 路径                     | 说明             |
+| -------- | ------------------------ | ---------------- |
+| `GET`    | `/api/servers`           | 列出所有 Server  |
+| `POST`   | `/api/servers`           | 添加 Server      |
+| `GET`    | `/api/servers/:id`       | Server 详情      |
+| `PUT`    | `/api/servers/:id`       | 更新 Server 配置 |
+| `DELETE` | `/api/servers/:id`       | 删除 Server      |
+| `POST`   | `/api/servers/:id/start` | 启动 Server      |
+| `POST`   | `/api/servers/:id/stop`  | 停止 Server      |
+| `GET`    | `/api/servers/:id/tools` | 获取已发现工具   |
 
 ### Profile 管理
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/api/profiles` | 列出所有 Profile |
-| `POST` | `/api/profiles` | 创建 Profile |
-| `PUT` | `/api/profiles/:id` | 更新 Profile |
-| `DELETE` | `/api/profiles/:id` | 删除 Profile |
-| `PUT` | `/api/profiles/:id/activate` | 激活 Profile |
-| `PUT` | `/api/profiles/:id/servers/:sid` | 更新 Server 开关 + 禁用工具 |
+| 方法     | 路径                             | 说明                        |
+| -------- | -------------------------------- | --------------------------- |
+| `GET`    | `/api/profiles`                  | 列出所有 Profile            |
+| `POST`   | `/api/profiles`                  | 创建 Profile                |
+| `PUT`    | `/api/profiles/:id`              | 更新 Profile                |
+| `DELETE` | `/api/profiles/:id`              | 删除 Profile                |
+| `PUT`    | `/api/profiles/:id/activate`     | 激活 Profile                |
+| `PUT`    | `/api/profiles/:id/servers/:sid` | 更新 Server 开关 + 禁用工具 |
 
 ### 审计日志
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/api/logs` | 查询日志（支持筛选） |
-| `GET` | `/api/logs/stats` | 聚合统计 |
+| 方法  | 路径              | 说明                 |
+| ----- | ----------------- | -------------------- |
+| `GET` | `/api/logs`       | 查询日志（支持筛选） |
+| `GET` | `/api/logs/stats` | 聚合统计             |
 
 ### 其他
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/api/health` | 健康检查 |
-| `GET` | `/api/events` | SSE 实时事件流 |
-| `POST` | `/api/import/scan` | 扫描本地客户端配置 |
-| `POST` | `/api/import/execute` | 执行导入 |
+| 方法   | 路径                  | 说明               |
+| ------ | --------------------- | ------------------ |
+| `GET`  | `/api/health`         | 健康检查           |
+| `GET`  | `/api/events`         | SSE 实时事件流     |
+| `POST` | `/api/import/scan`    | 扫描本地客户端配置 |
+| `POST` | `/api/import/execute` | 执行导入           |
 
 ## 数据模型
 
@@ -196,15 +197,15 @@ AuditLog
 
 ## 技术栈
 
-| 层 | 技术 |
-|----|------|
-| 前端 | React 19, Vite 6, TypeScript 5.7, Tailwind CSS v4 |
-| UI 组件 | shadcn/ui (new-york style) |
-| 桌面框架 | Tauri 2 (Rust) |
-| Sidecar | Node.js, TypeScript, Hono, @hono/node-server |
-| 数据库 | SQLite (sql.js WASM) |
-| MCP 协议 | @modelcontextprotocol/sdk (stdio + HTTP/SSE) |
-| 图标 | Lucide React |
+| 层       | 技术                                              |
+| -------- | ------------------------------------------------- |
+| 前端     | React 19, Vite 6, TypeScript 5.7, Tailwind CSS v4 |
+| UI 组件  | shadcn/ui (new-york style)                        |
+| 桌面框架 | Tauri 2 (Rust)                                    |
+| Sidecar  | Node.js, TypeScript, Hono, @hono/node-server      |
+| 数据库   | SQLite (sql.js WASM)                              |
+| MCP 协议 | @modelcontextprotocol/sdk (stdio + HTTP/SSE)      |
+| 图标     | Lucide React                                      |
 
 ## License
 

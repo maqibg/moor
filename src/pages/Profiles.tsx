@@ -25,7 +25,9 @@ export function Profiles() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-headline text-2xl tracking-tight text-cursor-dark">Profiles</h1>
-          <p className="font-body text-sm text-[rgba(38,37,30,0.55)] mt-1">Manage server groupings and tool visibility</p>
+          <p className="font-body text-sm text-[rgba(38,37,30,0.55)] mt-1">
+            Manage server groupings and tool visibility
+          </p>
         </div>
         {!creating && (
           <Button onClick={() => setCreating(true)}>
@@ -45,7 +47,15 @@ export function Profiles() {
               autoFocus
             />
             <Button onClick={handleCreate}>Create</Button>
-            <Button variant="outline" onClick={() => { setCreating(false); setNewName(""); }}>Cancel</Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCreating(false);
+                setNewName("");
+              }}
+            >
+              Cancel
+            </Button>
           </CardContent>
         </Card>
       )}
@@ -62,7 +72,9 @@ export function Profiles() {
                 <div className="flex items-center gap-2">
                   <span className="font-headline text-base text-cursor-dark">{profile.name}</span>
                   {profile.is_active ? (
-                    <Badge variant="success"><Check className="h-3 w-3 mr-1" /> Active</Badge>
+                    <Badge variant="success">
+                      <Check className="h-3 w-3 mr-1" /> Active
+                    </Badge>
                   ) : null}
                 </div>
                 <div className="flex items-center gap-2">
@@ -71,10 +83,24 @@ export function Profiles() {
                   </span>
                   {!profile.is_active && (
                     <>
-                      <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); activateProfile(profile.id); }}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          activateProfile(profile.id);
+                        }}
+                      >
                         Activate
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); deleteProfile(profile.id); }}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteProfile(profile.id);
+                        }}
+                      >
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </>

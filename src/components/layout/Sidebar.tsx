@@ -30,7 +30,7 @@ export function Sidebar() {
                 "flex items-center gap-2.5 px-3 py-2 rounded-lg font-headline text-sm transition-colors",
                 isActive
                   ? "bg-surface-400 text-cursor-dark"
-                  : "text-[rgba(38,37,30,0.55)] hover:bg-[rgba(38,37,30,0.06)] hover:text-cursor-dark"
+                  : "text-[rgba(38,37,30,0.55)] hover:bg-[rgba(38,37,30,0.06)] hover:text-cursor-dark",
               )
             }
           >

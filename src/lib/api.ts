@@ -1,28 +1,67 @@
-const getBaseUrl = async (): Promise<string> => {
+import { invoke } from "@tauri-apps/api/core";
+
+interface SidecarInfo {
+  port: number;
+  baseUrl: string;
+  apiToken: string;
+}
+
+const defaultRuntime = (): SidecarInfo => ({
+  port: 9223,
+  baseUrl: import.meta.env.VITE_MOOR_API_URL ?? "http://127.0.0.1:9223",
+  apiToken: import.meta.env.VITE_MOOR_API_TOKEN ?? "dev-token",
+});
+
+const getRuntimeInfo = async (): Promise<SidecarInfo> => {
   try {
-    const resp = await fetch("/api/port");
+    return await invoke<SidecarInfo>("get_sidecar_info");
+  } catch {
+    // Browser dev mode does not have Tauri commands.
+  }
+
+  const fallback = defaultRuntime();
+  try {
+    const resp = await fetch(`${fallback.baseUrl}/api/runtime`, {
+      headers: { "X-Moor-Token": fallback.apiToken },
+    });
     if (resp.ok) {
-      const { port } = await resp.json();
-      return `http://127.0.0.1:${port}`;
+      const runtime = (await resp.json()) as { port: number; baseUrl: string };
+      return { ...fallback, port: runtime.port, baseUrl: runtime.baseUrl };
     }
-  } catch {}
-  return "http://127.0.0.1:9223";
+  } catch {
+    // Dev sidecar may not be running yet; callers will surface API errors.
+  }
+  return fallback;
 };
 
-let baseUrl: string | null = null;
+let runtimeInfo: SidecarInfo | null = null;
+
+export async function getApiRuntime(): Promise<SidecarInfo> {
+  if (!runtimeInfo) {
+    runtimeInfo = await getRuntimeInfo();
+  }
+  return runtimeInfo;
+}
 
 export async function getApiUrl(path: string): Promise<string> {
-  if (!baseUrl) {
-    baseUrl = await getBaseUrl();
-  }
-  return `${baseUrl}${path}`;
+  const runtime = await getApiRuntime();
+  return `${runtime.baseUrl}${path}`;
+}
+
+export async function getApiHeaders(extra?: HeadersInit): Promise<HeadersInit> {
+  const runtime = await getApiRuntime();
+  return {
+    "Content-Type": "application/json",
+    "X-Moor-Token": runtime.apiToken,
+    ...extra,
+  };
 }
 
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const url = await getApiUrl(path);
   const resp = await fetch(url, {
-    headers: { "Content-Type": "application/json", ...options?.headers },
     ...options,
+    headers: await getApiHeaders(options?.headers),
   });
   if (!resp.ok) {
     const error = await resp.json().catch(() => ({ error: resp.statusText }));

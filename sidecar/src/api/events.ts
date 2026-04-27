@@ -7,9 +7,7 @@ export function setupSSE(c: Context) {
       const encoder = new TextEncoder();
 
       const send = (event: string, data: unknown) => {
-        controller.enqueue(
-          encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
-        );
+        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
       };
 
       const unsubStatus = eventBus.on("server:status", send);

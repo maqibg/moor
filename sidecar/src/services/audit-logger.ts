@@ -1,4 +1,5 @@
 import { run, saveDb } from "../db/index.js";
+import { redactForAudit } from "./audit-redaction.js";
 
 interface LogEntry {
   id: string;
@@ -44,11 +45,17 @@ export class AuditLogger {
           `INSERT INTO audit_logs (id, timestamp, profile_id, server_id, tool_name, arguments, result, error, duration_ms, agent_info)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
-            entry.id, entry.timestamp, entry.profileId, entry.serverId,
-            entry.toolName, JSON.stringify(entry.arguments),
-            entry.result !== null ? JSON.stringify(entry.result) : null,
-            entry.error, entry.durationMs, entry.agentInfo
-          ]
+            entry.id,
+            entry.timestamp,
+            entry.profileId,
+            entry.serverId,
+            entry.toolName,
+            JSON.stringify(redactForAudit(entry.arguments)),
+            entry.result !== null ? JSON.stringify(redactForAudit(entry.result)) : null,
+            entry.error,
+            entry.durationMs,
+            entry.agentInfo,
+          ],
         );
       }
       saveDb();

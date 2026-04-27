@@ -15,16 +15,19 @@ export function ClientConfig() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-headline text-2xl tracking-tight text-cursor-dark">Client Configuration</h1>
+        <h1 className="font-headline text-2xl tracking-tight text-cursor-dark">
+          Client Configuration
+        </h1>
         <p className="font-body text-sm text-[rgba(38,37,30,0.55)] mt-1">
           Configure your AI agents to connect to Moor
         </p>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        {(!snippets || snippets.length === 0 ? [
-          { client: "Claude Code", description: "Loading...", snippet: "{}", cliCommand: "" },
-        ] : snippets).map((s) => (
+        {(!snippets || snippets.length === 0
+          ? [{ client: "Claude Code", description: "Loading...", snippet: "{}", cliCommand: "" }]
+          : snippets
+        ).map((s) => (
           <Card key={s.client}>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">

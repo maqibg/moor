@@ -5,7 +5,12 @@ import { Play, Square, Trash2, Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import type { Server } from "@/hooks/useServers";
 
-export function ServerCard({ server, onStart, onStop, onRemove }: {
+export function ServerCard({
+  server,
+  onStart,
+  onStop,
+  onRemove,
+}: {
   server: Server;
   onStart: (id: string) => void;
   onStop: (id: string) => void;
@@ -20,7 +25,9 @@ export function ServerCard({ server, onStart, onStop, onRemove }: {
           <div className="flex items-center gap-3 min-w-0">
             <div className="flex flex-col gap-0.5 min-w-0">
               <div className="flex items-center gap-2">
-                <span className="font-headline text-sm font-medium text-cursor-dark truncate">{server.name}</span>
+                <span className="font-headline text-sm font-medium text-cursor-dark truncate">
+                  {server.name}
+                </span>
                 <StatusBadge status={server.status} />
               </div>
               <span className="font-mono text-xs text-[rgba(38,37,30,0.4)] truncate">
@@ -40,7 +47,12 @@ export function ServerCard({ server, onStart, onStop, onRemove }: {
                 <Play className="h-4 w-4" />
               </Button>
             )}
-            <Button variant="ghost" size="icon" onClick={() => navigate(`/servers/${server.id}`)} title="Settings">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => navigate(`/servers/${server.id}`)}
+              title="Settings"
+            >
               <Settings className="h-4 w-4" />
             </Button>
             <Button variant="ghost" size="icon" onClick={() => onRemove(server.id)} title="Remove">

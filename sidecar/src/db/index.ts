@@ -1,46 +1,52 @@
-import initSqlJs, { type Database as SqlJsDatabase } from "sql.js";
+import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
 
-const DATA_DIR = path.join(os.homedir(), ".moor");
-const DB_PATH = path.join(DATA_DIR, "moor.db");
+export interface InitDbOptions {
+  dataDir?: string;
+}
 
-let sqlDb: SqlJsDatabase;
+const DEFAULT_DATA_DIR = path.join(os.homedir(), ".moor");
 
-export async function initDb() {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+let sqlDb: DatabaseSync | null = null;
+let dbPath = path.join(DEFAULT_DATA_DIR, "moor.db");
 
-  const SQL = await initSqlJs();
+function normalizeParams(params: unknown[]): (string | number | null | bigint | Uint8Array)[] {
+  return params.map((param) => {
+    if (param === undefined) return null;
+    if (
+      typeof param === "string" ||
+      typeof param === "number" ||
+      typeof param === "bigint" ||
+      param === null ||
+      param instanceof Uint8Array
+    ) {
+      return param;
+    }
+    return JSON.stringify(param);
+  });
+}
 
-  if (fs.existsSync(DB_PATH)) {
-    const buffer = fs.readFileSync(DB_PATH);
-    sqlDb = new SQL.Database(buffer);
-  } else {
-    sqlDb = new SQL.Database();
-  }
-
-  sqlDb.run("PRAGMA foreign_keys = ON");
-
-  // Auto-save every 5 seconds
-  const saveTimer = setInterval(saveDb, 5000);
-
+export async function initDb(options: InitDbOptions = {}) {
+  const dataDir = options.dataDir ?? process.env.MOOR_DATA_DIR ?? DEFAULT_DATA_DIR;
+  fs.mkdirSync(dataDir, { recursive: true });
+  dbPath = path.join(dataDir, "moor.db");
+  sqlDb = new DatabaseSync(dbPath);
+  sqlDb.exec("PRAGMA foreign_keys = ON");
+  sqlDb.exec("PRAGMA journal_mode = WAL");
+  sqlDb.exec("PRAGMA busy_timeout = 5000");
   return sqlDb;
 }
 
-export function saveDb() {
-  if (!sqlDb) return;
-  const data = sqlDb.export();
-  const buffer = Buffer.from(data);
-  fs.writeFileSync(DB_PATH, buffer);
-}
-
-export function getDb(): SqlJsDatabase {
+export function getDb(): DatabaseSync {
+  if (!sqlDb) throw new Error("Database not initialized");
   return sqlDb;
 }
 
 export function runMigrations() {
-  sqlDb.run(`
+  const db = getDb();
+  db.exec(`
     CREATE TABLE IF NOT EXISTS profiles (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -48,9 +54,7 @@ export function runMigrations() {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
-  `);
 
-  sqlDb.run(`
     CREATE TABLE IF NOT EXISTS mcp_servers (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -65,9 +69,7 @@ export function runMigrations() {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
-  `);
 
-  sqlDb.run(`
     CREATE TABLE IF NOT EXISTS profile_servers (
       profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
       server_id TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
@@ -75,19 +77,17 @@ export function runMigrations() {
       disabled_tools TEXT NOT NULL DEFAULT '[]',
       PRIMARY KEY (profile_id, server_id)
     );
-  `);
 
-  sqlDb.run(`
     CREATE TABLE IF NOT EXISTS tool_discoveries (
       server_id TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
       tool_name TEXT NOT NULL,
+      exposed_name TEXT NOT NULL,
       description TEXT,
       input_schema TEXT,
-      discovered_at TEXT NOT NULL
+      discovered_at TEXT NOT NULL,
+      PRIMARY KEY (server_id, tool_name)
     );
-  `);
 
-  sqlDb.run(`
     CREATE TABLE IF NOT EXISTS audit_logs (
       id TEXT PRIMARY KEY,
       timestamp TEXT NOT NULL,
@@ -100,50 +100,82 @@ export function runMigrations() {
       duration_ms INTEGER,
       agent_info TEXT
     );
+
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_tool_name ON audit_logs(tool_name);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_server_id ON audit_logs(server_id);
+    CREATE INDEX IF NOT EXISTS idx_tool_discoveries_server_id ON tool_discoveries(server_id);
+    CREATE INDEX IF NOT EXISTS idx_tool_discoveries_exposed_name ON tool_discoveries(exposed_name);
   `);
 
-  sqlDb.run("CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp)");
-  sqlDb.run("CREATE INDEX IF NOT EXISTS idx_audit_logs_tool_name ON audit_logs(tool_name)");
-  sqlDb.run("CREATE INDEX IF NOT EXISTS idx_audit_logs_server_id ON audit_logs(server_id)");
-  sqlDb.run("CREATE INDEX IF NOT EXISTS idx_tool_discoveries_server_id ON tool_discoveries(server_id)");
+  ensureColumn("tool_discoveries", "exposed_name", "TEXT");
+}
 
-  saveDb();
+function ensureColumn(table: string, column: string, definition: string) {
+  const exists = queryAll(`PRAGMA table_info(${table})`).some((row) => row.name === column);
+  if (!exists) run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 
 export function seedDefaultProfile() {
   const rows = queryAll("SELECT id FROM profiles WHERE name = 'Default'", []);
+  const now = new Date().toISOString();
+  run("UPDATE profiles SET is_active = 0", []);
   if (rows.length === 0) {
-    const id = crypto.randomUUID();
-    const now = new Date().toISOString();
-    run("INSERT INTO profiles (id, name, is_active, created_at, updated_at) VALUES (?, ?, 1, ?, ?)", [id, "Default", now, now]);
+    run(
+      "INSERT INTO profiles (id, name, is_active, created_at, updated_at) VALUES (?, ?, 1, ?, ?)",
+      [crypto.randomUUID(), "Default", now, now],
+    );
   } else {
-    run("UPDATE profiles SET is_active = 1 WHERE id = ?", [rows[0].id]);
+    run("UPDATE profiles SET is_active = 1, updated_at = ? WHERE id = ?", [now, rows[0].id]);
   }
 }
 
 export function run(sql: string, params: unknown[] = []) {
-  sqlDb.run(sql, params);
+  getDb()
+    .prepare(sql)
+    .run(...normalizeParams(params));
+}
+
+export function exec(sql: string) {
+  getDb().exec(sql);
+}
+
+export function transaction<T>(callback: () => T): T {
+  exec("BEGIN IMMEDIATE");
+  try {
+    const result = callback();
+    exec("COMMIT");
+    return result;
+  } catch (err) {
+    exec("ROLLBACK");
+    throw err;
+  }
 }
 
 export function queryAll(sql: string, params: unknown[] = []): Record<string, unknown>[] {
-  const stmt = sqlDb.prepare(sql);
-  stmt.bind(params as (string | number | null | Uint8Array)[]);
-  const results: Record<string, unknown>[] = [];
-  while (stmt.step()) {
-    results.push(stmt.getAsObject());
-  }
-  stmt.free();
-  return results;
+  return getDb()
+    .prepare(sql)
+    .all(...normalizeParams(params)) as Record<string, unknown>[];
 }
 
 export function queryOne(sql: string, params: unknown[] = []): Record<string, unknown> | null {
-  const results = queryAll(sql, params);
-  return results.length > 0 ? results[0] : null;
+  const row = getDb()
+    .prepare(sql)
+    .get(...normalizeParams(params));
+  return row ? (row as Record<string, unknown>) : null;
+}
+
+export function saveDb() {
+  // node:sqlite writes directly to the database file; retained for existing callers.
 }
 
 export function closeDb() {
   if (sqlDb) {
-    saveDb();
     sqlDb.close();
+    sqlDb = null;
   }
+}
+
+export function getDbPath() {
+  return dbPath;
 }

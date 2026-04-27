@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useRef } from "react";
-import { getApiUrl } from "@/lib/api";
+import { getApiHeaders, getApiUrl } from "@/lib/api";
 
 interface SSEEvent {
   type: string;
@@ -7,46 +7,61 @@ interface SSEEvent {
 }
 
 export function useSSE(onEvent: (event: SSEEvent) => void) {
-  const esRef = useRef<EventSource | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
 
   const connect = useCallback(async () => {
-    if (esRef.current) return;
+    if (abortRef.current) return;
 
     try {
       const url = await getApiUrl("/api/events");
+      const controller = new AbortController();
+      abortRef.current = controller;
 
-      const es = new EventSource(url);
-      esRef.current = es;
-
-      es.addEventListener("server:status", (e) => {
-        onEventRef.current({ type: "server:status", data: JSON.parse(e.data) });
+      const response = await fetch(url, {
+        headers: await getApiHeaders({ Accept: "text/event-stream" }),
+        signal: controller.signal,
       });
+      if (!response.ok || !response.body) throw new Error(`SSE failed: ${response.status}`);
 
-      es.addEventListener("server:tools", (e) => {
-        onEventRef.current({ type: "server:tools", data: JSON.parse(e.data) });
-      });
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-      es.addEventListener("profile:activated", (e) => {
-        onEventRef.current({ type: "profile:activated", data: JSON.parse(e.data) });
-      });
+      while (!controller.signal.aborted) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() ?? "";
 
-      es.onerror = () => {
-        es.close();
-        esRef.current = null;
-        setTimeout(() => connect(), 5000);
-      };
-    } catch {
+        for (const chunk of events) {
+          const event = chunk
+            .split("\n")
+            .find((line) => line.startsWith("event: "))
+            ?.slice(7);
+          const dataLine = chunk.split("\n").find((line) => line.startsWith("data: "));
+          if (!event || !dataLine) continue;
+          onEventRef.current({ type: event, data: JSON.parse(dataLine.slice(6)) });
+        }
+      }
+
+      abortRef.current = null;
       setTimeout(() => connect(), 5000);
+    } catch (err) {
+      abortRef.current = null;
+      if (!(err instanceof DOMException && err.name === "AbortError")) {
+        setTimeout(() => connect(), 5000);
+      }
     }
   }, []);
 
   useEffect(() => {
     connect();
     return () => {
-      esRef.current?.close();
-      esRef.current = null;
+      abortRef.current?.abort();
+      abortRef.current = null;
     };
   }, [connect]);
 }

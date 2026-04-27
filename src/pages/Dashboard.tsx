@@ -12,13 +12,18 @@ export function Dashboard() {
   const { profiles } = useProfiles();
   const { logs, refresh: refreshLogs } = useLogs();
 
-  useSSE(useCallback((event) => {
-    if (event.type === "server:status" || event.type === "server:tools") refreshServers();
-    if (event.type === "profile:activated") {
-      refreshServers();
-      refreshLogs();
-    }
-  }, [refreshServers, refreshLogs]));
+  useSSE(
+    useCallback(
+      (event) => {
+        if (event.type === "server:status" || event.type === "server:tools") refreshServers();
+        if (event.type === "profile:activated") {
+          refreshServers();
+          refreshLogs();
+        }
+      },
+      [refreshServers, refreshLogs],
+    ),
+  );
 
   const running = servers.filter((s) => s.status === "running").length;
   const stopped = servers.filter((s) => s.status === "stopped").length;
@@ -29,7 +34,9 @@ export function Dashboard() {
     <div className="space-y-6">
       <div>
         <h1 className="font-headline text-2xl tracking-tight text-cursor-dark">Dashboard</h1>
-        <p className="font-body text-sm text-[rgba(38,37,30,0.55)] mt-1">Moor MCP Manager overview</p>
+        <p className="font-body text-sm text-[rgba(38,37,30,0.55)] mt-1">
+          Moor MCP Manager overview
+        </p>
       </div>
 
       <div className="grid grid-cols-4 gap-4">
@@ -72,7 +79,9 @@ export function Dashboard() {
               <FolderOpen className="h-5 w-5 text-cursor-orange" />
             </div>
             <div>
-              <p className="font-headline text-2xl text-cursor-dark">{activeProfile?.name || "—"}</p>
+              <p className="font-headline text-2xl text-cursor-dark">
+                {activeProfile?.name || "—"}
+              </p>
               <p className="font-body text-xs text-[rgba(38,37,30,0.55)]">Active Profile</p>
             </div>
           </CardContent>
@@ -86,7 +95,9 @@ export function Dashboard() {
           </CardHeader>
           <CardContent className="space-y-2">
             {servers.length === 0 ? (
-              <p className="font-body text-sm text-[rgba(38,37,30,0.4)] py-4 text-center">No servers configured</p>
+              <p className="font-body text-sm text-[rgba(38,37,30,0.4)] py-4 text-center">
+                No servers configured
+              </p>
             ) : (
               servers.slice(0, 5).map((server) => (
                 <div key={server.id} className="flex items-center justify-between py-1.5">
@@ -106,7 +117,9 @@ export function Dashboard() {
           </CardHeader>
           <CardContent className="space-y-2">
             {logs.length === 0 ? (
-              <p className="font-body text-sm text-[rgba(38,37,30,0.4)] py-4 text-center">No recent activity</p>
+              <p className="font-body text-sm text-[rgba(38,37,30,0.4)] py-4 text-center">
+                No recent activity
+              </p>
             ) : (
               logs.slice(0, 5).map((log) => (
                 <div key={log.id} className="flex items-center justify-between py-1.5">
