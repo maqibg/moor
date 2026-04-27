@@ -54,3 +54,16 @@ docs/archived/*
 .omx/
 # Added by code-review-graph
 .code-review-graph/
+
+############################
+# Tauri
+############################
+src-tauri/target/
+src-tauri/gen/
+
+############################
+# Sidecar
+############################
+sidecar/dist/
+sidecar/node_modules/
+~/.moor/
