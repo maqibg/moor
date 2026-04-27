@@ -1,0 +1,56 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+coverage/
+*.local
+
+# Environment variables
+.env                    # Local personal config (not committed)
+*.local                 # All *.local files (personal overrides)
+!.env.example           # Template file (committed)
+!.env.development       # Development environment (committed, optional)
+!.env.staging           # Staging environment (committed)
+!.env.production        # Production environment (committed)
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+############################
+# AI Rules
+############################
+.claude
+.omc
+.omx
+.codex
+.cursor
+.serena
+.zread
+.superpowers
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+.mcp.json
+
+docs/ai_docs/*
+docs/archived/*
+.tmp/
+.omx/
+# Added by code-review-graph
+.code-review-graph/
