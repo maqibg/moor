@@ -5,9 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ServerCard } from "@/components/shared/ServerCard";
 import { useServers } from "@/hooks/useServers";
 import { useSSE } from "@/hooks/useSSE";
-import { Plus, ScanSearch, X } from "lucide-react";
+import { Plus, ScanSearch, X, Check } from "lucide-react";
 import { apiPost } from "@/lib/api";
 import { useCallback } from "react";
+import { cn } from "@/lib/utils";
 
 interface ScannedServer {
   name: string;
@@ -59,10 +60,11 @@ export function Servers() {
   };
 
   const handleScan = async () => {
-    const result = await apiPost<{ scanned: number; newServers: number; servers: ScannedServer[] }>(
-      "/api/import/scan",
-      {},
-    );
+    const result = await apiPost<{
+      scanned: number;
+      newServers: number;
+      servers: ScannedServer[];
+    }>("/api/import/scan", {});
     setScanCandidates(result.servers);
     setSelectedImports(new Set(result.servers.map((server) => server.name)));
     setScanStatus(
@@ -91,12 +93,15 @@ export function Servers() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6 animate-fade-in-up">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
-          <h1 className="font-headline text-2xl tracking-tight text-cursor-dark">Servers</h1>
-          <p className="font-body text-sm text-[rgba(38,37,30,0.55)] mt-1">
-            Manage your MCP servers
+          <h1 className="font-headline text-[28px] tracking-tight text-cursor-dark leading-tight">
+            Servers
+          </h1>
+          <p className="font-body text-sm text-[rgba(38,37,30,0.5)] mt-1.5">
+            Manage and configure your MCP servers
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -109,20 +114,26 @@ export function Servers() {
         </div>
       </div>
 
+      {/* Add Server Form */}
       {showAdd && (
-        <Card>
+        <Card className="animate-scale-in border-cursor-orange/20 shadow-[0_8px_30px_rgba(245,78,0,0.04)]">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">Add New Server</CardTitle>
-              <Button variant="ghost" size="icon" onClick={() => setShowAdd(false)}>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setShowAdd(false)}
+              >
                 <X className="h-4 w-4" />
               </Button>
             </div>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="font-headline text-xs text-[rgba(38,37,30,0.55)] mb-1 block">
+                <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
                   Name
                 </label>
                 <Input
@@ -132,11 +143,11 @@ export function Servers() {
                 />
               </div>
               <div>
-                <label className="font-headline text-xs text-[rgba(38,37,30,0.55)] mb-1 block">
+                <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
                   Type
                 </label>
                 <select
-                  className="flex h-10 w-full rounded-lg border border-[rgba(38,37,30,0.1)] bg-transparent px-3 py-2 font-body text-sm text-cursor-dark"
+                  className="flex h-10 w-full rounded-xl border border-[rgba(38,37,30,0.1)] bg-transparent px-3 py-2 font-body text-sm text-cursor-dark focus:border-[rgba(38,37,30,0.2)] focus:outline-none"
                   value={form.connectionType}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, connectionType: e.target.value as "stdio" | "http" }))
@@ -150,7 +161,7 @@ export function Servers() {
             {form.connectionType === "stdio" ? (
               <>
                 <div>
-                  <label className="font-headline text-xs text-[rgba(38,37,30,0.55)] mb-1 block">
+                  <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
                     Command
                   </label>
                   <Input
@@ -160,7 +171,7 @@ export function Servers() {
                   />
                 </div>
                 <div>
-                  <label className="font-headline text-xs text-[rgba(38,37,30,0.55)] mb-1 block">
+                  <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
                     Arguments (space-separated)
                   </label>
                   <Input
@@ -172,7 +183,7 @@ export function Servers() {
               </>
             ) : (
               <div>
-                <label className="font-headline text-xs text-[rgba(38,37,30,0.55)] mb-1 block">
+                <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
                   URL
                 </label>
                 <Input
@@ -183,7 +194,7 @@ export function Servers() {
               </div>
             )}
             <div>
-              <label className="font-headline text-xs text-[rgba(38,37,30,0.55)] mb-1 block">
+              <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
                 Environment Variables (JSON, optional)
               </label>
               <Input
@@ -192,7 +203,7 @@ export function Servers() {
                 onChange={(e) => setForm((f) => ({ ...f, env: e.target.value }))}
               />
             </div>
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex justify-end gap-2 pt-1">
               <Button variant="outline" onClick={() => setShowAdd(false)}>
                 Cancel
               </Button>
@@ -202,14 +213,16 @@ export function Servers() {
         </Card>
       )}
 
+      {/* Config Import */}
       {(scanCandidates.length > 0 || scanStatus) && (
-        <Card>
+        <Card className="animate-scale-in">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">Config Import</CardTitle>
               <Button
                 variant="ghost"
                 size="icon"
+                className="h-8 w-8"
                 onClick={() => {
                   setScanCandidates([]);
                   setScanStatus(null);
@@ -221,16 +234,19 @@ export function Servers() {
           </CardHeader>
           <CardContent className="space-y-3">
             {scanStatus && (
-              <p className="font-body text-sm text-[rgba(38,37,30,0.55)]">{scanStatus}</p>
+              <div className="flex items-center gap-2 py-2">
+                <Check className="h-4 w-4 text-success-muted" />
+                <p className="font-body text-sm text-[rgba(38,37,30,0.55)]">{scanStatus}</p>
+              </div>
             )}
             {scanCandidates.map((server) => (
               <label
                 key={`${server.source}:${server.name}`}
-                className="flex items-center justify-between py-2 border-b border-[rgba(38,37,30,0.06)] last:border-0"
+                className="flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-surface-300/50 transition-colors cursor-pointer border border-transparent hover:border-[rgba(38,37,30,0.06)]"
               >
-                <div>
+                <div className="min-w-0">
                   <p className="font-headline text-sm text-cursor-dark">{server.name}</p>
-                  <p className="font-mono text-xs text-[rgba(38,37,30,0.55)]">
+                  <p className="font-mono text-[11px] text-[rgba(38,37,30,0.45)] truncate">
                     {server.connectionType === "stdio"
                       ? [server.command, ...(server.args ?? [])].filter(Boolean).join(" ")
                       : server.url}
@@ -238,15 +254,16 @@ export function Servers() {
                 </div>
                 <input
                   type="checkbox"
+                  className="h-4 w-4 rounded border-[rgba(38,37,30,0.2)] text-cursor-orange focus:ring-cursor-orange/30"
                   checked={selectedImports.has(server.name)}
                   onChange={(event) => toggleImport(server.name, event.currentTarget.checked)}
                 />
               </label>
             ))}
             {scanCandidates.length > 0 && (
-              <div className="flex justify-end">
+              <div className="flex justify-end pt-1">
                 <Button onClick={handleImportSelected} disabled={selectedImports.size === 0}>
-                  Import Selected
+                  Import Selected ({selectedImports.size})
                 </Button>
               </div>
             )}
@@ -254,13 +271,32 @@ export function Servers() {
         </Card>
       )}
 
+      {/* Server List */}
       <div className="space-y-2">
         {loading ? (
-          <p className="font-body text-sm text-[rgba(38,37,30,0.4)] py-8 text-center">Loading...</p>
+          <div className="py-16 text-center">
+            <div className="h-8 w-8 mx-auto rounded-full border-2 border-[rgba(38,37,30,0.1)] border-t-cursor-orange animate-spin mb-4" />
+            <p className="font-body text-sm text-[rgba(38,37,30,0.4)]">Loading servers...</p>
+          </div>
         ) : servers.length === 0 ? (
-          <p className="font-body text-sm text-[rgba(38,37,30,0.4)] py-8 text-center">
-            No servers yet. Click "Add Server" or "Scan Configs" to get started.
-          </p>
+          <button
+            onClick={() => setShowAdd(true)}
+            className={cn(
+              "w-full py-10 rounded-xl border-2 border-dashed border-[rgba(38,37,30,0.12)]",
+              "text-[rgba(38,37,30,0.4)] hover:text-cursor-orange hover:border-cursor-orange/30 hover:bg-cursor-orange/[0.02]",
+              "transition-all duration-200 flex flex-col items-center justify-center gap-3 cursor-pointer",
+            )}
+          >
+            <div className="h-12 w-12 rounded-full bg-surface-300 flex items-center justify-center">
+              <Plus className="h-5 w-5" />
+            </div>
+            <div className="text-center">
+              <p className="font-headline text-sm font-medium">Add Your First Server</p>
+              <p className="font-body text-xs text-[rgba(38,37,30,0.4)] mt-1">
+                Or scan existing configs to import
+              </p>
+            </div>
+          </button>
         ) : (
           servers.map((server) => (
             <ServerCard

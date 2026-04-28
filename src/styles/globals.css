@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./animations.css";
 
 @theme {
   --font-headline: "Space Grotesk", system-ui, sans-serif;
@@ -70,4 +71,29 @@ body {
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar - warm tone matching design system */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(38, 37, 30, 0.15);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(38, 37, 30, 0.25);
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(38, 37, 30, 0.15) transparent;
 }
