@@ -15,9 +15,11 @@ jobs:
       matrix:
         include:
           - platform: "macos-latest"
-            args: "--target aarch64-apple-darwin"
-          - platform: "macos-13"
-            args: "--target x86_64-apple-darwin"
+            target: "aarch64-apple-darwin"
+            node_arch: "arm64"
+          - platform: "macos-latest"
+            target: "x86_64-apple-darwin"
+            node_arch: "x64"
 
     runs-on: ${{ matrix.platform }}
 
@@ -29,6 +31,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
+          architecture: ${{ matrix.node_arch }}
           registry-url: "https://registry.npmjs.org"
 
       - name: Install pnpm
@@ -46,9 +49,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-${{ matrix.platform }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.platform }}-pnpm-store-
+            ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -68,12 +71,12 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || 'x86_64-apple-darwin' }}
+          targets: ${{ matrix.target }}
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.platform }}
+          key: ${{ matrix.target }}
           workspaces: "src-tauri"
 
       - name: Build Tauri App
@@ -86,4 +89,4 @@ jobs:
           releaseBody: ${{ steps.changelog.outputs.body }}
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-beta.') || contains(github.ref_name, '-rc.') || contains(github.ref_name, '-alpha.') }}
-          args: ${{ matrix.args }}
+          args: "--target ${{ matrix.target }}"
