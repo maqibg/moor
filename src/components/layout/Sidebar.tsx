@@ -72,7 +72,7 @@ export function Sidebar() {
       </div>
 
       <div className="px-5 py-3 border-t border-[rgba(38,37,30,0.08)]">
-        <p className="font-mono text-[10px] text-[rgba(38,37,30,0.3)]">Moor v0.1.0</p>
+        <p className="font-mono text-[10px] text-[rgba(38,37,30,0.3)]">{`Moor v${__APP_VERSION__}`}</p>
       </div>
     </aside>
   );

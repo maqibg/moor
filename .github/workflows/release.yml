@@ -53,6 +53,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Validate version consistency
+        run: node scripts/sync-version.mjs --check
+
+      - name: Extract changelog for release
+        id: changelog
+        run: |
+          {
+            echo "body<<EOF"
+            node scripts/extract-changelog.mjs
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -71,19 +83,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Moor ${{ github.ref_name }}"
-          releaseBody: |
-            ## Moor ${{ github.ref_name }}
-
-            ### macOS Downloads
-            - **Apple Silicon (M1/M2/M3)**: Download `Moor_*_aarch64.dmg`
-            - **Intel Mac**: Download `Moor_*_x86_64.dmg`
-
-            > ⚠️ On first launch, macOS may show an "unverified developer" warning. Right-click the app icon and select **Open** to proceed.
-            >
-            > If the app is still blocked or quarantined, run the following command in Terminal and reopen:
-            > ```bash
-            > xattr -rd com.apple.quarantine /Applications/moor.app
-            > ```
+          releaseBody: ${{ steps.changelog.outputs.body }}
           releaseDraft: true
-          prerelease: false
+          prerelease: ${{ contains(github.ref_name, '-beta.') || contains(github.ref_name, '-rc.') || contains(github.ref_name, '-alpha.') }}
           args: ${{ matrix.args }}

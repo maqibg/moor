@@ -2,9 +2,11 @@ import { defineConfig } from "vite-plus";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+import { readFileSync } from "fs";
 
 const host = process.env.TAURI_DEV_HOST;
 const __dirname = import.meta.dirname;
+const pkg = JSON.parse(readFileSync(path.resolve(__dirname, "package.json"), "utf8"));
 
 export default defineConfig({
   staged: {
@@ -161,6 +163,9 @@ export default defineConfig({
     ignorePatterns: [],
   },
   plugins: [react(), tailwindcss()],
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

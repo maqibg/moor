@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "dev.moor.app",
   "build": {
-    "beforeDevCommand": "pnpm --filter moor-sidecar build:sea && pnpm dev",
+    "beforeDevCommand": "pnpm version:sync && pnpm --filter moor-sidecar build:sea && pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm version:sync && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {

@@ -1,5 +1,5 @@
 import { build } from "esbuild";
-import { chmodSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sidecarRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(sidecarRoot, "..");
+const pkg = JSON.parse(readFileSync(path.join(sidecarRoot, "package.json"), "utf8"));
 const distDir = path.join(sidecarRoot, "dist");
 const bundlePath = path.join(distDir, "moor-sidecar.cjs");
 const seaBlobPath = path.join(distDir, "moor-sidecar.blob");
@@ -51,6 +52,9 @@ await build({
   sourcemap: false,
   banner: {
     js: "globalThis.__moorSidecar = true;",
+  },
+  define: {
+    APP_VERSION: JSON.stringify(pkg.version),
   },
 });
 

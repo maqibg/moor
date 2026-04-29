@@ -16,6 +16,8 @@ import {
 } from "../mcp/tool-catalog.js";
 import { eventBus } from "./event-bus.js";
 
+declare const APP_VERSION: string;
+
 export interface ManagedServer {
   id: string;
   name: string;
@@ -346,7 +348,7 @@ class ServerManager extends EventEmitter {
 
   private async createSession(config: StoredServerConfig): Promise<ServerSession> {
     const client = new Client(
-      { name: `moor-${config.name}`, version: "0.1.0" },
+      { name: `moor-${config.name}`, version: APP_VERSION },
       { capabilities: {} },
     );
     const transport = await this.createTransport(config);
@@ -371,7 +373,7 @@ class ServerManager extends EventEmitter {
     try {
       const transport = new StreamableHTTPClientTransport(url);
       const probe = new Client(
-        { name: `moor-probe-${config.name}`, version: "0.1.0" },
+        { name: `moor-probe-${config.name}`, version: APP_VERSION },
         { capabilities: {} },
       );
       await probe.connect(transport);

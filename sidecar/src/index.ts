@@ -3,6 +3,13 @@ import net from "node:net";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+declare const APP_VERSION: string;
+if (typeof APP_VERSION === "undefined") {
+  // tsx dev mode fallback — esbuild define replaces this at build time
+  (globalThis as Record<string, unknown>).APP_VERSION = "0.0.0-dev";
+}
+
 import { createApp } from "./server.js";
 import { initDb, runMigrations, seedDefaultProfile, closeDb, saveDb } from "./db/index.js";
 import { serverManager } from "./services/server-manager.js";

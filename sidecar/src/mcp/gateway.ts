@@ -11,11 +11,13 @@ import { aggregator } from "./aggregator.js";
 import { serverManager } from "../services/server-manager.js";
 import { getAuditLogger } from "../services/audit-logger.js";
 
+declare const APP_VERSION: string;
+
 const gateway = new Hono();
 
 export function createGatewayServer(agentInfo: string | null = null) {
   const server = new Server(
-    { name: "Moor", version: "0.1.0" },
+    { name: "Moor", version: APP_VERSION },
     { capabilities: { tools: { listChanged: true } } },
   );
 
