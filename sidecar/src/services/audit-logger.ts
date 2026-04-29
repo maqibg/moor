@@ -1,0 +1,88 @@
+import { run, saveDb } from "../db/index.js";
+import { redactForAudit } from "./audit-redaction.js";
+
+interface LogEntry {
+  id: string;
+  timestamp: string;
+  profileId: string | null;
+  serverId: string | null;
+  toolName: string;
+  arguments: unknown;
+  result: unknown | null;
+  error: string | null;
+  durationMs: number;
+  agentInfo: string | null;
+}
+
+const FLUSH_INTERVAL_MS = 500;
+const MAX_BUFFER_SIZE = 50;
+
+export class AuditLogger {
+  private buffer: LogEntry[] = [];
+  private flushTimer: ReturnType<typeof setInterval> | null = null;
+
+  start() {
+    this.flushTimer = setInterval(() => this.flush(), FLUSH_INTERVAL_MS);
+  }
+
+  log(entry: Omit<LogEntry, "id" | "timestamp">) {
+    this.buffer.push({
+      ...entry,
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+    });
+    if (this.buffer.length >= MAX_BUFFER_SIZE) {
+      this.flush();
+    }
+  }
+
+  flush() {
+    if (this.buffer.length === 0) return;
+    const entries = this.buffer.splice(0);
+    try {
+      for (const entry of entries) {
+        run(
+          `INSERT INTO audit_logs (id, timestamp, profile_id, server_id, tool_name, arguments, result, error, duration_ms, agent_info)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            entry.id,
+            entry.timestamp,
+            entry.profileId,
+            entry.serverId,
+            entry.toolName,
+            JSON.stringify(redactForAudit(entry.arguments)),
+            entry.result !== null ? JSON.stringify(redactForAudit(entry.result)) : null,
+            entry.error,
+            entry.durationMs,
+            entry.agentInfo,
+          ],
+        );
+      }
+      saveDb();
+    } catch (err) {
+      console.error("AuditLogger flush error:", err);
+      this.buffer.unshift(...entries);
+    }
+  }
+
+  drain(): Promise<void> {
+    if (this.flushTimer) {
+      clearInterval(this.flushTimer);
+      this.flushTimer = null;
+    }
+    this.flush();
+    return Promise.resolve();
+  }
+}
+
+let _instance: AuditLogger | null = null;
+
+export function initAuditLogger(): AuditLogger {
+  _instance = new AuditLogger();
+  return _instance;
+}
+
+export function getAuditLogger(): AuditLogger {
+  if (!_instance) throw new Error("AuditLogger not initialized");
+  return _instance;
+}

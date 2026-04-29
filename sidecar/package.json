@@ -1,0 +1,30 @@
+{
+  "name": "moor-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts --api-token dev-token",
+    "test": "vp test run",
+    "build": "tsc && node scripts/build-sidecar.mjs",
+    "build:ts": "tsc",
+    "build:bundle": "node scripts/build-sidecar.mjs --bundle-only",
+    "build:sea": "node scripts/build-sidecar.mjs",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@hono/mcp": "^0.2.5",
+    "@hono/node-server": "^1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "hono": "^4",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.2",
+    "esbuild": "^0.28.0",
+    "postject": "1.0.0-alpha.6",
+    "tsx": "^4",
+    "typescript": "~5.7",
+    "vite-plus": "catalog:"
+  }
+}
