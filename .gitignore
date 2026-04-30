@@ -35,13 +35,14 @@ coverage/
 ############################
 # AI Rules
 ############################
-.claude
 .omc
 .omx
 .codex
+.claude
 .cursor
 .serena
 .zread
+.kiro
 .superpowers
 CLAUDE.md
 CLAUDE.local.md
