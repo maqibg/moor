@@ -48,6 +48,11 @@ export async function getApiUrl(path: string): Promise<string> {
   return `${runtime.baseUrl}${path}`;
 }
 
+export async function getMcpEndpoint(): Promise<string> {
+  const runtime = await getApiRuntime();
+  return `${runtime.baseUrl}/mcp`;
+}
+
 export async function getApiHeaders(extra?: HeadersInit): Promise<HeadersInit> {
   const runtime = await getApiRuntime();
   return {

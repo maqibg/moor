@@ -68,11 +68,13 @@ Open **Moor.app**. The Dashboard shows your active Profile, server status, and r
 
 ### Scan Existing Configs
 
-Moor can automatically detect MCP servers you've already configured for Claude Code and Cursor:
+Moor can automatically detect MCP servers you've already configured for Claude Code, Codex, and OpenCode:
 
 1. Go to **Servers** → **Import**
-2. Click **Scan** — Moor reads `~/.claude/settings.json` and `.cursor/mcp.json`
+2. Click **Scan** — Moor reads `~/.claude/settings.json`, `~/.codex/config.toml`, and `~/.config/opencode/opencode.json` / `.jsonc`
 3. Select the servers you want to import
+
+You can also paste a JSON MCP configuration with **Import JSON**. Moor imports stdio and HTTP/SSE servers, and reports unsupported entries such as OpenAPI configs without saving them.
 
 ### Create a Profile
 
@@ -91,6 +93,10 @@ Point any MCP-compatible client to Moor's single endpoint:
 ```
 http://127.0.0.1:9223/mcp
 ```
+
+`9223` is the default sidecar port. If it is already in use, Moor picks the next available port and shows the actual endpoint in the Dashboard and Client Config pages.
+
+The `/mcp` endpoint is loopback-only and does not require `X-Moor-Token`. Moor uses `X-Moor-Token` only for local management APIs between the WebView and sidecar, so you do not need to paste it into agent configs.
 
 Moor handles the rest — aggregating `tools/list`, routing `tools/call`, and filtering based on your active Profile.
 
@@ -123,13 +129,14 @@ Beyond server-level on/off, drill into any server to disable specific tools. Dis
 One-click import from:
 
 - **Claude Code**: `~/.claude/settings.json`
-- **Cursor**: `.cursor/mcp.json`
+- **Codex**: `~/.codex/config.toml`
+- **OpenCode**: `~/.config/opencode/opencode.json` / `.jsonc`
 
-Manual entry is also supported for any stdio or HTTP server.
+Manual entry and pasted JSON batch import are also supported for stdio and HTTP/SSE servers.
 
 ### Client Configuration
 
-Generate ready-to-copy configuration snippets for Claude Code, Cursor, Codex, and OpenCode. Paste into your client and start using Moor immediately.
+Generate ready-to-copy configuration snippets for Claude Code, Codex, and OpenCode. The snippets contain only the `/mcp` endpoint; Moor's `X-Moor-Token` is reserved for internal management API calls.
 
 ### Audit Logs
 
@@ -298,6 +305,7 @@ vp test
 | `GET`  | `/api/runtime`        | Runtime info (port, URL)   |
 | `GET`  | `/api/events`         | SSE real-time event stream |
 | `POST` | `/api/import/scan`    | Scan local client configs  |
+| `POST` | `/api/import/parse`   | Preview pasted JSON import |
 | `POST` | `/api/import/execute` | Execute import             |
 
 ## Tech Stack

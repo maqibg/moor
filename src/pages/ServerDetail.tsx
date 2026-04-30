@@ -19,6 +19,7 @@ interface ServerDetailData {
   args: string[] | null;
   url: string | null;
   env: Record<string, string> | null;
+  headers: Record<string, string> | null;
   working_dir: string | null;
   status: string;
   error_message: string | null;
@@ -93,6 +94,7 @@ export function ServerDetail() {
   };
 
   const envEntries = server.env ? Object.entries(server.env) : [];
+  const headerEntries = server.headers ? Object.entries(server.headers) : [];
 
   return (
     <div className="space-y-6 animate-fade-in-up">
@@ -225,6 +227,35 @@ export function ServerDetail() {
                   </span>
                 </div>
                 {envEntries.map(([key, value]) => (
+                  <div
+                    key={key}
+                    className="flex items-center px-4 py-2.5 border-b border-[rgba(38,37,30,0.04)] last:border-0 hover:bg-surface-300/30 transition-colors"
+                  >
+                    <span className="font-mono text-xs text-cursor-dark w-1/3 truncate">{key}</span>
+                    <span className="font-mono text-xs text-[rgba(38,37,30,0.5)] w-2/3 truncate">
+                      {value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {headerEntries.length > 0 && (
+            <div>
+              <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-2 block">
+                HTTP Headers
+              </label>
+              <div className="rounded-xl border border-[rgba(38,37,30,0.08)] overflow-hidden">
+                <div className="flex items-center px-4 py-2 border-b border-[rgba(38,37,30,0.06)] bg-surface-300/50">
+                  <span className="font-mono text-[10px] text-[rgba(38,37,30,0.4)] w-1/3 uppercase tracking-wider">
+                    Header
+                  </span>
+                  <span className="font-mono text-[10px] text-[rgba(38,37,30,0.4)] w-2/3 uppercase tracking-wider">
+                    Value
+                  </span>
+                </div>
+                {headerEntries.map(([key, value]) => (
                   <div
                     key={key}
                     className="flex items-center px-4 py-2.5 border-b border-[rgba(38,37,30,0.04)] last:border-0 hover:bg-surface-300/30 transition-colors"

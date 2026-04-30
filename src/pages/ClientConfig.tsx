@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useApi } from "@/hooks/useApi";
+import { getMcpEndpoint } from "@/lib/api";
 import { Copy, Check, Terminal, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -51,6 +52,11 @@ function CodeBlock({ code, label }: { code: string; label?: string }) {
 
 export function ClientConfig() {
   const { data: snippets } = useApi<ClientSnippet[]>("/api/import/snippets", []);
+  const [mcpEndpoint, setMcpEndpoint] = useState("http://127.0.0.1:9223/mcp");
+
+  useEffect(() => {
+    void getMcpEndpoint().then(setMcpEndpoint);
+  }, []);
 
   const displaySnippets =
     !snippets || snippets.length === 0
@@ -59,9 +65,24 @@ export function ClientConfig() {
             client: "Claude Code",
             description: "Configure Claude Code to connect to Moor",
             snippet:
-              '{\n  "mcpServers": {\n    "moor": {\n      "url": "http://127.0.0.1:3000/mcp"\n    }\n  }\n}',
+              '{\n  "mcpServers": {\n    "moor": {\n      "url": "http://127.0.0.1:9223/mcp"\n    }\n  }\n}',
             cliCommand:
-              'claude config set mcpServers.moor \'{"url": "http://127.0.0.1:3000/mcp"}\'',
+              '# Edit ~/.claude/settings.json and add to mcpServers:\n"moor": { "url": "http://127.0.0.1:9223/mcp" }',
+          },
+          {
+            client: "Codex",
+            description: "Configure Codex to connect to Moor",
+            snippet: '[mcp_servers.moor]\nurl = "http://127.0.0.1:9223/mcp"\nenabled = true',
+            cliCommand:
+              '# Edit ~/.codex/config.toml and add:\n[mcp_servers.moor]\nurl = "http://127.0.0.1:9223/mcp"\nenabled = true',
+          },
+          {
+            client: "OpenCode",
+            description: "Configure OpenCode to connect to Moor",
+            snippet:
+              '{\n  "$schema": "https://opencode.ai/config.json",\n  "mcp": {\n    "moor": {\n      "type": "remote",\n      "url": "http://127.0.0.1:9223/mcp",\n      "enabled": true\n    }\n  }\n}',
+            cliCommand:
+              '# Edit ~/.config/opencode/opencode.json and add the "mcp.moor" entry above.',
           },
         ]
       : snippets;
@@ -125,9 +146,17 @@ export function ClientConfig() {
               <p className="font-body text-sm text-[rgba(38,37,30,0.5)] leading-relaxed">
                 Make sure Moor is running and your MCP client is configured to use the endpoint{" "}
                 <code className="font-mono text-xs bg-surface-300 px-1.5 py-0.5 rounded text-[rgba(38,37,30,0.7)]">
-                  http://127.0.0.1:3000/mcp
+                  {mcpEndpoint}
                 </code>
                 . After configuration, restart your client to pick up the new tools.
+              </p>
+              <p className="font-body text-sm text-[rgba(38,37,30,0.5)] leading-relaxed mt-2">
+                MCP clients do not need an{" "}
+                <code className="font-mono text-xs bg-surface-300 px-1.5 py-0.5 rounded text-[rgba(38,37,30,0.7)]">
+                  X-Moor-Token
+                </code>{" "}
+                header. Moor uses that header only for local management APIs, while this endpoint
+                stays bound to the loopback interface.
               </p>
             </div>
           </div>

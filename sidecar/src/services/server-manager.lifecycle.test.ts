@@ -11,7 +11,7 @@ import {
   runMigrations,
   seedDefaultProfile,
 } from "../db/index.js";
-import { serverManager } from "./server-manager.js";
+import { resolveHttpHeaders, serverManager } from "./server-manager.js";
 
 const fixturePath = path.join(process.cwd(), "src/test/fixtures/stdio-echo-server.mjs");
 let dataDir: string;
@@ -56,5 +56,22 @@ describe("ServerManager MCP lifecycle", () => {
     ).resolves.toMatchObject({
       content: [{ type: "text", text: "hello" }],
     });
+  });
+
+  it("resolves env placeholders for HTTP transport headers", () => {
+    process.env.MOOR_TEST_HEADER_TOKEN = "secret-token";
+
+    expect(
+      resolveHttpHeaders({
+        Authorization: "Bearer {env:MOOR_TEST_HEADER_TOKEN}",
+        "X-Static": "static",
+        "X-Missing": "{env:MOOR_TEST_MISSING}",
+      }),
+    ).toEqual({
+      Authorization: "Bearer secret-token",
+      "X-Static": "static",
+    });
+
+    delete process.env.MOOR_TEST_HEADER_TOKEN;
   });
 });

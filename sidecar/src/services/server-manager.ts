@@ -38,6 +38,7 @@ interface StoredServerConfig {
   args: string[] | null;
   url: string | null;
   env: Record<string, string> | null;
+  headers: Record<string, string> | null;
   working_dir: string | null;
 }
 
@@ -54,6 +55,35 @@ function cleanEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   return Object.fromEntries(
     Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
   );
+}
+
+function getAppVersion(): string {
+  return typeof APP_VERSION === "undefined" ? "0.0.0-dev" : APP_VERSION;
+}
+
+function resolveHeaderValue(value: string): string | null {
+  let missingEnv = false;
+  const resolved = value.replace(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, name: string) => {
+    const envValue = process.env[name];
+    if (envValue == null) {
+      missingEnv = true;
+      return "";
+    }
+    return envValue;
+  });
+  return missingEnv ? null : resolved;
+}
+
+export function resolveHttpHeaders(
+  headers: Record<string, string> | null,
+): HeadersInit | undefined {
+  if (!headers) return undefined;
+  const resolved = Object.fromEntries(
+    Object.entries(headers)
+      .map(([key, value]) => [key, resolveHeaderValue(value)] as const)
+      .filter((entry): entry is readonly [string, string] => entry[1] != null),
+  );
+  return Object.keys(resolved).length > 0 ? resolved : undefined;
 }
 
 class ServerManager extends EventEmitter {
@@ -93,13 +123,14 @@ class ServerManager extends EventEmitter {
     args?: string[];
     url?: string;
     env?: Record<string, string>;
+    headers?: Record<string, string>;
     workingDir?: string;
   }): ManagedServer {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     run(
-      `INSERT INTO mcp_servers (id, name, connection_type, command, args, url, env, working_dir, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'stopped', ?, ?)`,
+      `INSERT INTO mcp_servers (id, name, connection_type, command, args, url, env, headers, working_dir, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'stopped', ?, ?)`,
       [
         id,
         config.name,
@@ -108,6 +139,7 @@ class ServerManager extends EventEmitter {
         config.args ? JSON.stringify(config.args) : null,
         config.url ?? null,
         config.env ? JSON.stringify(config.env) : null,
+        config.headers ? JSON.stringify(config.headers) : null,
         config.workingDir ?? null,
         now,
         now,
@@ -135,6 +167,7 @@ class ServerManager extends EventEmitter {
       args: "args",
       url: "url",
       env: "env",
+      headers: "headers",
       workingDir: "working_dir",
       working_dir: "working_dir",
     };
@@ -342,15 +375,14 @@ class ServerManager extends EventEmitter {
       args: parseJson<string[] | null>(row.args, null),
       url: row.url as string | null,
       env: parseJson<Record<string, string> | null>(row.env, null),
+      headers: parseJson<Record<string, string> | null>(row.headers, null),
       working_dir: row.working_dir as string | null,
     };
   }
 
   private async createSession(config: StoredServerConfig): Promise<ServerSession> {
-    const client = new Client(
-      { name: `moor-${config.name}`, version: APP_VERSION },
-      { capabilities: {} },
-    );
+    const version = getAppVersion();
+    const client = new Client({ name: `moor-${config.name}`, version }, { capabilities: {} });
     const transport = await this.createTransport(config);
     await client.connect(transport);
     return { client, transport };
@@ -370,17 +402,18 @@ class ServerManager extends EventEmitter {
 
     if (!config.url) throw new Error("http server requires url");
     const url = new URL(config.url);
+    const requestInit = { headers: resolveHttpHeaders(config.headers) };
     try {
-      const transport = new StreamableHTTPClientTransport(url);
+      const transport = new StreamableHTTPClientTransport(url, { requestInit });
       const probe = new Client(
-        { name: `moor-probe-${config.name}`, version: APP_VERSION },
+        { name: `moor-probe-${config.name}`, version: getAppVersion() },
         { capabilities: {} },
       );
       await probe.connect(transport);
       await probe.close();
-      return new StreamableHTTPClientTransport(url);
+      return new StreamableHTTPClientTransport(url, { requestInit });
     } catch {
-      return new SSEClientTransport(url);
+      return new SSEClientTransport(url, { requestInit });
     }
   }
 }

@@ -63,6 +63,7 @@ export function runMigrations() {
       args TEXT,
       url TEXT,
       env TEXT,
+      headers TEXT,
       working_dir TEXT,
       status TEXT NOT NULL DEFAULT 'stopped' CHECK(status IN ('stopped', 'starting', 'running', 'error')),
       error_message TEXT,
@@ -109,6 +110,7 @@ export function runMigrations() {
   `);
 
   ensureColumn("tool_discoveries", "exposed_name", "TEXT");
+  ensureColumn("mcp_servers", "headers", "TEXT");
 }
 
 function ensureColumn(table: string, column: string, definition: string) {

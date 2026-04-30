@@ -5,10 +5,7 @@ interface ClientSnippet {
   cliCommand: string;
 }
 
-export function generateSnippets(port: number, apiToken = ""): ClientSnippet[] {
-  const mcpUrl = `http://127.0.0.1:${port}/mcp`;
-  const authHeader = apiToken ? { headers: { "X-Moor-Token": apiToken } } : {};
-
+export function generateSnippets(mcpUrl: string): ClientSnippet[] {
   return [
     {
       client: "Claude Code",
@@ -16,7 +13,7 @@ export function generateSnippets(port: number, apiToken = ""): ClientSnippet[] {
       snippet: JSON.stringify(
         {
           mcpServers: {
-            moor: { url: mcpUrl, ...authHeader },
+            moor: { url: mcpUrl },
           },
         },
         null,
@@ -25,46 +22,29 @@ export function generateSnippets(port: number, apiToken = ""): ClientSnippet[] {
       cliCommand: `# Edit ~/.claude/settings.json and add to mcpServers:\n"moor": { "url": "${mcpUrl}" }`,
     },
     {
-      client: "Cursor",
-      description: "Add to .cursor/mcp.json → mcpServers",
-      snippet: JSON.stringify(
-        {
-          mcpServers: {
-            moor: { url: mcpUrl, ...authHeader },
-          },
-        },
-        null,
-        2,
-      ),
-      cliCommand: `# Edit .cursor/mcp.json and add to mcpServers:\n"moor": { "url": "${mcpUrl}" }`,
-    },
-    {
       client: "Codex",
-      description: "Configure in Codex settings",
-      snippet: JSON.stringify(
-        {
-          mcpServers: {
-            moor: { url: mcpUrl, ...authHeader },
-          },
-        },
-        null,
-        2,
-      ),
-      cliCommand: `# Add MCP server in Codex settings:\nURL: ${mcpUrl}`,
+      description: "Add to ~/.codex/config.toml or project .codex/config.toml",
+      snippet: `[mcp_servers.moor]\nurl = "${mcpUrl}"\nenabled = true`,
+      cliCommand: `# Edit ~/.codex/config.toml and add:\n[mcp_servers.moor]\nurl = "${mcpUrl}"\nenabled = true`,
     },
     {
       client: "OpenCode",
-      description: "Add to OpenCode MCP configuration",
+      description: "Add to ~/.config/opencode/opencode.json or project opencode.json",
       snippet: JSON.stringify(
         {
-          mcpServers: {
-            moor: { url: mcpUrl, ...authHeader },
+          $schema: "https://opencode.ai/config.json",
+          mcp: {
+            moor: {
+              type: "remote",
+              url: mcpUrl,
+              enabled: true,
+            },
           },
         },
         null,
         2,
       ),
-      cliCommand: `# Configure in OpenCode settings:\nURL: ${mcpUrl}`,
+      cliCommand: `# Edit ~/.config/opencode/opencode.json and add the "mcp.moor" entry above.`,
     },
   ];
 }
