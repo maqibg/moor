@@ -4,5 +4,5 @@
   "initialVersions": {
     "moor-sidecar": "0.2.0"
   },
-  "changesets": []
+  "changesets": ["hip-toes-repeat"]
 }
