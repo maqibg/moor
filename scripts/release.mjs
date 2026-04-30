@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { copyFileSync, existsSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,26 +24,35 @@ if (existsSync(preJsonPath)) {
   }
 }
 
-const status = execSync("git status --porcelain", { cwd: root, encoding: "utf8" }).trim();
-const pendingChangesetFiles = status
-  .split("\n")
-  .filter((l) => l.includes(".changeset") && l.endsWith(".md") && !l.includes("README"));
+// 检查是否有待消费的 changeset 文件（直接扫描目录，不依赖 git status）
+const changesetDir = path.join(root, ".changeset");
+const pendingChangesets = readdirSync(changesetDir).filter(
+  (f) => f.endsWith(".md") && f !== "README.md",
+);
 
-if (pendingChangesetFiles.length === 0) {
+if (pendingChangesets.length === 0) {
   console.error("No pending changesets found. Run 'pnpm changeset' first.");
   process.exit(1);
 }
 
-const changedBefore = status
-  .split("\n")
-  .filter((l) => !l.includes(".changeset"))
-  .map((l) => l.trim())
-  .filter(Boolean);
-if (changedBefore.length > 0) {
-  console.error("Working tree has uncommitted changes outside .changeset/:");
-  changedBefore.forEach((l) => console.error(`  ${l}`));
-  console.error("\nCommit or stash these changes before releasing.");
-  process.exit(1);
+console.log(
+  `Found ${pendingChangesets.length} pending changeset(s): ${pendingChangesets.join(", ")}\n`,
+);
+
+// 检查工作区是否干净（忽略 .changeset/ 目录）
+const status = execSync("git status --porcelain", { cwd: root, encoding: "utf8" }).trim();
+if (status) {
+  const dirtyFiles = status
+    .split("\n")
+    .filter((l) => !l.includes(".changeset"))
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (dirtyFiles.length > 0) {
+    console.error("Working tree has uncommitted changes outside .changeset/:");
+    dirtyFiles.forEach((l) => console.error(`  ${l}`));
+    console.error("\nCommit or stash these changes before releasing.");
+    process.exit(1);
+  }
 }
 
 run("pnpm changeset version");
