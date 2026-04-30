@@ -49,10 +49,9 @@ CLAUDE.local.md
 AGENTS.md
 .mcp.json
 
-docs/ai_docs/*
-docs/archived/*
 .tmp/
 .omx/
+docs/specs/*
 # Added by code-review-graph
 .code-review-graph/
 

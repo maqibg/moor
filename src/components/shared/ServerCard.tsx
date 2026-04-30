@@ -71,45 +71,45 @@ export function ServerCard({
             </div>
           </div>
 
-          <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+          <div className="flex items-center gap-0.5 shrink-0 bg-surface-300/50 rounded-lg p-0.5">
             {isRunning ? (
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 text-[rgba(38,37,30,0.45)] hover:text-error-warm"
+                className="h-9 w-9 text-[rgba(38,37,30,0.45)] hover:text-error-warm hover:bg-error-warm/10 active:bg-error-warm/20 transition-all duration-150"
                 onClick={() => onStop(server.id)}
                 title="Stop server"
               >
-                <Square className="h-3.5 w-3.5" />
+                <Square className="h-4 w-4" />
               </Button>
             ) : (
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 text-[rgba(38,37,30,0.45)] hover:text-success-muted"
+                className="h-9 w-9 text-[rgba(38,37,30,0.45)] hover:text-success-muted hover:bg-success-muted/10 active:bg-success-muted/20 transition-all duration-150"
                 onClick={() => onStart(server.id)}
                 title="Start server"
               >
-                <Play className="h-3.5 w-3.5" />
+                <Play className="h-4 w-4" />
               </Button>
             )}
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 text-[rgba(38,37,30,0.45)] hover:text-cursor-dark"
+              className="h-9 w-9 text-[rgba(38,37,30,0.45)] hover:text-cursor-dark hover:bg-surface-400 active:bg-surface-500 transition-all duration-150"
               onClick={() => navigate(`/servers/${server.id}`)}
               title="Server details"
             >
-              <Settings className="h-3.5 w-3.5" />
+              <Settings className="h-4 w-4" />
             </Button>
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 text-[rgba(38,37,30,0.35)] hover:text-error-warm"
+              className="h-9 w-9 text-[rgba(38,37,30,0.45)] hover:text-error-warm hover:bg-error-warm/10 active:bg-error-warm/20 transition-all duration-150"
               onClick={() => onRemove(server.id)}
               title="Remove server"
             >
-              <Trash2 className="h-3.5 w-3.5" />
+              <Trash2 className="h-4 w-4" />
             </Button>
           </div>
         </div>

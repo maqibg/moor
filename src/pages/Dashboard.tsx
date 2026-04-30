@@ -1,10 +1,11 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useServers } from "@/hooks/useServers";
 import { useProfiles } from "@/hooks/useProfiles";
 import { useLogs } from "@/hooks/useLogs";
+import { getMcpEndpoint } from "@/lib/api";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { useSSE } from "@/hooks/useSSE";
 import { cn } from "@/lib/utils";
@@ -20,7 +21,6 @@ import {
   Clock,
   ChevronRight,
 } from "lucide-react";
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 function StatCard({
@@ -64,6 +64,11 @@ export function Dashboard() {
   const { profiles } = useProfiles();
   const { logs, refresh: refreshLogs } = useLogs();
   const [copied, setCopied] = useState(false);
+  const [mcpEndpoint, setMcpEndpoint] = useState("http://127.0.0.1:9223/mcp");
+
+  useEffect(() => {
+    void getMcpEndpoint().then(setMcpEndpoint);
+  }, []);
 
   useSSE(
     useCallback(
@@ -84,7 +89,7 @@ export function Dashboard() {
   const activeProfile = profiles.find((p) => p.is_active);
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText("http://127.0.0.1:3000/mcp");
+    await navigator.clipboard.writeText(mcpEndpoint);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -125,7 +130,7 @@ export function Dashboard() {
                 <Badge variant="success">Active</Badge>
               </div>
               <div className="flex items-center gap-2 bg-surface-100 border border-[rgba(38,37,30,0.08)] rounded-lg px-3 py-1.5 font-mono text-xs text-[rgba(38,37,30,0.55)] w-fit">
-                http://127.0.0.1:3000/mcp
+                {mcpEndpoint}
               </div>
             </div>
           </div>

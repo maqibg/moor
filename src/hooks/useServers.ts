@@ -49,6 +49,7 @@ export interface Server {
   args?: string[] | null;
   url?: string | null;
   env?: Record<string, string> | null;
+  headers?: Record<string, string> | null;
   working_dir?: string | null;
   status: "stopped" | "starting" | "running" | "error";
   error_message?: string | null;

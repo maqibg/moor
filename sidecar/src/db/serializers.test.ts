@@ -10,9 +10,30 @@ describe("db serializers", () => {
         connection_type: "stdio",
         args: '["/tmp"]',
         env: '{"TOKEN":"x"}',
+        headers: '{"Authorization":"Bearer {env:TOKEN}"}',
         status: "stopped",
-      }).args,
-    ).toEqual(["/tmp"]);
+      }),
+    ).toMatchObject({
+      args: ["/tmp"],
+      env: { TOKEN: "x" },
+      headers: { Authorization: "Bearer {env:TOKEN}" },
+    });
+
+    expect(
+      serializeServer({
+        id: "s2",
+        name: "http-only",
+        connection_type: "http",
+        args: null,
+        env: null,
+        headers: null,
+        status: "stopped",
+      }),
+    ).toMatchObject({
+      args: [],
+      env: {},
+      headers: null,
+    });
 
     expect(
       serializeToolDiscovery({

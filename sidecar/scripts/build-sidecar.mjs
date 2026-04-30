@@ -14,6 +14,7 @@ const seaBlobPath = path.join(distDir, "moor-sidecar.blob");
 const seaConfigPath = path.join(distDir, "sea-config.json");
 const tauriBinDir = path.join(repoRoot, "src-tauri", "binaries");
 const bundleOnly = process.argv.includes("--bundle-only");
+const jsoncParserEsmEntry = "jsonc-parser/lib/esm/main.js";
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { stdio: "inherit", cwd: sidecarRoot, ...options });
@@ -39,6 +40,23 @@ function binaryName() {
   return `moor-sidecar-${targetTriple()}${suffix}`;
 }
 
+function assertSeaBundleSafe() {
+  const bundle = readFileSync(bundlePath, "utf8");
+  const failures = [];
+  if (bundle.includes("jsonc-parser/lib/umd/main.js")) {
+    failures.push("jsonc-parser UMD entry was bundled");
+  }
+  if (bundle.includes('require2("./impl/format")') || bundle.includes('require("./impl/format")')) {
+    failures.push('jsonc-parser relative require("./impl/format") remains in bundle');
+  }
+  if (!bundle.includes("jsonc-parser/lib/esm/main.js")) {
+    failures.push("jsonc-parser ESM entry was not bundled");
+  }
+  if (failures.length > 0) {
+    throw new Error(`Sidecar bundle is not SEA-safe: ${failures.join("; ")}`);
+  }
+}
+
 mkdirSync(distDir, { recursive: true });
 mkdirSync(tauriBinDir, { recursive: true });
 
@@ -50,6 +68,9 @@ await build({
   target: "node24",
   format: "cjs",
   sourcemap: false,
+  alias: {
+    "jsonc-parser": jsoncParserEsmEntry,
+  },
   banner: {
     js: "globalThis.__moorSidecar = true;",
   },
@@ -57,6 +78,7 @@ await build({
     APP_VERSION: JSON.stringify(pkg.version),
   },
 });
+assertSeaBundleSafe();
 
 if (bundleOnly) {
   console.log(`Bundled sidecar to ${bundlePath}`);

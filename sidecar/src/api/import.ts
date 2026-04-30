@@ -1,37 +1,96 @@
 import { Hono } from "hono";
 import { scanAllConfigs } from "../config/scanner.js";
+import {
+  parseJsonMcpConfig,
+  type ImportDiagnostic,
+  type ParsedImport,
+} from "../config/import-parser.js";
 import { generateSnippets } from "../config/snippets.js";
 import { serverManager } from "../services/server-manager.js";
 import { queryAll, queryOne, run, saveDb } from "../db/index.js";
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
-import type { ScannedServer } from "../config/scanner.js";
+import type { ScannedServer, UnsupportedServer } from "../config/scanner.js";
 
 const importApi = new Hono();
+
+const MAX_PARSE_BODY_BYTES = 512 * 1024; // 512 KB
+
+interface ImportPreview {
+  scanned: number;
+  newServers: number;
+  servers: ScannedServer[];
+  duplicates: ScannedServer[];
+  unsupported: UnsupportedServer[];
+  errors: string[];
+  diagnostics: ImportDiagnostic[];
+}
 
 export function selectImportCandidates(
   servers: ScannedServer[],
   existingNames: Set<string>,
 ): ScannedServer[] {
-  return servers.filter((server) => !existingNames.has(server.name));
+  const seenNames = new Set(existingNames);
+  return servers.filter((server) => {
+    if (seenNames.has(server.name)) return false;
+    seenNames.add(server.name);
+    return true;
+  });
+}
+
+function getExistingNames(): Set<string> {
+  const existingServers = queryAll("SELECT name FROM mcp_servers", []);
+  return new Set(existingServers.map((server) => server.name as string));
+}
+
+function buildImportPreview(parsed: ParsedImport, existingNames: Set<string>): ImportPreview {
+  const seenNames = new Set(existingNames);
+  const servers: ScannedServer[] = [];
+  const duplicates: ScannedServer[] = [];
+
+  for (const server of parsed.servers) {
+    if (seenNames.has(server.name)) {
+      duplicates.push(server);
+      continue;
+    }
+    seenNames.add(server.name);
+    servers.push(server);
+  }
+
+  return {
+    scanned: parsed.servers.length + parsed.unsupported.length,
+    newServers: servers.length,
+    servers,
+    duplicates,
+    unsupported: parsed.unsupported,
+    errors: parsed.errors,
+    diagnostics: parsed.diagnostics,
+  };
 }
 
 importApi.post("/scan", (c) => {
-  const servers = scanAllConfigs();
-  const existingServers = queryAll("SELECT name FROM mcp_servers", []);
-  const existingNames = new Set(existingServers.map((s) => s.name as string));
-  const newServers = selectImportCandidates(servers, existingNames);
-  return c.json({ scanned: servers.length, newServers: newServers.length, servers: newServers });
+  const parsed = scanAllConfigs();
+  const preview = buildImportPreview(parsed, getExistingNames());
+  return c.json(preview);
+});
+
+importApi.post("/parse", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { content?: string };
+  if (!body.content?.trim()) {
+    return c.json({ error: "content is required" }, 400);
+  }
+  if (body.content.length > MAX_PARSE_BODY_BYTES) {
+    return c.json({ error: "content exceeds maximum allowed size" }, 413);
+  }
+
+  const parsed = parseJsonMcpConfig(body.content, "json-import");
+  return c.json(buildImportPreview(parsed, getExistingNames()));
 });
 
 importApi.post("/execute", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { servers?: ScannedServer[] };
-  const existingServers = queryAll("SELECT name FROM mcp_servers", []);
-  const existingNames = new Set(existingServers.map((s) => s.name as string));
+  const existingNames = getExistingNames();
   const servers = body.servers?.length
-    ? body.servers
-    : selectImportCandidates(scanAllConfigs(), existingNames);
+    ? selectImportCandidates(body.servers, existingNames)
+    : selectImportCandidates(scanAllConfigs().servers, existingNames);
   const imported: string[] = [];
   const skipped: string[] = [];
 
@@ -44,11 +103,13 @@ importApi.post("/execute", async (c) => {
 
     serverManager.addServer({
       name: serverConfig.name,
-      connectionType: serverConfig.connectionType as "stdio" | "http",
+      connectionType: serverConfig.connectionType,
       command: serverConfig.command,
       args: serverConfig.args,
       url: serverConfig.url,
       env: serverConfig.env,
+      headers: serverConfig.headers,
+      workingDir: serverConfig.workingDir,
     });
     imported.push(serverConfig.name);
   }
@@ -71,15 +132,8 @@ importApi.post("/execute", async (c) => {
 });
 
 importApi.get("/snippets", (c) => {
-  const portFile = path.join(os.homedir(), ".moor", "port");
-  let port = 9223;
-  try {
-    port = parseInt(fs.readFileSync(portFile, "utf-8").trim(), 10);
-  } catch {
-    // Keep the default port when no runtime port file exists.
-  }
-  const token = c.req.header("x-moor-token") ?? "";
-  return c.json(generateSnippets(port, token));
+  const url = new URL(c.req.url);
+  return c.json(generateSnippets(`${url.protocol}//${url.host}/mcp`));
 });
 
 export { importApi };

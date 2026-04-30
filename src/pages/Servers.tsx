@@ -1,14 +1,18 @@
-import { useState } from "react";
+import { lazy, Suspense, useCallback, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ServerCard } from "@/components/shared/ServerCard";
 import { useServers } from "@/hooks/useServers";
 import { useSSE } from "@/hooks/useSSE";
-import { Plus, ScanSearch, X, Check } from "lucide-react";
+import { AlertTriangle, Check, FileJson, Plus, ScanSearch, WandSparkles, X } from "lucide-react";
 import { apiPost } from "@/lib/api";
-import { useCallback } from "react";
 import { cn } from "@/lib/utils";
+import {
+  formatJsonImport,
+  getJsonImportDiagnostics,
+  type ImportDiagnostic,
+} from "@/lib/json-import-editor";
 
 interface ScannedServer {
   name: string;
@@ -17,8 +21,41 @@ interface ScannedServer {
   args?: string[];
   url?: string;
   env?: Record<string, string>;
+  headers?: Record<string, string>;
+  workingDir?: string;
   source: string;
 }
+
+interface UnsupportedServer {
+  name: string;
+  source: string;
+  reason: string;
+}
+
+interface ImportPreview {
+  scanned: number;
+  newServers: number;
+  servers: ScannedServer[];
+  duplicates: ScannedServer[];
+  unsupported: UnsupportedServer[];
+  errors: string[];
+  diagnostics?: ImportDiagnostic[];
+}
+
+const JSON_IMPORT_PLACEHOLDER = `{
+  "mcpServers": {
+    "my-server": {
+      "command": "npx",
+      "args": ["-y", "my-mcp-server"]
+    }
+  }
+}`;
+
+const JsonImportEditor = lazy(() =>
+  import("@/components/shared/JsonImportEditor").then((module) => ({
+    default: module.JsonImportEditor,
+  })),
+);
 
 export function Servers() {
   const { servers, loading, startServer, stopServer, removeServer, refresh } = useServers();
@@ -30,10 +67,17 @@ export function Servers() {
     args: "",
     url: "",
     env: "",
+    headers: "",
   });
+  const [showJsonImport, setShowJsonImport] = useState(false);
+  const [jsonImport, setJsonImport] = useState("");
+  const [jsonImportErrors, setJsonImportErrors] = useState<string[]>([]);
+  const [jsonImportStatus, setJsonImportStatus] = useState<string | null>(null);
   const [scanCandidates, setScanCandidates] = useState<ScannedServer[]>([]);
   const [selectedImports, setSelectedImports] = useState<Set<string>>(new Set());
   const [scanStatus, setScanStatus] = useState<string | null>(null);
+  const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
+  const jsonImportDiagnostics = useMemo(() => getJsonImportDiagnostics(jsonImport), [jsonImport]);
 
   useSSE(
     useCallback(
@@ -46,30 +90,113 @@ export function Servers() {
 
   const handleAdd = async () => {
     if (!form.name) return;
+
+    let env: Record<string, string> | undefined;
+    let headers: Record<string, string> | undefined;
+
+    if (form.env) {
+      try {
+        env = JSON.parse(form.env) as Record<string, string>;
+      } catch {
+        setScanStatus("Invalid JSON in environment variables field");
+        return;
+      }
+    }
+
+    if (form.connectionType === "http" && form.headers) {
+      try {
+        headers = JSON.parse(form.headers) as Record<string, string>;
+      } catch {
+        setScanStatus("Invalid JSON in HTTP headers field");
+        return;
+      }
+    }
+
     await apiPost("/api/servers", {
       name: form.name,
       connectionType: form.connectionType,
       command: form.connectionType === "stdio" ? form.command : undefined,
       args: form.args ? form.args.split(" ") : undefined,
       url: form.connectionType === "http" ? form.url : undefined,
-      env: form.env ? JSON.parse(form.env) : undefined,
+      env,
+      headers,
     });
     setShowAdd(false);
-    setForm({ name: "", connectionType: "stdio", command: "", args: "", url: "", env: "" });
+    setForm({
+      name: "",
+      connectionType: "stdio",
+      command: "",
+      args: "",
+      url: "",
+      env: "",
+      headers: "",
+    });
     refresh();
   };
 
-  const handleScan = async () => {
-    const result = await apiPost<{
-      scanned: number;
-      newServers: number;
-      servers: ScannedServer[];
-    }>("/api/import/scan", {});
+  const applyImportPreview = (result: ImportPreview) => {
+    setImportPreview(result);
     setScanCandidates(result.servers);
     setSelectedImports(new Set(result.servers.map((server) => server.name)));
     setScanStatus(
       result.newServers === 0 ? `Scanned ${result.scanned} configs. No new servers found.` : null,
     );
+  };
+
+  const handleScan = async () => {
+    try {
+      const result = await apiPost<ImportPreview>("/api/import/scan", {});
+      applyImportPreview(result);
+    } catch (err) {
+      setScanStatus((err as Error).message);
+    }
+  };
+
+  const handleJsonImportChange = (value: string) => {
+    setJsonImport(value);
+    setJsonImportErrors([]);
+    setJsonImportStatus(null);
+  };
+
+  const handleFormatJsonImport = () => {
+    const result = formatJsonImport(jsonImport);
+    setJsonImportErrors([]);
+
+    if (result.diagnostics.length > 0) {
+      setJsonImportStatus("Fix JSON syntax errors before formatting.");
+      return;
+    }
+
+    setJsonImport(result.value);
+    setJsonImportStatus(result.formatted ? "JSON formatted." : "JSON is already formatted.");
+  };
+
+  const handleParseJsonImport = async () => {
+    if (jsonImportDiagnostics.length > 0) {
+      setJsonImportErrors([]);
+      setJsonImportStatus("Fix JSON syntax errors before previewing.");
+      return;
+    }
+
+    try {
+      const result = await apiPost<ImportPreview>("/api/import/parse", { content: jsonImport });
+      if (result.errors.length > 0 || (result.diagnostics?.length ?? 0) > 0) {
+        setImportPreview(result);
+        setScanCandidates([]);
+        setSelectedImports(new Set());
+        setJsonImportErrors(result.errors);
+        setJsonImportStatus(null);
+        return;
+      }
+
+      applyImportPreview(result);
+      setShowJsonImport(false);
+      setJsonImportErrors([]);
+      setJsonImportStatus(null);
+    } catch (err) {
+      setJsonImportErrors([(err as Error).message]);
+      setJsonImportStatus(null);
+    }
   };
 
   const handleImportSelected = async () => {
@@ -80,6 +207,7 @@ export function Servers() {
     setScanStatus(`Imported ${result.imported.length} servers. Skipped ${result.skipped.length}.`);
     setScanCandidates([]);
     setSelectedImports(new Set());
+    setImportPreview(null);
     refresh();
   };
 
@@ -91,6 +219,14 @@ export function Servers() {
       return next;
     });
   };
+
+  const hasStaticAuthorizationHeader = scanCandidates.some((server) => {
+    const authorization = Object.entries(server.headers ?? {}).find(
+      ([key]) => key.toLowerCase() === "authorization",
+    )?.[1];
+    return Boolean(authorization && !authorization.includes("{env:"));
+  });
+  const jsonImportStatusIsError = jsonImportStatus?.startsWith("Fix ") ?? false;
 
   return (
     <div className="space-y-6 animate-fade-in-up">
@@ -105,6 +241,9 @@ export function Servers() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setShowJsonImport(true)}>
+            <FileJson className="h-4 w-4 mr-2" /> Import JSON
+          </Button>
           <Button variant="outline" onClick={handleScan}>
             <ScanSearch className="h-4 w-4 mr-2" /> Scan Configs
           </Button>
@@ -113,6 +252,91 @@ export function Servers() {
           </Button>
         </div>
       </div>
+
+      {/* JSON Import Form */}
+      {showJsonImport && (
+        <Card className="animate-scale-in border-[rgba(38,37,30,0.08)]">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Import MCP JSON</CardTitle>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setShowJsonImport(false)}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <FileJson className="h-4 w-4 text-[rgba(38,37,30,0.5)]" />
+                <span className="font-mono text-[11px] text-[rgba(38,37,30,0.48)]">JSONC</span>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleFormatJsonImport}
+                disabled={!jsonImport.trim()}
+              >
+                <WandSparkles className="h-3.5 w-3.5 mr-2" />
+                Format JSON
+              </Button>
+            </div>
+            <Suspense
+              fallback={
+                <div className="h-[300px] rounded-xl border border-[rgba(38,37,30,0.1)] bg-surface-200/40" />
+              }
+            >
+              <JsonImportEditor
+                value={jsonImport}
+                placeholder={JSON_IMPORT_PLACEHOLDER}
+                diagnostics={jsonImportDiagnostics}
+                onChange={handleJsonImportChange}
+              />
+            </Suspense>
+            {jsonImportStatus && (
+              <div
+                className={cn(
+                  "flex items-center gap-2 rounded-lg border px-3 py-2",
+                  jsonImportStatusIsError
+                    ? "border-error-warm/20 bg-error-warm/8"
+                    : "border-[rgba(38,37,30,0.08)] bg-surface-300/40",
+                )}
+              >
+                {jsonImportStatusIsError ? (
+                  <AlertTriangle className="h-4 w-4 text-error-warm" />
+                ) : (
+                  <Check className="h-4 w-4 text-success-muted" />
+                )}
+                <p className="font-body text-xs text-[rgba(38,37,30,0.55)]">{jsonImportStatus}</p>
+              </div>
+            )}
+            {jsonImportErrors.length > 0 && (
+              <div className="rounded-lg border border-error-warm/20 bg-error-warm/8 px-3 py-2">
+                {jsonImportErrors.map((error) => (
+                  <p key={error} className="font-body text-xs text-error-warm">
+                    {error}
+                  </p>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowJsonImport(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleParseJsonImport}
+                disabled={!jsonImport.trim() || jsonImportDiagnostics.length > 0}
+              >
+                Preview Import
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Add Server Form */}
       {showAdd && (
@@ -182,16 +406,28 @@ export function Servers() {
                 </div>
               </>
             ) : (
-              <div>
-                <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
-                  URL
-                </label>
-                <Input
-                  placeholder="e.g., http://localhost:3000/mcp"
-                  value={form.url}
-                  onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
-                />
-              </div>
+              <>
+                <div>
+                  <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
+                    URL
+                  </label>
+                  <Input
+                    placeholder="e.g., http://localhost:3000/mcp"
+                    value={form.url}
+                    onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
+                    HTTP Headers (JSON, optional)
+                  </label>
+                  <Input
+                    placeholder='{"Authorization":"Bearer {env:MCP_TOKEN}"}'
+                    value={form.headers}
+                    onChange={(e) => setForm((f) => ({ ...f, headers: e.target.value }))}
+                  />
+                </div>
+              </>
             )}
             <div>
               <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
@@ -226,6 +462,7 @@ export function Servers() {
                 onClick={() => {
                   setScanCandidates([]);
                   setScanStatus(null);
+                  setImportPreview(null);
                 }}
               >
                 <X className="h-4 w-4" />
@@ -237,6 +474,50 @@ export function Servers() {
               <div className="flex items-center gap-2 py-2">
                 <Check className="h-4 w-4 text-success-muted" />
                 <p className="font-body text-sm text-[rgba(38,37,30,0.55)]">{scanStatus}</p>
+              </div>
+            )}
+            {hasStaticAuthorizationHeader && (
+              <div className="flex items-start gap-2 rounded-lg border border-gold/20 bg-gold/8 px-3 py-2">
+                <AlertTriangle className="h-4 w-4 text-gold shrink-0 mt-0.5" />
+                <p className="font-body text-xs leading-relaxed text-[rgba(38,37,30,0.55)]">
+                  Static Authorization headers are stored in Moor's local SQLite database. Prefer{" "}
+                  <code className="font-mono">{"{env:VAR_NAME}"}</code> when possible.
+                </p>
+              </div>
+            )}
+            {importPreview && importPreview.errors.length > 0 && (
+              <div className="rounded-lg border border-error-warm/20 bg-error-warm/8 px-3 py-2">
+                {importPreview.errors.map((error) => (
+                  <p key={error} className="font-body text-xs text-error-warm">
+                    {error}
+                  </p>
+                ))}
+              </div>
+            )}
+            {importPreview && importPreview.unsupported.length > 0 && (
+              <div className="rounded-lg border border-[rgba(38,37,30,0.08)] bg-surface-300/40 px-3 py-2">
+                <p className="font-headline text-xs text-[rgba(38,37,30,0.55)] mb-1.5">
+                  Unsupported ({importPreview.unsupported.length})
+                </p>
+                <div className="space-y-1">
+                  {importPreview.unsupported.map((server) => (
+                    <p
+                      key={`${server.source}:${server.name}:${server.reason}`}
+                      className="font-body text-xs text-[rgba(38,37,30,0.48)]"
+                    >
+                      <span className="font-mono text-[rgba(38,37,30,0.62)]">{server.name}</span>:{" "}
+                      {server.reason}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
+            {importPreview && importPreview.duplicates.length > 0 && (
+              <div className="rounded-lg border border-[rgba(38,37,30,0.08)] bg-surface-300/30 px-3 py-2">
+                <p className="font-body text-xs text-[rgba(38,37,30,0.48)]">
+                  Skipping {importPreview.duplicates.length} duplicate server
+                  {importPreview.duplicates.length > 1 ? "s" : ""} by name.
+                </p>
               </div>
             )}
             {scanCandidates.map((server) => (
