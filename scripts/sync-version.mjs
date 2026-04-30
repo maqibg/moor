@@ -6,10 +6,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 const checkOnly = process.argv.includes("--check");
 
-// 版本号唯一来源：根 package.json
-const expected = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version;
+// 版本号来源：sidecar/package.json（changeset 直接管理的 workspace 成员）
+// changeset version 会更新 sidecar/package.json，然后由此脚本同步到其他位置
+const expected = JSON.parse(
+  readFileSync(path.join(root, "sidecar", "package.json"), "utf8"),
+).version;
 
-console.log(`Source of truth: package.json -> ${expected}\n`);
+console.log(`Source of truth: sidecar/package.json -> ${expected}\n`);
 
 const jsonReadWrite = (filePath) => ({
   read: () => JSON.parse(readFileSync(filePath, "utf8")).version,
@@ -22,9 +25,9 @@ const jsonReadWrite = (filePath) => ({
 
 const targets = [
   {
-    name: "sidecar/package.json",
-    path: path.join(root, "sidecar", "package.json"),
-    ...jsonReadWrite(path.join(root, "sidecar", "package.json")),
+    name: "package.json",
+    path: path.join(root, "package.json"),
+    ...jsonReadWrite(path.join(root, "package.json")),
   },
   {
     name: "tauri.conf.json",

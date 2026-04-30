@@ -2,7 +2,7 @@
 
 ## 概述
 
-Moor 使用 `@changesets/cli` 实现自动版本号管理和 changelog 生成。版本号以根 `package.json` 为唯一来源（Single Source of Truth），构建时自动同步到所有目标文件。
+Moor 使用 `@changesets/cli` 实现自动版本号管理和 changelog 生成。版本号以 `sidecar/package.json` 为唯一来源（Single Source of Truth，因为它是 changeset 直接管理的 workspace 成员），构建时自动同步到所有目标文件。
 
 ## 版本号分布
 

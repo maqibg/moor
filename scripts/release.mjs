@@ -70,6 +70,20 @@ run("pnpm version:sync");
 const version = getRootVersion();
 const tagName = `v${version}`;
 
+// 检查 tag 是否已存在
+const existingTags = execSync("git tag -l", { cwd: root, encoding: "utf8" }).trim().split("\n");
+if (existingTags.includes(tagName)) {
+  console.error(`\n❌ Tag "${tagName}" already exists.`);
+  console.error("This usually means changeset did not bump the version as expected.");
+  console.error(
+    "Check .changeset/config.json and ensure the changeset file targets the correct package.",
+  );
+  console.error("\nRolling back the release commit...");
+  run("git reset --soft HEAD~1");
+  run("git checkout -- .");
+  process.exit(1);
+}
+
 run(`git add -A`);
 run(`git commit -m "chore(release): ${tagName}"`);
 run(`git tag ${tagName}`);
