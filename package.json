@@ -17,9 +17,9 @@
     "format:check": "vp fmt --check \"src/**/*.{ts,tsx,css}\" \"sidecar/src/**/*.ts\"",
     "version:sync": "node scripts/sync-version.mjs",
     "release": "node scripts/release.mjs",
-    "release:beta": "pnpm changeset pre enter beta && pnpm release",
-    "release:rc": "pnpm changeset pre enter rc && pnpm release",
-    "release:exit": "pnpm changeset pre exit && pnpm version:sync",
+    "release:beta": "node scripts/pre-release.mjs beta",
+    "release:rc": "node scripts/pre-release.mjs rc",
+    "release:exit": "node scripts/pre-release-exit.mjs",
     "prepare": "vp config"
   },
   "dependencies": {

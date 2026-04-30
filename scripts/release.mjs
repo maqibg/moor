@@ -15,6 +15,15 @@ function getRootVersion() {
   return JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version;
 }
 
+// 检测 pre-release 模式并提示
+const preJsonPath = path.join(root, ".changeset", "pre.json");
+if (existsSync(preJsonPath)) {
+  const pre = JSON.parse(readFileSync(preJsonPath, "utf8"));
+  if (pre.mode === "pre") {
+    console.log(`📦 Pre-release 模式: ${pre.tag}\n`);
+  }
+}
+
 const status = execSync("git status --porcelain", { cwd: root, encoding: "utf8" }).trim();
 const pendingChangesetFiles = status
   .split("\n")

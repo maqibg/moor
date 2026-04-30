@@ -6,9 +6,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 const checkOnly = process.argv.includes("--check");
 
-const expected = JSON.parse(
-  readFileSync(path.join(root, "sidecar", "package.json"), "utf8"),
-).version;
+// 版本号唯一来源：根 package.json
+const expected = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version;
+
+console.log(`Source of truth: package.json -> ${expected}\n`);
 
 const jsonReadWrite = (filePath) => ({
   read: () => JSON.parse(readFileSync(filePath, "utf8")).version,
@@ -21,9 +22,9 @@ const jsonReadWrite = (filePath) => ({
 
 const targets = [
   {
-    name: "package.json",
-    path: path.join(root, "package.json"),
-    ...jsonReadWrite(path.join(root, "package.json")),
+    name: "sidecar/package.json",
+    path: path.join(root, "sidecar", "package.json"),
+    ...jsonReadWrite(path.join(root, "sidecar", "package.json")),
   },
   {
     name: "tauri.conf.json",
