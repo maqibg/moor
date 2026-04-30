@@ -1,0 +1,85 @@
+export type ServerAction = "starting" | "stopping";
+export type ServerStatus = "stopped" | "starting" | "running" | "error";
+
+export interface ServerStateItem {
+  id: string;
+  status: ServerStatus;
+  error_message?: string | null;
+}
+
+export interface ServerStatusEventPayload {
+  serverId: string;
+  status: ServerStatus;
+  errorMessage?: string | null;
+}
+
+const serverStatuses = ["stopped", "starting", "running", "error"] satisfies ServerStatus[];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isServerStatus(value: unknown): value is ServerStatus {
+  return typeof value === "string" && serverStatuses.includes(value as ServerStatus);
+}
+
+export function getServerStatusEventPayload(eventData: unknown): ServerStatusEventPayload | null {
+  if (!isRecord(eventData)) return null;
+
+  const payload = isRecord(eventData.data) ? eventData.data : eventData;
+  const serverId = payload.serverId;
+  const status = payload.status;
+
+  if (typeof serverId !== "string" || !isServerStatus(status)) return null;
+
+  return {
+    serverId,
+    status,
+    errorMessage: typeof payload.errorMessage === "string" ? payload.errorMessage : null,
+  };
+}
+
+function isServerStatusEventPayload(value: unknown): value is ServerStatusEventPayload {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.serverId === "string" &&
+    isServerStatus(value.status) &&
+    (value.errorMessage === undefined ||
+      value.errorMessage === null ||
+      typeof value.errorMessage === "string")
+  );
+}
+
+export function applyServerAction<TServer extends ServerStateItem>(
+  servers: TServer[],
+  serverId: string,
+  action: ServerAction,
+): TServer[] {
+  return servers.map((server) => {
+    if (server.id !== serverId) return server;
+    if (action === "starting") {
+      return { ...server, status: "starting", error_message: null };
+    }
+    return { ...server, error_message: null };
+  });
+}
+
+export function mergeServerStatusEvent<TServer extends ServerStateItem>(
+  servers: TServer[],
+  eventData: unknown,
+): TServer[] {
+  const payload = isServerStatusEventPayload(eventData)
+    ? eventData
+    : getServerStatusEventPayload(eventData);
+  if (!payload) return servers;
+
+  return servers.map((server) => {
+    if (server.id !== payload.serverId) return server;
+
+    return {
+      ...server,
+      status: payload.status,
+      error_message: payload.status === "error" ? payload.errorMessage : null,
+    };
+  });
+}

@@ -5,7 +5,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ServerCard } from "@/components/shared/ServerCard";
 import { useServers } from "@/hooks/useServers";
 import { useSSE } from "@/hooks/useSSE";
-import { AlertTriangle, Check, FileJson, Plus, ScanSearch, WandSparkles, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  FileJson,
+  Plus,
+  RefreshCw,
+  ScanSearch,
+  WandSparkles,
+  X,
+} from "lucide-react";
 import { apiPost } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
@@ -58,7 +67,17 @@ const JsonImportEditor = lazy(() =>
 );
 
 export function Servers() {
-  const { servers, loading, startServer, stopServer, removeServer, refresh } = useServers();
+  const {
+    servers,
+    loading,
+    startServer,
+    stopServer,
+    removeServer,
+    refresh,
+    refreshSilently,
+    serverActions,
+    mergeStatusEvent,
+  } = useServers();
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({
     name: "",
@@ -82,9 +101,13 @@ export function Servers() {
   useSSE(
     useCallback(
       (event) => {
-        if (event.type === "server:status" || event.type === "server:tools") refresh();
+        if (event.type === "server:status") {
+          mergeStatusEvent(event.data);
+          return;
+        }
+        if (event.type === "server:tools") void refreshSilently();
       },
-      [refresh],
+      [mergeStatusEvent, refreshSilently],
     ),
   );
 
@@ -241,6 +264,9 @@ export function Servers() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => void refresh()} disabled={loading}>
+            <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} /> Refresh
+          </Button>
           <Button variant="outline" onClick={() => setShowJsonImport(true)}>
             <FileJson className="h-4 w-4 mr-2" /> Import JSON
           </Button>
@@ -583,6 +609,7 @@ export function Servers() {
             <ServerCard
               key={server.id}
               server={server}
+              action={serverActions[server.id]}
               onStart={startServer}
               onStop={stopServer}
               onRemove={removeServer}
