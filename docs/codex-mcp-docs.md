@@ -1,50 +1,50 @@
-# Codex MCP 配置指南
+# Codex MCP Configuration Guide
 
-> 来源：https://developers.openai.com/codex/mcp
-> 访问日期：2026-04-30
+> Source: https://developers.openai.com/codex/mcp
+> Accessed: 2026-04-30
 >
-> 说明：本文为外部文档镜像/参考，版权归原站点所有；内容可能过期，请以官方链接为准，引用或再分发时遵循原站点许可。
+> Note: This document is an external documentation mirror/reference. Copyright belongs to the original site; content may be outdated, please refer to the official link. Follow the original site's license when citing or redistributing.
 
-Model Context Protocol (MCP) 连接模型与工具和上下文。使用 MCP 为 Codex 提供第三方文档访问，或让其与浏览器、Figma 等开发者工具交互。
+Model Context Protocol (MCP) connects models with tools and context. Use MCP to give Codex access to third-party documentation, or let it interact with developer tools like browsers and Figma.
 
-Codex 在 CLI 和 IDE 扩展中均支持 MCP Server。
+Codex supports MCP Servers in both CLI and IDE extensions.
 
-## Server 类型
+## Server Types
 
-- **STDIO Server**：作为本地进程运行（通过命令启动）
-  - 支持环境变量
-- **Streamable HTTP Server**：通过地址访问
-  - Bearer Token 认证
-  - OAuth 认证（运行 `codex mcp login <server-name>`）
+- **STDIO Server**: Runs as a local process (started via command)
+  - Supports environment variables
+- **Streamable HTTP Server**: Accessed via URL
+  - Bearer Token authentication
+  - OAuth authentication (run `codex mcp login <server-name>`)
 
-## 配置文件位置
+## Configuration File Location
 
-Codex 将 MCP 配置存储在 `config.toml` 中，与其他 Codex 配置共存。默认位置为 `~/.codex/config.toml`，也可将 MCP Server 限定到项目中（`.codex/config.toml`，仅限受信任项目）。
+Codex stores MCP configuration in `config.toml`, co-located with other Codex configurations. The default location is `~/.codex/config.toml`. You can also scope MCP Servers to a project (`.codex/config.toml`, trusted projects only).
 
-CLI 和 IDE 扩展共享此配置。配置好 MCP Server 后，可在两个 Codex 客户端间切换，无需重新设置。
+CLI and IDE extensions share this configuration. Once configured, you can switch between the two Codex clients without reconfiguring.
 
-配置方式二选一：
+Choose one of two configuration methods:
 
-1. **使用 CLI**：运行 `codex mcp` 添加和管理 Server
-2. **编辑 `config.toml`**：直接编辑 `~/.codex/config.toml`（或项目范围的 `.codex/config.toml`）
+1. **Use CLI**: Run `codex mcp` to add and manage Servers
+2. **Edit `config.toml`**: Directly edit `~/.codex/config.toml` (or project-scoped `.codex/config.toml`)
 
-## 使用 CLI 配置
+## Configuring via CLI
 
-### 添加 MCP Server
+### Adding an MCP Server
 
 ```bash
 codex mcp add <server-name> --env VAR1=VALUE1 --env VAR2=VALUE2 -- <stdio server-command>
 ```
 
-示例 — 添加 Context7（免费 MCP Server，提供开发者文档）：
+Example — Adding Context7 (free MCP Server providing developer documentation):
 
 ```bash
 codex mcp add context7 -- npx -y @upstash/context7-mcp
 ```
 
-### 其他 CLI 命令
+### Other CLI Commands
 
-查看所有可用 MCP 命令：
+View all available MCP commands:
 
 ```bash
 codex mcp --help
@@ -52,71 +52,71 @@ codex mcp --help
 
 ### Terminal UI (TUI)
 
-在 `codex` TUI 中，使用 `/mcp` 查看活跃的 MCP Server。
+In the `codex` TUI, use `/mcp` to view active MCP Servers.
 
-## 使用 config.toml 配置
+## Configuring via config.toml
 
-如需更细粒度的控制，编辑 `~/.codex/config.toml`（或项目范围的 `.codex/config.toml`）。在 IDE 扩展中，从齿轮菜单选择 **MCP settings** > **Open config.toml**。
+For finer-grained control, edit `~/.codex/config.toml` (or project-scoped `.codex/config.toml`). In the IDE extension, select **MCP settings** > **Open config.toml** from the gear menu.
 
-在配置文件中用 `[mcp_servers.<server-name>]` 表配置每个 MCP Server。
+Configure each MCP Server with the `[mcp_servers.<server-name>]` table in the configuration file.
 
-### STDIO Server 配置
+### STDIO Server Configuration
 
-| 字段                       | 必需 | 说明                                                      |
-| -------------------------- | ---- | --------------------------------------------------------- |
-| `command`                  | 是   | 启动 Server 的命令                                        |
-| `args`                     | 否   | 传递给 Server 的参数                                      |
-| `env`                      | 否   | 为 Server 设置的环境变量                                  |
-| `env_vars`                 | 否   | 允许并转发的环境变量                                      |
-| `cwd`                      | 否   | Server 启动的工作目录                                     |
-| `experimental_environment` | 否   | 设为 `remote` 可在有远程执行环境时通过其启动 stdio Server |
+| Field                      | Required | Description                                                     |
+| -------------------------- | -------- | --------------------------------------------------------------- |
+| `command`                  | Yes      | Command to start the Server                                     |
+| `args`                     | No       | Arguments passed to the Server                                  |
+| `env`                      | No       | Environment variables set for the Server                        |
+| `env_vars`                 | No       | Environment variables to allow and forward                      |
+| `cwd`                      | No       | Working directory for Server startup                            |
+| `experimental_environment` | No       | Set to `remote` to launch stdio Server via remote execution env |
 
-`env_vars` 可包含纯变量名或带 source 的对象：
+`env_vars` can contain plain variable names or objects with source:
 
 ```toml
 env_vars = ["LOCAL_TOKEN", { name = "REMOTE_TOKEN", source = "remote" }]
 ```
 
-字符串条目和 `source = "local"` 从 Codex 的本地环境读取。`source = "remote"` 从远程执行环境读取，需要远程 MCP stdio。
+String entries and `source = "local"` read from Codex's local environment. `source = "remote"` reads from the remote execution environment, requiring remote MCP stdio.
 
-### Streamable HTTP Server 配置
+### Streamable HTTP Server Configuration
 
-| 字段                   | 必需 | 说明                                                     |
-| ---------------------- | ---- | -------------------------------------------------------- |
-| `url`                  | 是   | Server 地址                                              |
-| `bearer_token_env_var` | 否   | Bearer Token 所在的环境变量名，发送到 `Authorization` 头 |
-| `http_headers`         | 否   | Header 名称到静态值的映射                                |
-| `env_http_headers`     | 否   | Header 名称到环境变量名的映射（值从环境读取）            |
+| Field                  | Required | Description                                                                          |
+| ---------------------- | -------- | ------------------------------------------------------------------------------------ |
+| `url`                  | Yes      | Server URL                                                                           |
+| `bearer_token_env_var` | No       | Name of environment variable containing Bearer Token, sent in `Authorization` header |
+| `http_headers`         | No       | Mapping of header names to static values                                             |
+| `env_http_headers`     | No       | Mapping of header names to environment variable names (values read from env)         |
 
-### 通用配置选项
+### General Configuration Options
 
-| 字段                  | 默认值 | 说明                                             |
-| --------------------- | ------ | ------------------------------------------------ |
-| `startup_timeout_sec` | `10`   | Server 启动超时（秒）                            |
-| `tool_timeout_sec`    | `60`   | 工具执行超时（秒）                               |
-| `enabled`             | —      | 设为 `false` 可禁用 Server 而不删除              |
-| `required`            | —      | 设为 `true` 则该 Server 初始化失败时导致启动失败 |
-| `enabled_tools`       | —      | 工具白名单                                       |
-| `disabled_tools`      | —      | 工具黑名单（在 `enabled_tools` 之后应用）        |
+| Field                 | Default | Description                                                      |
+| --------------------- | ------- | ---------------------------------------------------------------- |
+| `startup_timeout_sec` | `10`    | Server startup timeout (seconds)                                 |
+| `tool_timeout_sec`    | `60`    | Tool execution timeout (seconds)                                 |
+| `enabled`             | —       | Set to `false` to disable Server without deleting                |
+| `required`            | —       | Set to `true` to fail startup if this Server fails to initialize |
+| `enabled_tools`       | —       | Tool whitelist                                                   |
+| `disabled_tools`      | —       | Tool blacklist (applied after `enabled_tools`)                   |
 
-### OAuth 回调配置
+### OAuth Callback Configuration
 
-如果 OAuth 提供方需要固定回调端口，在 `config.toml` 顶层设置：
+If the OAuth provider requires a fixed callback port, set it at the top level of `config.toml`:
 
 ```toml
 mcp_oauth_callback_port = 5555
 mcp_oauth_callback_url = "https://devbox.example.internal/callback"
 ```
 
-- 未设置 `mcp_oauth_callback_port` 时，Codex 绑定临时端口
-- `mcp_oauth_callback_url` 作为 OAuth `redirect_uri`，同时仍用 `mcp_oauth_callback_port` 作为回调监听端口
-- 本地回调 URL（如 `localhost`）绑定到本地接口；非本地 URL 绑定到 `0.0.0.0` 以便回调可达
+- When `mcp_oauth_callback_port` is not set, Codex binds to a temporary port
+- `mcp_oauth_callback_url` is used as the OAuth `redirect_uri`, while `mcp_oauth_callback_port` is still used as the callback listening port
+- Local callback URLs (e.g., `localhost`) bind to the local interface; non-local URLs bind to `0.0.0.0` so the callback is reachable
 
-如果 MCP Server 声明了 `scopes_supported`，Codex 在 OAuth 登录时优先使用 Server 广播的 scopes，否则回退到 `config.toml` 中配置的 scopes。
+If the MCP Server declares `scopes_supported`, Codex prioritizes those scopes during OAuth login; otherwise it falls back to scopes configured in `config.toml`.
 
-## config.toml 完整示例
+## Complete config.toml Examples
 
-### Context7（STDIO）
+### Context7 (STDIO)
 
 ```toml
 [mcp_servers.context7]
@@ -128,15 +128,15 @@ env_vars = ["LOCAL_TOKEN"]
 MY_ENV_VAR = "MY_ENV_VALUE"
 ```
 
-### OAuth 回调覆盖
+### OAuth Callback Override
 
 ```toml
-# 可选的 MCP OAuth 回调覆盖（用于 `codex mcp login`）
+# Optional MCP OAuth callback override (for `codex mcp login`)
 mcp_oauth_callback_port = 5555
 mcp_oauth_callback_url = "https://devbox.example.internal/callback"
 ```
 
-### Figma（HTTP + Bearer Token）
+### Figma (HTTP + Bearer Token)
 
 ```toml
 [mcp_servers.figma]
@@ -145,26 +145,26 @@ bearer_token_env_var = "FIGMA_OAUTH_TOKEN"
 http_headers = { "X-Figma-Region" = "us-east-1" }
 ```
 
-### Chrome DevTools（工具过滤）
+### Chrome DevTools (Tool Filtering)
 
 ```toml
 [mcp_servers.chrome_devtools]
 url = "http://localhost:3000/mcp"
 enabled_tools = ["open", "screenshot"]
-disabled_tools = ["screenshot"] # 在 enabled_tools 之后应用
+disabled_tools = ["screenshot"] # Applied after enabled_tools
 startup_timeout_sec = 20
 tool_timeout_sec = 45
 enabled = true
 ```
 
-## 常用 MCP Server
+## Common MCP Servers
 
-| Server                                                                                                                                                                                  | 说明                             |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| [OpenAI Docs MCP](https://developers.openai.com/learn/docs-mcp)                                                                                                                         | 搜索和阅读 OpenAI 开发者文档     |
-| [Context7](https://github.com/upstash/context7)                                                                                                                                         | 连接最新开发者文档               |
-| [Figma Local](https://developers.figma.com/docs/figma-mcp-server/local-server-installation/) / [Remote](https://developers.figma.com/docs/figma-mcp-server/remote-server-installation/) | 访问 Figma 设计                  |
-| [Playwright](https://www.npmjs.com/package/@playwright/mcp)                                                                                                                             | 使用 Playwright 控制和检查浏览器 |
-| [Chrome Developer Tools](https://github.com/ChromeDevTools/chrome-devtools-mcp/)                                                                                                        | 控制和检查 Chrome                |
-| [Sentry](https://docs.sentry.io/product/sentry-mcp/#codex)                                                                                                                              | 访问 Sentry 日志                 |
-| [GitHub](https://github.com/github/github-mcp-server)                                                                                                                                   | 管理 GitHub（PR、Issue 等）      |
+| Server                                                                                                                                                                                  | Description                                 |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| [OpenAI Docs MCP](https://developers.openai.com/learn/docs-mcp)                                                                                                                         | Search and read OpenAI developer docs       |
+| [Context7](https://github.com/upstash/context7)                                                                                                                                         | Connect to latest developer docs            |
+| [Figma Local](https://developers.figma.com/docs/figma-mcp-server/local-server-installation/) / [Remote](https://developers.figma.com/docs/figma-mcp-server/remote-server-installation/) | Access Figma designs                        |
+| [Playwright](https://www.npmjs.com/package/@playwright/mcp)                                                                                                                             | Control and inspect browser with Playwright |
+| [Chrome Developer Tools](https://github.com/ChromeDevTools/chrome-devtools-mcp/)                                                                                                        | Control and inspect Chrome                  |
+| [Sentry](https://docs.sentry.io/product/sentry-mcp/#codex)                                                                                                                              | Access Sentry logs                          |
+| [GitHub](https://github.com/github/github-mcp-server)                                                                                                                                   | Manage GitHub (PRs, Issues, etc.)           |

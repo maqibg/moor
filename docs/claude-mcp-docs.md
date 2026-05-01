@@ -1,9 +1,9 @@
 # Connect Claude Code to tools via MCP
 
-> 来源：https://code.claude.com/docs/en/mcp
-> 访问日期：2026-04-30
+> Source: https://code.claude.com/docs/en/mcp
+> Accessed: 2026-04-30
 >
-> 说明：本文为外部文档镜像/参考，版权归原站点所有；内容可能过期，请以官方链接为准，引用或再分发时遵循原站点许可。
+> Note: This document is an external documentation mirror/reference. Copyright belongs to the original site; content may be outdated, please refer to the official link. Follow the original site's license when citing or redistributing.
 
 Claude Code can connect to hundreds of external tools and data sources through the Model Context Protocol (MCP), an open source standard for AI-tool integrations. MCP servers give Claude Code access to your tools, databases, and APIs.
 
