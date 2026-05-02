@@ -46,5 +46,21 @@ export function generateSnippets(mcpUrl: string): ClientSnippet[] {
       ),
       cliCommand: `# Edit ~/.config/opencode/opencode.json and add the "mcp.moor" entry above.`,
     },
+    {
+      client: "Cursor",
+      description: "Add to ~/.cursor/mcp.json or project .cursor/mcp.json",
+      snippet: JSON.stringify(
+        {
+          mcpServers: {
+            moor: {
+              url: mcpUrl,
+            },
+          },
+        },
+        null,
+        2,
+      ),
+      cliCommand: `# Edit ~/.cursor/mcp.json and add the mcpServers.moor entry above.`,
+    },
   ];
 }
