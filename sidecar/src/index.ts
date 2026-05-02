@@ -22,6 +22,7 @@ interface CliOptions {
   port: number;
   apiToken: string;
   dataDir: string;
+  legacyDataDir?: string;
 }
 
 function readArg(name: string): string | undefined {
@@ -37,6 +38,7 @@ function parseCliOptions(): CliOptions {
     port: Number(readArg("--port") ?? process.env.MOOR_PORT ?? DEFAULT_PORT),
     apiToken: readArg("--api-token") ?? process.env.MOOR_API_TOKEN ?? crypto.randomUUID(),
     dataDir,
+    legacyDataDir: readArg("--legacy-data-dir") ?? process.env.MOOR_LEGACY_DATA_DIR,
   };
 }
 
@@ -81,7 +83,7 @@ async function main() {
   const port = await findAvailablePort(options.host, options.port, options.port + 10);
   const portFile = path.join(options.dataDir, "port");
 
-  await initDb({ dataDir: options.dataDir });
+  await initDb({ dataDir: options.dataDir, legacyDataDir: options.legacyDataDir });
   runMigrations();
   seedDefaultProfile();
 

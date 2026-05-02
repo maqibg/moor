@@ -5,12 +5,19 @@ import fs from "node:fs";
 
 export interface InitDbOptions {
   dataDir?: string;
+  legacyDataDir?: string;
 }
 
 const DEFAULT_DATA_DIR = path.join(os.homedir(), ".moor");
+const SQLITE_DATA_FILES = ["moor.db", "moor.db-wal", "moor.db-shm"] as const;
 
 let sqlDb: DatabaseSync | null = null;
 let dbPath = path.join(DEFAULT_DATA_DIR, "moor.db");
+
+export interface LegacyDataDirMigrationOptions {
+  dataDir: string;
+  legacyDataDir?: string;
+}
 
 function normalizeParams(params: unknown[]): (string | number | null | bigint | Uint8Array)[] {
   return params.map((param) => {
@@ -30,6 +37,7 @@ function normalizeParams(params: unknown[]): (string | number | null | bigint | 
 
 export async function initDb(options: InitDbOptions = {}) {
   const dataDir = options.dataDir ?? process.env.MOOR_DATA_DIR ?? DEFAULT_DATA_DIR;
+  migrateLegacyDataDir({ dataDir, legacyDataDir: options.legacyDataDir });
   fs.mkdirSync(dataDir, { recursive: true });
   dbPath = path.join(dataDir, "moor.db");
   sqlDb = new DatabaseSync(dbPath);
@@ -37,6 +45,26 @@ export async function initDb(options: InitDbOptions = {}) {
   sqlDb.exec("PRAGMA journal_mode = WAL");
   sqlDb.exec("PRAGMA busy_timeout = 5000");
   return sqlDb;
+}
+
+export function migrateLegacyDataDir(options: LegacyDataDirMigrationOptions) {
+  const { dataDir, legacyDataDir } = options;
+  if (!legacyDataDir || path.resolve(dataDir) === path.resolve(legacyDataDir)) return;
+
+  const currentDbPath = path.join(dataDir, "moor.db");
+  if (fs.existsSync(currentDbPath)) return;
+
+  const legacyDbPath = path.join(legacyDataDir, "moor.db");
+  if (!fs.existsSync(legacyDbPath)) return;
+
+  fs.mkdirSync(dataDir, { recursive: true });
+  for (const fileName of SQLITE_DATA_FILES) {
+    const source = path.join(legacyDataDir, fileName);
+    const target = path.join(dataDir, fileName);
+    if (fs.existsSync(source)) {
+      fs.copyFileSync(source, target);
+    }
+  }
 }
 
 export function getDb(): DatabaseSync {

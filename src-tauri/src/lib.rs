@@ -20,6 +20,8 @@ use tauri_plugin_shell::{
     ShellExt,
 };
 
+const LEGACY_BUNDLE_IDENTIFIER: &str = "dev.moor.app";
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SidecarInfo {
@@ -45,18 +47,20 @@ struct SidecarInner {
     child: Mutex<Option<CommandChild>>,
     api_token: String,
     data_dir: PathBuf,
+    legacy_data_dir: Option<PathBuf>,
     restart_count: AtomicUsize,
     shutting_down: AtomicBool,
 }
 
 impl SidecarState {
-    fn new(api_token: String, data_dir: PathBuf) -> Self {
+    fn new(api_token: String, data_dir: PathBuf, legacy_data_dir: Option<PathBuf>) -> Self {
         Self {
             inner: Arc::new(SidecarInner {
                 info: Mutex::new(None),
                 child: Mutex::new(None),
                 api_token,
                 data_dir,
+                legacy_data_dir,
                 restart_count: AtomicUsize::new(0),
                 shutting_down: AtomicBool::new(false),
             }),
@@ -135,7 +139,7 @@ fn spawn_sidecar(app: &AppHandle, state: SidecarState) -> Result<(), String> {
     fs::create_dir_all(&state.inner.data_dir).map_err(|err| err.to_string())?;
     state.set_info(None);
 
-    let args = vec![
+    let mut args = vec![
         "--host".to_string(),
         "127.0.0.1".to_string(),
         "--port".to_string(),
@@ -145,6 +149,10 @@ fn spawn_sidecar(app: &AppHandle, state: SidecarState) -> Result<(), String> {
         "--data-dir".to_string(),
         state.inner.data_dir.to_string_lossy().to_string(),
     ];
+    if let Some(legacy_data_dir) = &state.inner.legacy_data_dir {
+        args.push("--legacy-data-dir".to_string());
+        args.push(legacy_data_dir.to_string_lossy().to_string());
+    }
 
     let (mut rx, child) = app
         .shell()
@@ -162,7 +170,9 @@ fn spawn_sidecar(app: &AppHandle, state: SidecarState) -> Result<(), String> {
             match event {
                 CommandEvent::Stdout(bytes) => {
                     if let Ok(line) = String::from_utf8(bytes) {
-                        if let Some(info) = parse_ready_line(&line, &state_for_events.inner.api_token) {
+                        if let Some(info) =
+                            parse_ready_line(&line, &state_for_events.inner.api_token)
+                        {
                             state_for_events.set_info(Some(info));
                         }
                     }
@@ -205,7 +215,12 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .unwrap_or_else(|_| PathBuf::from(".moor"));
-            let sidecar_state = SidecarState::new(generate_api_token(), data_dir);
+            let legacy_data_dir = app
+                .path()
+                .data_dir()
+                .ok()
+                .map(|dir| dir.join(LEGACY_BUNDLE_IDENTIFIER));
+            let sidecar_state = SidecarState::new(generate_api_token(), data_dir, legacy_data_dir);
             app.manage(sidecar_state.clone());
             spawn_sidecar(app.handle(), sidecar_state)
                 .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
@@ -238,20 +253,18 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
-            match event {
-                RunEvent::Exit | RunEvent::ExitRequested { .. } => {
-                    app_handle.state::<SidecarState>().stop();
-                }
-                RunEvent::WindowEvent { event, label, .. } if label == "main" => {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let _ = window.hide();
-                        }
+        .run(|app_handle, event| match event {
+            RunEvent::Exit | RunEvent::ExitRequested { .. } => {
+                app_handle.state::<SidecarState>().stop();
+            }
+            RunEvent::WindowEvent { event, label, .. } if label == "main" => {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let _ = window.hide();
                     }
                 }
-                _ => {}
             }
+            _ => {}
         });
 }
