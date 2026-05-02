@@ -1,5 +1,14 @@
 # moor-sidecar
 
+## 0.2.1-beta.1
+
+### Patch Changes
+
+- feat: add stdio server management and legacy data migration
+  - Support stdio command transport for MCP servers
+  - Add legacy data directory migration for ~/.moor
+  - Fix TypeScript resolution for node: prefixed modules
+
 ## 0.2.1-beta.0
 
 ### Patch Changes
