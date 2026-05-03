@@ -172,6 +172,12 @@ export default defineConfig({
     },
   },
   test: {
+    include: [
+      "src/**/*.test.{ts,tsx}",
+      "sidecar/src/**/*.test.ts",
+      "scripts/**/*.test.mjs",
+      "sidecar/scripts/**/*.test.mjs",
+    ],
     exclude: ["**/node_modules/**", "**/dist/**"],
   },
   clearScreen: false,

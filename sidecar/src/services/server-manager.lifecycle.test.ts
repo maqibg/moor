@@ -1,6 +1,7 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import {
   closeDb,
@@ -19,7 +20,9 @@ import {
 import { resolveHttpHeaders } from "./http-headers.js";
 import { serverManager } from "./server-manager.js";
 
-const fixturePath = path.join(process.cwd(), "src/test/fixtures/stdio-echo-server.mjs");
+const fixturePath = fileURLToPath(
+  new URL("../test/fixtures/stdio-echo-server.mjs", import.meta.url),
+);
 let dataDir: string;
 
 describe("ServerManager MCP lifecycle", () => {

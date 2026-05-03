@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import test from "node:test";
+import { describe, it } from "vite-plus/test";
 
 import { getSeaBuildCacheState, writeSeaBuildCache } from "./build-sidecar-cache.mjs";
 
@@ -28,77 +28,79 @@ function createBuildFixture() {
   return { root, repoRoot, sidecarRoot, outputBinary, cachePath, buildScriptPath };
 }
 
-test("getSeaBuildCacheState skips when fingerprint matches and binary exists", () => {
-  const fixture = createBuildFixture();
+describe("sidecar SEA build cache", () => {
+  it("getSeaBuildCacheState skips when fingerprint matches and binary exists", () => {
+    const fixture = createBuildFixture();
 
-  try {
-    const firstState = getSeaBuildCacheState({
-      repoRoot: fixture.repoRoot,
-      sidecarRoot: fixture.sidecarRoot,
-      outputBinary: fixture.outputBinary,
-      cachePath: fixture.cachePath,
-      buildScriptPath: fixture.buildScriptPath,
-      nodeVersion: "v24.0.0",
-      platform: "darwin",
-      arch: "arm64",
-    });
-    assert.equal(firstState.shouldBuild, true);
+    try {
+      const firstState = getSeaBuildCacheState({
+        repoRoot: fixture.repoRoot,
+        sidecarRoot: fixture.sidecarRoot,
+        outputBinary: fixture.outputBinary,
+        cachePath: fixture.cachePath,
+        buildScriptPath: fixture.buildScriptPath,
+        nodeVersion: "v24.0.0",
+        platform: "darwin",
+        arch: "arm64",
+      });
+      assert.equal(firstState.shouldBuild, true);
 
-    writeSeaBuildCache(fixture.cachePath, firstState.fingerprint);
+      writeSeaBuildCache(fixture.cachePath, firstState.fingerprint);
 
-    const secondState = getSeaBuildCacheState({
-      repoRoot: fixture.repoRoot,
-      sidecarRoot: fixture.sidecarRoot,
-      outputBinary: fixture.outputBinary,
-      cachePath: fixture.cachePath,
-      buildScriptPath: fixture.buildScriptPath,
-      nodeVersion: "v24.0.0",
-      platform: "darwin",
-      arch: "arm64",
-    });
+      const secondState = getSeaBuildCacheState({
+        repoRoot: fixture.repoRoot,
+        sidecarRoot: fixture.sidecarRoot,
+        outputBinary: fixture.outputBinary,
+        cachePath: fixture.cachePath,
+        buildScriptPath: fixture.buildScriptPath,
+        nodeVersion: "v24.0.0",
+        platform: "darwin",
+        arch: "arm64",
+      });
 
-    assert.equal(secondState.shouldBuild, false);
-    assert.equal(secondState.reason, "up-to-date");
-  } finally {
-    rmSync(fixture.root, { recursive: true, force: true });
-  }
-});
+      assert.equal(secondState.shouldBuild, false);
+      assert.equal(secondState.reason, "up-to-date");
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
 
-test("getSeaBuildCacheState rebuilds when sidecar source changes", () => {
-  const fixture = createBuildFixture();
+  it("getSeaBuildCacheState rebuilds when sidecar source changes", () => {
+    const fixture = createBuildFixture();
 
-  try {
-    const firstState = getSeaBuildCacheState({
-      repoRoot: fixture.repoRoot,
-      sidecarRoot: fixture.sidecarRoot,
-      outputBinary: fixture.outputBinary,
-      cachePath: fixture.cachePath,
-      buildScriptPath: fixture.buildScriptPath,
-      nodeVersion: "v24.0.0",
-      platform: "darwin",
-      arch: "arm64",
-    });
-    writeSeaBuildCache(fixture.cachePath, firstState.fingerprint);
+    try {
+      const firstState = getSeaBuildCacheState({
+        repoRoot: fixture.repoRoot,
+        sidecarRoot: fixture.sidecarRoot,
+        outputBinary: fixture.outputBinary,
+        cachePath: fixture.cachePath,
+        buildScriptPath: fixture.buildScriptPath,
+        nodeVersion: "v24.0.0",
+        platform: "darwin",
+        arch: "arm64",
+      });
+      writeSeaBuildCache(fixture.cachePath, firstState.fingerprint);
 
-    writeFileSync(path.join(fixture.sidecarRoot, "src", "index.ts"), "console.log('two');\n");
+      writeFileSync(path.join(fixture.sidecarRoot, "src", "index.ts"), "console.log('two');\n");
 
-    const changedState = getSeaBuildCacheState({
-      repoRoot: fixture.repoRoot,
-      sidecarRoot: fixture.sidecarRoot,
-      outputBinary: fixture.outputBinary,
-      cachePath: fixture.cachePath,
-      buildScriptPath: fixture.buildScriptPath,
-      nodeVersion: "v24.0.0",
-      platform: "darwin",
-      arch: "arm64",
-    });
+      const changedState = getSeaBuildCacheState({
+        repoRoot: fixture.repoRoot,
+        sidecarRoot: fixture.sidecarRoot,
+        outputBinary: fixture.outputBinary,
+        cachePath: fixture.cachePath,
+        buildScriptPath: fixture.buildScriptPath,
+        nodeVersion: "v24.0.0",
+        platform: "darwin",
+        arch: "arm64",
+      });
 
-    assert.equal(changedState.shouldBuild, true);
-    assert.equal(changedState.reason, "fingerprint-changed");
+      assert.equal(changedState.shouldBuild, true);
+      assert.equal(changedState.reason, "fingerprint-changed");
 
-    const cacheFile = readFileSync(fixture.cachePath, "utf8");
-    assert.match(cacheFile, /"hash"/);
-  } finally {
-    rmSync(fixture.root, { recursive: true, force: true });
-  }
+      const cacheFile = readFileSync(fixture.cachePath, "utf8");
+      assert.match(cacheFile, /"hash"/);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
 });

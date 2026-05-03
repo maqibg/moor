@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import test from "node:test";
+import { describe, it } from "vite-plus/test";
 
 import { syncVersions } from "./version-sync-core.mjs";
 
@@ -39,46 +39,48 @@ function createVersionFixture() {
   return root;
 }
 
-test("syncVersions updates Cargo.lock for the local moor package", () => {
-  const root = createVersionFixture();
-  const logs = [];
+describe("version sync", () => {
+  it("syncVersions updates Cargo.lock for the local moor package", () => {
+    const root = createVersionFixture();
+    const logs = [];
 
-  try {
-    const result = syncVersions({
-      root,
-      checkOnly: false,
-      log: (message) => logs.push(message),
-      error: (message) => logs.push(message),
-    });
+    try {
+      const result = syncVersions({
+        root,
+        checkOnly: false,
+        log: (message) => logs.push(message),
+        error: (message) => logs.push(message),
+      });
 
-    assert.equal(result.expected, "0.2.1-beta.1");
-    assert.equal(result.hasMismatch, true);
+      assert.equal(result.expected, "0.2.1-beta.1");
+      assert.equal(result.hasMismatch, true);
 
-    const cargoLock = readFileSync(path.join(root, "src-tauri", "Cargo.lock"), "utf8");
-    assert.match(cargoLock, /name = "moor"\nversion = "0\.2\.1-beta\.1"/);
-    assert.match(logs.join("\n"), /\[synced\] Cargo\.lock/);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+      const cargoLock = readFileSync(path.join(root, "src-tauri", "Cargo.lock"), "utf8");
+      assert.match(cargoLock, /name = "moor"\nversion = "0\.2\.1-beta\.1"/);
+      assert.match(logs.join("\n"), /\[synced\] Cargo\.lock/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 
-test("syncVersions check-only reports Cargo.lock mismatch without writing", () => {
-  const root = createVersionFixture();
+  it("syncVersions check-only reports Cargo.lock mismatch without writing", () => {
+    const root = createVersionFixture();
 
-  try {
-    const result = syncVersions({
-      root,
-      checkOnly: true,
-      log: () => {},
-      error: () => {},
-    });
+    try {
+      const result = syncVersions({
+        root,
+        checkOnly: true,
+        log: () => {},
+        error: () => {},
+      });
 
-    assert.equal(result.hasMismatch, true);
-    assert.equal(result.exitCode, 1);
+      assert.equal(result.hasMismatch, true);
+      assert.equal(result.exitCode, 1);
 
-    const cargoLock = readFileSync(path.join(root, "src-tauri", "Cargo.lock"), "utf8");
-    assert.match(cargoLock, /name = "moor"\nversion = "0\.2\.1-beta\.0"/);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+      const cargoLock = readFileSync(path.join(root, "src-tauri", "Cargo.lock"), "utf8");
+      assert.match(cargoLock, /name = "moor"\nversion = "0\.2\.1-beta\.0"/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
