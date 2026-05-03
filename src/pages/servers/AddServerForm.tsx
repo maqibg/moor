@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { X } from "lucide-react";
+import { AlertTriangle, X } from "lucide-react";
 
 const CONNECTION_TYPES = [
   { value: "stdio", label: "stdio" },
@@ -41,9 +41,11 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
     headers: "",
   });
   const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
     if (!form.name || submitting) return;
+    setFormError(null);
 
     let env: Record<string, string> | undefined;
     let headers: Record<string, string> | undefined;
@@ -52,6 +54,7 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
       try {
         env = JSON.parse(form.env) as Record<string, string>;
       } catch {
+        setFormError("Invalid JSON in environment variables field");
         return;
       }
     }
@@ -60,6 +63,7 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
       try {
         headers = JSON.parse(form.headers) as Record<string, string>;
       } catch {
+        setFormError("Invalid JSON in HTTP headers field");
         return;
       }
     }
@@ -76,6 +80,8 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
         headers,
       });
       onClose();
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Failed to add server");
     } finally {
       setSubmitting(false);
     }
@@ -174,6 +180,12 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
             onChange={(e) => setForm((f) => ({ ...f, env: e.target.value }))}
           />
         </div>
+        {formError && (
+          <div className="flex items-center gap-2 rounded-lg border border-error-warm/20 bg-error-warm/8 px-3 py-2">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-error-warm" />
+            <p className="font-body text-xs text-error-warm">{formError}</p>
+          </div>
+        )}
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="outline" onClick={onClose}>
             Cancel

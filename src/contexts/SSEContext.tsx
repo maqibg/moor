@@ -14,6 +14,11 @@ export function SSEProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const controller = new AbortController();
+    const scheduleReconnect = () => {
+      setTimeout(() => {
+        if (!controller.signal.aborted) void connect();
+      }, 5000);
+    };
 
     async function connect() {
       try {
@@ -63,15 +68,14 @@ export function SSEProvider({ children }: { children: ReactNode }) {
             }
           }
         }
+        if (!controller.signal.aborted) scheduleReconnect();
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        setTimeout(() => {
-          if (!controller.signal.aborted) connect();
-        }, 5000);
+        scheduleReconnect();
       }
     }
 
-    connect();
+    void connect();
     return () => controller.abort();
   }, []);
 
