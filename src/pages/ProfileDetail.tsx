@@ -60,7 +60,7 @@ export function ProfileDetail() {
         <Button
           variant="ghost"
           size="icon"
-          className="h-9 w-9 mt-0.5"
+          className="mt-0.5"
           onClick={() => navigate("/profiles")}
         >
           <ArrowLeft className="h-4 w-4" />

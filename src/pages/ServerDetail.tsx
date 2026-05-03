@@ -100,12 +100,7 @@ export function ServerDetail() {
     <div className="space-y-6 animate-fade-in-up">
       {/* Header */}
       <div className="flex items-start gap-3">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-9 w-9 mt-0.5"
-          onClick={() => navigate("/servers")}
-        >
+        <Button variant="ghost" size="icon" className="mt-0.5" onClick={() => navigate("/servers")}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="flex-1 min-w-0">
@@ -177,8 +172,8 @@ export function ServerDetail() {
                 </pre>
                 <Button
                   variant="ghost"
-                  size="icon"
-                  className="absolute top-2.5 right-2.5 h-7 w-7 text-[rgba(242,241,237,0.4)] hover:text-[rgba(242,241,237,0.8)] hover:bg-white/10"
+                  size="icon-sm"
+                  className="absolute top-2.5 right-2.5 text-[rgba(242,241,237,0.4)] hover:text-[rgba(242,241,237,0.8)] hover:bg-white/10"
                   onClick={handleCopy}
                 >
                   {copied ? (

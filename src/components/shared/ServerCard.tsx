@@ -84,7 +84,7 @@ function LifecycleButton({
       <Button
         variant="ghost"
         size="icon"
-        className="h-9 w-9 text-[rgba(38,37,30,0.45)] hover:text-error-warm hover:bg-error-warm/10 active:bg-error-warm/20 transition-all duration-150"
+        className="text-[rgba(38,37,30,0.45)] hover:text-error-warm hover:bg-error-warm/10 active:bg-error-warm/20 transition-all duration-150"
         disabled={isBusy}
         onClick={() => void onStop(serverId)}
         title={isStopping ? "Stopping server" : "Stop server"}
@@ -98,7 +98,7 @@ function LifecycleButton({
     <Button
       variant="ghost"
       size="icon"
-      className="h-9 w-9 text-[rgba(38,37,30,0.45)] hover:text-success-muted hover:bg-success-muted/10 active:bg-success-muted/20 transition-all duration-150"
+      className="text-[rgba(38,37,30,0.45)] hover:text-success-muted hover:bg-success-muted/10 active:bg-success-muted/20 transition-all duration-150"
       disabled={isBusy}
       onClick={() => void onStart(serverId)}
       title={isStarting ? "Starting server" : "Start server"}
@@ -146,7 +146,7 @@ function ServerControls({
       <Button
         variant="ghost"
         size="icon"
-        className="h-9 w-9 text-[rgba(38,37,30,0.45)] hover:text-cursor-dark hover:bg-surface-400 active:bg-surface-500 transition-all duration-150"
+        className="text-[rgba(38,37,30,0.45)] hover:text-cursor-dark hover:bg-surface-400 active:bg-surface-500 transition-all duration-150"
         onClick={() => navigate(`/servers/${server.id}`)}
         title="Server details"
       >
@@ -155,7 +155,7 @@ function ServerControls({
       <Button
         variant="ghost"
         size="icon"
-        className="h-9 w-9 text-[rgba(38,37,30,0.45)] hover:text-error-warm hover:bg-error-warm/10 active:bg-error-warm/20 transition-all duration-150"
+        className="text-[rgba(38,37,30,0.45)] hover:text-error-warm hover:bg-error-warm/10 active:bg-error-warm/20 transition-all duration-150"
         onClick={confirmRemove}
         title="Remove server"
       >
@@ -188,15 +188,10 @@ export function ServerCard({ server, action, onStart, onStop, onRemove }: Server
     <Card
       className={cn(
         "group transition-all duration-200 hover:shadow-[rgba(0,0,0,0.04)_0px_12px_40px,rgba(0,0,0,0.02)_0px_0px_16px]",
-        isStopping && "border-l-[3px] border-l-gold",
-        isRunning && !isStopping && "border-l-[3px] border-l-success-muted",
-        isError && "border-l-[3px] border-l-error-warm",
-        isStarting && "border-l-[3px] border-l-gold",
-        !isRunning &&
-          !isError &&
-          !isStarting &&
-          !isStopping &&
-          "border-l-[3px] border-l-transparent hover:border-l-[rgba(38,37,30,0.1)]",
+        isRunning && !isStopping && "bg-success-muted/[0.02] border-success-muted/10",
+        isError && "bg-error-warm/[0.02] border-error-warm/10",
+        isStarting && "bg-gold/[0.02] border-gold/10",
+        isStopping && "bg-gold/[0.02] border-gold/10",
       )}
     >
       <CardContent className="p-4">
