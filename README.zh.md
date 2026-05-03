@@ -68,11 +68,13 @@ vp install
 
 ### 扫描现有配置
 
-Moor 可以自动检测你已为 Claude Code 和 Cursor 配置的 MCP Server：
+Moor 可以自动检测你已为 Claude Code、Codex 和 OpenCode 配置的 MCP Server：
 
-1. 进入 **Servers** → **Import**
-2. 点击 **Scan** — Moor 会读取 `~/.claude/settings.json` 和 `.cursor/mcp.json`
+1. 进入 **Servers** → **Scan Configs**
+2. 点击 **Scan** — Moor 会读取 `~/.claude/settings.json`、`~/.codex/config.toml` 以及 `~/.config/opencode/opencode.json` / `.jsonc`
 3. 选择要导入的 Server
+
+你也可以通过 **Import JSON** 粘贴 JSON MCP 配置。Moor 支持导入 stdio 和 HTTP/SSE Server，对于不支持的条目（例如 OpenAPI 配置）会报告但不会保存。
 
 ### 创建 Profile
 
@@ -91,6 +93,10 @@ Profile 让你按场景分组 Server，并控制哪些工具暴露给 Agent：
 ```
 http://127.0.0.1:9223/mcp
 ```
+
+`9223` 是默认的 Sidecar 端口。如果该端口已被占用，Moor 会自动选择下一个可用端口，并在 Dashboard 和 Client Config 页面显示实际端点。
+
+`/mcp` 端点仅限本地回环访问，不需要 `X-Moor-Token`。Moor 仅在 WebView 与 Sidecar 之间的本地管理 API 中使用 `X-Moor-Token`，因此你无需将它粘贴到 Agent 配置中。
 
 Moor 会处理剩下的一切——聚合 `tools/list`、路由 `tools/call`、并根据激活的 Profile 进行过滤。
 
@@ -123,13 +129,14 @@ Moor 会处理剩下的一切——聚合 `tools/list`、路由 `tools/call`、�
 一键导入来自以下客户端的配置：
 
 - **Claude Code**: `~/.claude/settings.json`
-- **Cursor**: `.cursor/mcp.json`
+- **Codex**: `~/.codex/config.toml`
+- **OpenCode**: `~/.config/opencode/opencode.json` / `.jsonc`
 
-也支持手动添加任意 stdio 或 HTTP Server。
+也支持手动输入和粘贴 JSON 批量导入 stdio 与 HTTP/SSE Server。
 
 ### 客户端配置
 
-为 Claude Code、Cursor、Codex 和 OpenCode 生成即拷即用的配置片段。粘贴到客户端即可立即使用 Moor。
+为 Claude Code、Codex 和 OpenCode 生成即拷即用的配置片段。片段仅包含 `/mcp` 端点；Moor 的 `X-Moor-Token` 保留给内部管理 API 使用。
 
 ### 审计日志
 
@@ -292,19 +299,21 @@ vp test
 
 ### 其他
 
-| 方法   | 路径                  | 说明               |
-| ------ | --------------------- | ------------------ |
-| `GET`  | `/api/health`         | 健康检查           |
-| `GET`  | `/api/runtime`        | 运行时信息         |
-| `GET`  | `/api/events`         | SSE 实时事件流     |
-| `POST` | `/api/import/scan`    | 扫描本地客户端配置 |
-| `POST` | `/api/import/execute` | 执行导入           |
+| 方法   | 路径                  | 说明                 |
+| ------ | --------------------- | -------------------- |
+| `GET`  | `/api/health`         | 健康检查             |
+| `GET`  | `/api/runtime`        | 运行时信息           |
+| `GET`  | `/api/events`         | SSE 实时事件流       |
+| `POST` | `/api/import/scan`    | 扫描本地客户端配置   |
+| `POST` | `/api/import/parse`   | 预览粘贴的 JSON 导入 |
+| `POST` | `/api/import/execute` | 执行导入             |
 
 ## 技术栈
 
 | 层级     | 技术                                              |
 | -------- | ------------------------------------------------- |
 | 前端     | React 19, Vite 6, TypeScript 5.7, Tailwind CSS v4 |
+| UI 基础  | Radix UI                                          |
 | UI 组件  | shadcn/ui (New York style)                        |
 | 桌面框架 | Tauri 2 (Rust)                                    |
 | Sidecar  | Node.js, TypeScript, Hono, @hono/node-server      |

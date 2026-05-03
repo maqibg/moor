@@ -313,6 +313,7 @@ vp test
 | Layer         | Technology                                        |
 | ------------- | ------------------------------------------------- |
 | Frontend      | React 19, Vite 6, TypeScript 5.7, Tailwind CSS v4 |
+| UI Primitives | Radix UI                                          |
 | UI Components | shadcn/ui (New York style)                        |
 | Desktop       | Tauri 2 (Rust)                                    |
 | Sidecar       | Node.js, TypeScript, Hono, @hono/node-server      |

@@ -3,6 +3,7 @@ import { chmodSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { getSeaBuildCacheState, writeSeaBuildCache } from "./build-sidecar-cache.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sidecarRoot = path.resolve(__dirname, "..");
@@ -14,6 +15,7 @@ const seaBlobPath = path.join(distDir, "moor-sidecar.blob");
 const seaConfigPath = path.join(distDir, "sea-config.json");
 const tauriBinDir = path.join(repoRoot, "src-tauri", "binaries");
 const bundleOnly = process.argv.includes("--bundle-only");
+const cached = process.argv.includes("--cached");
 const jsoncParserEsmEntry = "jsonc-parser/lib/esm/main.js";
 
 function run(command, args, options = {}) {
@@ -60,6 +62,27 @@ function assertSeaBundleSafe() {
 mkdirSync(distDir, { recursive: true });
 mkdirSync(tauriBinDir, { recursive: true });
 
+const outputBinary = path.join(tauriBinDir, binaryName());
+const seaCachePath = path.join(distDir, "moor-sidecar.sea-cache.json");
+let cacheState = null;
+
+if (cached && !bundleOnly) {
+  cacheState = getSeaBuildCacheState({
+    repoRoot,
+    sidecarRoot,
+    outputBinary,
+    cachePath: seaCachePath,
+    buildScriptPath: fileURLToPath(import.meta.url),
+  });
+
+  if (!cacheState.shouldBuild) {
+    console.log(`Sidecar SEA binary is up to date: ${outputBinary}`);
+    process.exit(0);
+  }
+
+  console.log(`Sidecar SEA cache miss (${cacheState.reason}); rebuilding...`);
+}
+
 await build({
   entryPoints: [path.join(sidecarRoot, "src", "index.ts")],
   outfile: bundlePath,
@@ -102,7 +125,6 @@ writeFileSync(
 
 run(process.execPath, ["--experimental-sea-config", seaConfigPath]);
 
-const outputBinary = path.join(tauriBinDir, binaryName());
 copyFileSync(process.execPath, outputBinary);
 chmodSync(outputBinary, 0o755);
 
@@ -130,6 +152,10 @@ run(postjectBin, postjectArgs);
 
 if (process.platform === "darwin") {
   run("codesign", ["--sign", "-", "--force", outputBinary]);
+}
+
+if (cacheState) {
+  writeSeaBuildCache(seaCachePath, cacheState.fingerprint);
 }
 
 console.log(`Built Tauri sidecar binary at ${outputBinary}`);

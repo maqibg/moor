@@ -2,6 +2,15 @@ import { lazy, Suspense, useCallback, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { ServerCard } from "@/components/shared/ServerCard";
 import { useServers } from "@/hooks/useServers";
 import { useSSE } from "@/hooks/useSSE";
@@ -65,6 +74,11 @@ const JsonImportEditor = lazy(() =>
     default: module.JsonImportEditor,
   })),
 );
+
+const CONNECTION_TYPES = [
+  { value: "stdio", label: "stdio" },
+  { value: "http", label: "HTTP/SSE" },
+] as const;
 
 export function Servers() {
   const {
@@ -288,10 +302,10 @@ export function Servers() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8"
+                className="text-[rgba(38,37,30,0.65)] hover:text-cursor-dark hover:bg-[rgba(38,37,30,0.08)]"
                 onClick={() => setShowJsonImport(false)}
               >
-                <X className="h-4 w-4" />
+                <X className="h-5 w-5" />
               </Button>
             </div>
           </CardHeader>
@@ -373,57 +387,56 @@ export function Servers() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8"
+                className="text-[rgba(38,37,30,0.65)] hover:text-cursor-dark hover:bg-[rgba(38,37,30,0.08)]"
                 onClick={() => setShowAdd(false)}
               >
-                <X className="h-4 w-4" />
+                <X className="h-5 w-5" />
               </Button>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
-                  Name
-                </label>
+              <div className="space-y-1.5">
+                <Label>Name</Label>
                 <Input
                   placeholder="e.g., github"
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                 />
               </div>
-              <div>
-                <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
-                  Type
-                </label>
-                <select
-                  className="flex h-10 w-full rounded-xl border border-[rgba(38,37,30,0.1)] bg-transparent px-3 py-2 font-body text-sm text-cursor-dark focus:border-[rgba(38,37,30,0.2)] focus:outline-none"
+              <div className="space-y-1.5">
+                <Label>Type</Label>
+                <Select
                   value={form.connectionType}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, connectionType: e.target.value as "stdio" | "http" }))
+                  onValueChange={(value) =>
+                    setForm((f) => ({ ...f, connectionType: value as "stdio" | "http" }))
                   }
                 >
-                  <option value="stdio">stdio</option>
-                  <option value="http">HTTP/SSE</option>
-                </select>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CONNECTION_TYPES.map((t) => (
+                      <SelectItem key={t.value} value={t.value}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             {form.connectionType === "stdio" ? (
               <>
-                <div>
-                  <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
-                    Command
-                  </label>
+                <div className="space-y-1.5">
+                  <Label>Command</Label>
                   <Input
                     placeholder="e.g., npx -y @modelcontextprotocol/server-github"
                     value={form.command}
                     onChange={(e) => setForm((f) => ({ ...f, command: e.target.value }))}
                   />
                 </div>
-                <div>
-                  <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
-                    Arguments (space-separated)
-                  </label>
+                <div className="space-y-1.5">
+                  <Label>Arguments (space-separated)</Label>
                   <Input
                     placeholder="e.g., --port 3000"
                     value={form.args}
@@ -433,20 +446,16 @@ export function Servers() {
               </>
             ) : (
               <>
-                <div>
-                  <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
-                    URL
-                  </label>
+                <div className="space-y-1.5">
+                  <Label>URL</Label>
                   <Input
                     placeholder="e.g., http://localhost:3000/mcp"
                     value={form.url}
                     onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
                   />
                 </div>
-                <div>
-                  <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
-                    HTTP Headers (JSON, optional)
-                  </label>
+                <div className="space-y-1.5">
+                  <Label>HTTP Headers (JSON, optional)</Label>
                   <Input
                     placeholder='{"Authorization":"Bearer {env:MCP_TOKEN}"}'
                     value={form.headers}
@@ -455,10 +464,8 @@ export function Servers() {
                 </div>
               </>
             )}
-            <div>
-              <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
-                Environment Variables (JSON, optional)
-              </label>
+            <div className="space-y-1.5">
+              <Label>Environment Variables (JSON, optional)</Label>
               <Input
                 placeholder='{"API_KEY": "..."}'
                 value={form.env}
@@ -484,14 +491,14 @@ export function Servers() {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8"
+                className="text-[rgba(38,37,30,0.65)] hover:text-cursor-dark hover:bg-[rgba(38,37,30,0.08)]"
                 onClick={() => {
                   setScanCandidates([]);
                   setScanStatus(null);
                   setImportPreview(null);
                 }}
               >
-                <X className="h-4 w-4" />
+                <X className="h-5 w-5" />
               </Button>
             </div>
           </CardHeader>
@@ -549,7 +556,7 @@ export function Servers() {
             {scanCandidates.map((server) => (
               <label
                 key={`${server.source}:${server.name}`}
-                className="flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-surface-300/50 transition-colors cursor-pointer border border-transparent hover:border-[rgba(38,37,30,0.06)]"
+                className="flex items-center justify-between py-2.5 px-3 rounded-xl hover:bg-surface-300/50 transition-colors cursor-pointer border border-transparent hover:border-[rgba(38,37,30,0.06)]"
               >
                 <div className="min-w-0">
                   <p className="font-headline text-sm text-cursor-dark">{server.name}</p>
@@ -559,11 +566,9 @@ export function Servers() {
                       : server.url}
                   </p>
                 </div>
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded border-[rgba(38,37,30,0.2)] text-cursor-orange focus:ring-cursor-orange/30"
+                <Checkbox
                   checked={selectedImports.has(server.name)}
-                  onChange={(event) => toggleImport(server.name, event.currentTarget.checked)}
+                  onCheckedChange={(checked) => toggleImport(server.name, checked === true)}
                 />
               </label>
             ))}

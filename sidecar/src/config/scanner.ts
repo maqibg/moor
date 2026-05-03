@@ -73,7 +73,6 @@ function scanOpenCodeConfig(): ParsedImport {
   const results = candidates.map((p) => parseConfigFile(p, "opencode", parseJsonMcpConfig));
   const merged = mergeParsed(...results);
 
-  // Deduplicate servers from .json and .jsonc by name (first occurrence wins)
   const seen = new Set<string>();
   merged.servers = merged.servers.filter((s) => {
     if (seen.has(s.name)) return false;
@@ -84,6 +83,30 @@ function scanOpenCodeConfig(): ParsedImport {
   return merged;
 }
 
+function scanCursorConfig(): ParsedImport {
+  return parseConfigFile(
+    path.join(os.homedir(), ".cursor", "mcp.json"),
+    "cursor",
+    parseJsonMcpConfig,
+  );
+}
+
 export function scanAllConfigs(): ParsedImport {
-  return mergeParsed(scanClaudeCodeConfig(), scanCodexConfig(), scanOpenCodeConfig());
+  return mergeParsed(
+    scanClaudeCodeConfig(),
+    scanCodexConfig(),
+    scanOpenCodeConfig(),
+    scanCursorConfig(),
+  );
+}
+
+export function scanClientConfig(clientId: string): ParsedImport {
+  const scanners: Record<string, () => ParsedImport> = {
+    "claude-code": scanClaudeCodeConfig,
+    codex: scanCodexConfig,
+    opencode: scanOpenCodeConfig,
+    cursor: scanCursorConfig,
+  };
+  const scanner = scanners[clientId];
+  return scanner ? scanner() : EMPTY;
 }

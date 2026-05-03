@@ -139,8 +139,8 @@ export function Profiles() {
                       </Button>
                       <Button
                         variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-[rgba(38,37,30,0.35)] hover:text-error-warm"
+                        size="icon-sm"
+                        className="text-[rgba(38,37,30,0.35)] hover:text-error-warm"
                         onClick={(e) => {
                           e.stopPropagation();
                           deleteProfile(profile.id);
