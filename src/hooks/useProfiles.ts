@@ -1,47 +1,52 @@
 import { useCallback } from "react";
-import { useApi } from "./useApi";
-import { apiPost, apiPut, apiDelete } from "@/lib/api";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { api, apiPost, apiPut, apiDelete } from "@/lib/api";
 
 export function useProfiles() {
-  const {
-    data: profiles,
-    loading,
-    error,
-    refresh,
-    setData,
-  } = useApi<Profile[]>("/api/profiles", []);
+  const queryClient = useQueryClient();
 
-  const createProfile = useCallback(
-    async (name: string) => {
-      const profile = await apiPost<Profile>("/api/profiles", { name });
-      setData((prev) => [...prev, profile]);
-      return profile;
+  const {
+    data: profiles = [],
+    isLoading: loading,
+    error,
+  } = useQuery<Profile[]>({
+    queryKey: ["profiles"],
+    queryFn: () => api<Profile[]>("/api/profiles"),
+  });
+
+  const refresh = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ["profiles"] });
+  }, [queryClient]);
+
+  const createProfile = useMutation({
+    mutationFn: (name: string) => apiPost<Profile>("/api/profiles", { name }),
+    onSuccess: (profile) => {
+      queryClient.setQueryData<Profile[]>(["profiles"], (prev) => [...(prev ?? []), profile]);
     },
-    [setData],
-  );
+  });
 
   const activateProfile = useCallback(
     async (id: string) => {
       await apiPut(`/api/profiles/${id}/activate`, {});
-      refresh();
+      await queryClient.invalidateQueries({ queryKey: ["profiles"] });
+      await queryClient.invalidateQueries({ queryKey: ["servers"] });
     },
-    [refresh],
+    [queryClient],
   );
 
-  const deleteProfile = useCallback(
-    async (id: string) => {
-      await apiDelete(`/api/profiles/${id}`);
-      setData((prev) => prev.filter((p) => p.id !== id));
+  const deleteProfile = useMutation({
+    mutationFn: (id: string) => apiDelete(`/api/profiles/${id}`).then(() => id),
+    onSuccess: (id) => {
+      queryClient.setQueryData<Profile[]>(["profiles"], (prev) => prev?.filter((p) => p.id !== id));
     },
-    [setData],
-  );
+  });
 
   const updateProfile = useCallback(
     async (id: string, updates: { name?: string }) => {
       await apiPut(`/api/profiles/${id}`, updates);
-      refresh();
+      await queryClient.invalidateQueries({ queryKey: ["profiles"] });
     },
-    [refresh],
+    [queryClient],
   );
 
   const updateProfileServer = useCallback(
@@ -58,11 +63,11 @@ export function useProfiles() {
   return {
     profiles,
     loading,
-    error,
+    error: error?.message ?? null,
     refresh,
-    createProfile,
+    createProfile: createProfile.mutateAsync,
     activateProfile,
-    deleteProfile,
+    deleteProfile: deleteProfile.mutateAsync,
     updateProfile,
     updateProfileServer,
   };

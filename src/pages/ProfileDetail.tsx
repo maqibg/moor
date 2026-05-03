@@ -1,3 +1,6 @@
+import { useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -5,7 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Server, FolderOpen } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useProfiles, type Profile } from "@/hooks/useProfiles";
-import { useApi } from "@/hooks/useApi";
 import type { Server as ServerType } from "@/hooks/useServers";
 import { cn } from "@/lib/utils";
 
@@ -21,12 +23,19 @@ interface ProfileDetailData extends Profile {
 export function ProfileDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { updateProfileServer } = useProfiles();
-  const {
-    data: profile,
-    loading,
-    refresh,
-  } = useApi<ProfileDetailData | null>(`/api/profiles/${id ?? ""}`, null);
+
+  const { data: profile, isLoading: loading } = useQuery<ProfileDetailData | null>({
+    queryKey: ["profiles", id],
+    queryFn: () => api<ProfileDetailData | null>(`/api/profiles/${id ?? ""}`),
+    enabled: !!id,
+  });
+
+  const refresh = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: ["profiles", id] }),
+    [queryClient, id],
+  );
 
   if (loading) {
     return (

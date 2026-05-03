@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,7 +7,6 @@ import { useProfiles } from "@/hooks/useProfiles";
 import { useLogs } from "@/hooks/useLogs";
 import { getMcpEndpoint } from "@/lib/api";
 import { StatusBadge } from "@/components/shared/StatusBadge";
-import { useSSE } from "@/hooks/useSSE";
 import { cn } from "@/lib/utils";
 import {
   Server,
@@ -60,28 +59,15 @@ function StatCard({
 
 export function Dashboard() {
   const navigate = useNavigate();
-  const { servers, refresh: refreshServers } = useServers();
+  const { servers } = useServers();
   const { profiles } = useProfiles();
-  const { logs, refresh: refreshLogs } = useLogs();
+  const { logs } = useLogs();
   const [copied, setCopied] = useState(false);
   const [mcpEndpoint, setMcpEndpoint] = useState("http://127.0.0.1:9223/mcp");
 
   useEffect(() => {
     void getMcpEndpoint().then(setMcpEndpoint);
   }, []);
-
-  useSSE(
-    useCallback(
-      (event) => {
-        if (event.type === "server:status" || event.type === "server:tools") refreshServers();
-        if (event.type === "profile:activated") {
-          refreshServers();
-          refreshLogs();
-        }
-      },
-      [refreshServers, refreshLogs],
-    ),
-  );
 
   const running = servers.filter((s) => s.status === "running").length;
   const stopped = servers.filter((s) => s.status === "stopped").length;

@@ -1,7 +1,4 @@
-import { accessSync, constants } from "node:fs";
 import { EventEmitter } from "node:events";
-import os from "node:os";
-import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import {
@@ -10,13 +7,15 @@ import {
 } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { run, queryAll, queryOne, saveDb, transaction } from "../db/index.js";
-import { serializeToolDiscovery } from "../db/serializers.js";
+import { run, queryAll, queryOne, transaction } from "../db/index.js";
+import { parseJsonValue, serializeToolDiscovery } from "../db/serializers.js";
 import {
   buildToolCatalogFromRows,
   type ToolCatalogEntry,
   type ToolCatalogRow,
 } from "../mcp/tool-catalog.js";
+import { buildStdioEnvironment, assertStdioCommandAvailable } from "./stdio-env.js";
+import { resolveHttpHeaders } from "./http-headers.js";
 import { eventBus } from "./event-bus.js";
 
 declare const APP_VERSION: string;
@@ -45,166 +44,8 @@ interface StoredServerConfig {
   working_dir: string | null;
 }
 
-// macOS GUI apps do not inherit interactive shell PATH values, so Moor appends common
-// local CLI install locations before spawning stdio MCP servers.
-const STDIO_PATH_CANDIDATES = [
-  "~/.local/share/mise/shims",
-  "~/.local/bin",
-  "~/Library/pnpm",
-  "~/.cargo/bin",
-  "~/.asdf/shims",
-  "~/.volta/bin",
-  "~/.bun/bin",
-  "/opt/homebrew/bin",
-  "/opt/homebrew/sbin",
-  "/usr/local/bin",
-  "/usr/local/sbin",
-  "/opt/local/bin",
-  "/usr/bin",
-  "/bin",
-  "/usr/sbin",
-  "/sbin",
-];
-
-function parseJson<T>(value: unknown, fallback: T): T {
-  if (typeof value !== "string") return (value as T) ?? fallback;
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function cleanEnv(env?: Record<string, unknown> | null): Record<string, string> {
-  if (!env) return {};
-  return Object.fromEntries(
-    Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
-  );
-}
-
-function splitPathList(value: string | undefined): string[] {
-  return value
-    ? value
-        .split(path.delimiter)
-        .map((entry) => entry.trim())
-        .filter(Boolean)
-    : [];
-}
-
-function uniquePathEntries(entries: string[]): string[] {
-  const seen = new Set<string>();
-  return entries.filter((entry) => {
-    if (seen.has(entry)) return false;
-    seen.add(entry);
-    return true;
-  });
-}
-
-function expandHomePath(value: string, home: string): string {
-  if (value === "~") return home;
-  if (value.startsWith("~/")) return path.join(home, value.slice(2));
-  return value;
-}
-
-function getDefaultStdioPathEntries(home: string): string[] {
-  return STDIO_PATH_CANDIDATES.map((entry) => expandHomePath(entry, home));
-}
-
-export function buildStdioEnvironment(
-  parentEnv: Record<string, unknown> = process.env,
-  serverEnv?: Record<string, unknown> | null,
-): Record<string, string> {
-  const parent = cleanEnv(parentEnv);
-  const server = cleanEnv(serverEnv);
-  const env = { ...parent, ...server };
-  const home = server.HOME ?? parent.HOME ?? os.homedir();
-  env.PATH = uniquePathEntries([
-    ...splitPathList(server.PATH),
-    ...splitPathList(parent.PATH),
-    ...getDefaultStdioPathEntries(home),
-  ]).join(path.delimiter);
-  return env;
-}
-
-function hasPathSeparator(command: string): boolean {
-  return command.includes("/") || command.includes("\\");
-}
-
-function executableNames(command: string, env: Record<string, string>): string[] {
-  if (process.platform !== "win32" || path.extname(command)) return [command];
-  const extensions = splitPathList(
-    env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM".replaceAll(";", path.delimiter),
-  );
-  return [command, ...extensions.map((extension) => `${command}${extension.toLowerCase()}`)];
-}
-
-function canExecute(filePath: string): boolean {
-  try {
-    accessSync(filePath, constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function findExecutableOnPath(command: string, env: Record<string, string>): string | null {
-  if (path.isAbsolute(command)) return canExecute(command) ? command : null;
-  if (hasPathSeparator(command)) return null;
-  for (const dir of splitPathList(env.PATH)) {
-    for (const name of executableNames(command, env)) {
-      const candidate = path.join(dir, name);
-      if (canExecute(candidate)) return candidate;
-    }
-  }
-  return null;
-}
-
-export function assertStdioCommandAvailable(command: string, env: Record<string, string>): void {
-  if (path.isAbsolute(command)) {
-    if (findExecutableOnPath(command, env)) return;
-    throw new Error(
-      `Command "${command}" is not executable while starting this stdio server. ` +
-        `Check that the absolute path exists and has execute permission.`,
-    );
-  }
-  if (hasPathSeparator(command) || findExecutableOnPath(command, env)) return;
-  const searchedPath = env.PATH || "(empty)";
-  throw new Error(
-    `Command "${command}" was not found on PATH while starting this stdio server. ` +
-      `Moor searched PATH: ${searchedPath}. ` +
-      `If Moor was launched from Finder or Dock, shell startup files may not be loaded. ` +
-      `Install "${command}" into one of these directories, use an absolute command path, ` +
-      `or set PATH in this server environment.`,
-  );
-}
-
 function getAppVersion(): string {
   return typeof APP_VERSION === "undefined" ? "0.0.0-dev" : APP_VERSION;
-}
-
-function resolveHeaderValue(value: string): string | null {
-  let missingEnv = false;
-  const resolved = value.replace(/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, name: string) => {
-    const envValue = process.env[name];
-    if (envValue == null) {
-      missingEnv = true;
-      return "";
-    }
-    return envValue;
-  });
-  return missingEnv ? null : resolved;
-}
-
-export function resolveHttpHeaders(
-  headers: Record<string, string> | null,
-): HeadersInit | undefined {
-  if (!headers) return undefined;
-  const resolved = Object.fromEntries(
-    Object.entries(headers)
-      .map(([key, value]) => [key, resolveHeaderValue(value)] as const)
-      .filter((entry): entry is readonly [string, string] => entry[1] != null),
-  );
-  return Object.keys(resolved).length > 0 ? resolved : undefined;
 }
 
 class ServerManager extends EventEmitter {
@@ -231,6 +72,11 @@ class ServerManager extends EventEmitter {
 
   getServer(id: string): ManagedServer | undefined {
     return this.servers.get(id);
+  }
+
+  getActiveProfileId(): string | null {
+    const row = queryOne("SELECT id FROM profiles WHERE is_active = 1", []);
+    return (row?.id as string) ?? null;
   }
 
   listServers(): ManagedServer[] {
@@ -266,7 +112,6 @@ class ServerManager extends EventEmitter {
         now,
       ],
     );
-    saveDb();
 
     const server: ManagedServer = {
       id,
@@ -309,7 +154,6 @@ class ServerManager extends EventEmitter {
     values.push(id);
 
     run(`UPDATE mcp_servers SET ${setClauses.join(", ")} WHERE id = ?`, values);
-    saveDb();
     if (updates.name) server.name = updates.name as string;
     return server;
   }
@@ -319,7 +163,6 @@ class ServerManager extends EventEmitter {
     if (!server) return false;
     if (server.status === "running") await this.stopServer(id);
     run("DELETE FROM mcp_servers WHERE id = ?", [id]);
-    saveDb();
     this.servers.delete(id);
     return true;
   }
@@ -383,9 +226,7 @@ class ServerManager extends EventEmitter {
   }
 
   getToolCatalog(profileId?: string | null): ToolCatalogEntry[] {
-    const activeProfileId =
-      profileId ??
-      (queryOne("SELECT id FROM profiles WHERE is_active = 1", [])?.id as string | undefined);
+    const activeProfileId = profileId ?? this.getActiveProfileId();
     if (!activeProfileId) return [];
 
     const rows = queryAll(
@@ -412,27 +253,27 @@ class ServerManager extends EventEmitter {
           ({
             serverId: row.serverId as string,
             serverName: row.serverName as string,
-            disabledTools: parseJson<string[]>(row.disabledTools, []),
+            disabledTools: parseJsonValue(row.disabledTools, []) as string[],
             toolName: row.toolName as string,
             description: row.description as string | null,
-            inputSchema: parseJson(row.inputSchema, undefined),
+            inputSchema: parseJsonValue(row.inputSchema, undefined),
           }) satisfies ToolCatalogRow,
       ),
     );
   }
 
   getActiveProfileServers() {
-    const activeProfile = queryOne("SELECT id FROM profiles WHERE is_active = 1", []);
-    if (!activeProfile) return [];
+    const activeProfileId = this.getActiveProfileId();
+    if (!activeProfileId) return [];
     return queryAll(
       "SELECT ps.*, ms.name, ms.connection_type, ms.status FROM profile_servers ps JOIN mcp_servers ms ON ps.server_id = ms.id WHERE ps.profile_id = ? AND ps.enabled = 1",
-      [activeProfile.id],
+      [activeProfileId],
     )
       .map((row) => ({
         serverId: row.server_id as string,
         server: this.servers.get(row.server_id as string)!,
         enabled: Boolean(row.enabled),
-        disabledTools: parseJson<string[]>(row.disabled_tools, []),
+        disabledTools: parseJsonValue(row.disabled_tools, []) as string[],
       }))
       .filter((item) => item.server);
   }
@@ -458,7 +299,6 @@ class ServerManager extends EventEmitter {
         );
       }
     });
-    saveDb();
     eventBus.emit("server:tools", { type: "server:tools", data: { serverId, tools } });
   }
 
@@ -478,7 +318,6 @@ class ServerManager extends EventEmitter {
       new Date().toISOString(),
       id,
     ]);
-    saveDb();
     eventBus.emit("server:status", {
       type: "server:status",
       data: { serverId: id, status, errorMessage },
@@ -493,10 +332,10 @@ class ServerManager extends EventEmitter {
       name: row.name as string,
       connection_type: row.connection_type as "stdio" | "http",
       command: row.command as string | null,
-      args: parseJson<string[] | null>(row.args, null),
+      args: parseJsonValue(row.args, null) as string[] | null,
       url: row.url as string | null,
-      env: parseJson<Record<string, string> | null>(row.env, null),
-      headers: parseJson<Record<string, string> | null>(row.headers, null),
+      env: parseJsonValue(row.env, null) as Record<string, string> | null,
+      headers: parseJsonValue(row.headers, null) as Record<string, string> | null,
       working_dir: row.working_dir as string | null,
     };
   }

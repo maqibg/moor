@@ -11,7 +11,7 @@ if (typeof APP_VERSION === "undefined") {
 }
 
 import { createApp } from "./server.js";
-import { initDb, runMigrations, seedDefaultProfile, closeDb, saveDb } from "./db/index.js";
+import { initDb, runMigrations, seedDefaultProfile, closeDb } from "./db/index.js";
 import { serverManager } from "./services/server-manager.js";
 import { initAuditLogger, getAuditLogger } from "./services/audit-logger.js";
 
@@ -64,7 +64,6 @@ function setupGracefulShutdown(portFile: string) {
     console.log(`\nReceived ${signal}, shutting down gracefully...`);
     await serverManager.stopAll();
     await getAuditLogger().drain();
-    saveDb();
     closeDb();
     try {
       fs.unlinkSync(portFile);

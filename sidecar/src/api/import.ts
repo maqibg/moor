@@ -10,7 +10,7 @@ import { generateSnippets } from "../config/snippets.js";
 import { getClientById } from "../config/clients.js";
 import { convertConfig, type ConvertInput } from "../config/converter.js";
 import { serverManager } from "../services/server-manager.js";
-import { queryAll, queryOne, run, saveDb } from "../db/index.js";
+import { queryAll, queryOne, run } from "../db/index.js";
 import type { ScannedServer, UnsupportedServer } from "../config/scanner.js";
 
 const importApi = new Hono();
@@ -154,7 +154,6 @@ importApi.post("/execute", async (c) => {
         );
       }
     }
-    saveDb();
   }
 
   return c.json({ imported, skipped });

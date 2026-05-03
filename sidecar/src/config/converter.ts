@@ -1,4 +1,4 @@
-import { getClientById } from "./clients.js";
+import { getClientById, resolveConfigPaths } from "./clients.js";
 import { scanClientConfig } from "./scanner.js";
 import {
   parseJsonMcpConfig,
@@ -58,7 +58,7 @@ export function convertConfig(input: ConvertInput): ConvertResult {
   return {
     content,
     warnings: [...source.warnings, ...warnings],
-    targetPath: target.configPath,
+    targetPath: resolveConfigPaths(target)[0],
     targetClient: target.id,
   };
 }

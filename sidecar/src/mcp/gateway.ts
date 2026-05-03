@@ -7,7 +7,6 @@ import {
   ListToolsRequestSchema,
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
-import { aggregator } from "./aggregator.js";
 import { serverManager } from "../services/server-manager.js";
 import { getAuditLogger } from "../services/audit-logger.js";
 
@@ -22,8 +21,8 @@ export function createGatewayServer(agentInfo: string | null = null) {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: aggregator.getAggregatedTools().map((tool) => ({
-      name: tool.name,
+    tools: serverManager.getToolCatalog().map((tool) => ({
+      name: tool.exposedName,
       description: tool.description,
       inputSchema: tool.inputSchema ?? { type: "object" },
     })),
@@ -32,8 +31,8 @@ export function createGatewayServer(agentInfo: string | null = null) {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const toolName = request.params.name;
     const toolArgs = request.params.arguments ?? {};
-    const owner = aggregator.findToolOwner(toolName);
-    const profileId = aggregator.getActiveProfileId();
+    const owner = serverManager.findToolOwner(toolName);
+    const profileId = serverManager.getActiveProfileId();
     const startTime = Date.now();
 
     if (!owner) {

@@ -1,4 +1,12 @@
-import type { MCPTool } from "./types.js";
+export interface MCPTool {
+  name: string;
+  description?: string;
+  inputSchema?: {
+    type: "object";
+    properties?: Record<string, unknown>;
+    required?: string[];
+  };
+}
 
 export interface ToolCatalogRow {
   serverId: string;

@@ -1,4 +1,4 @@
-import { run, saveDb } from "../db/index.js";
+import { run } from "../db/index.js";
 import { redactForAudit } from "./audit-redaction.js";
 
 interface LogEntry {
@@ -58,7 +58,6 @@ export class AuditLogger {
           ],
         );
       }
-      saveDb();
     } catch (err) {
       console.error("AuditLogger flush error:", err);
       this.buffer.unshift(...entries);

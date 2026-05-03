@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { run, queryAll, queryOne, saveDb } from "../db/index.js";
+import { run, queryAll, queryOne } from "../db/index.js";
 import { serializeProfile, serializeProfileServer, serializeServer } from "../db/serializers.js";
 import { eventBus } from "../services/event-bus.js";
 
@@ -28,7 +28,6 @@ profiles.post("/", (c) => {
       "INSERT INTO profiles (id, name, is_active, created_at, updated_at) VALUES (?, ?, 0, ?, ?)",
       [id, body.name, now, now],
     );
-    saveDb();
     const row = queryOne("SELECT * FROM profiles WHERE id = ?", [id]);
     return c.json(serializeProfile(row ?? {}), 201);
   });
@@ -88,7 +87,6 @@ profiles.put("/:id", (c) => {
         new Date().toISOString(),
         id,
       ]);
-      saveDb();
     }
     const row = queryOne("SELECT * FROM profiles WHERE id = ?", [id]);
     return c.json(serializeProfile(row ?? {}));
@@ -101,7 +99,6 @@ profiles.delete("/:id", (c) => {
   if (!existing) return c.json({ error: "Profile not found" }, 404);
   if (existing.is_active) return c.json({ error: "Cannot delete active profile" }, 400);
   run("DELETE FROM profiles WHERE id = ?", [id]);
-  saveDb();
   return c.json({ success: true });
 });
 
@@ -114,7 +111,6 @@ profiles.put("/:id/activate", (c) => {
     new Date().toISOString(),
     id,
   ]);
-  saveDb();
   eventBus.emit("profile:activated", { type: "profile:activated", data: { profileId: id } });
   const row = queryOne("SELECT * FROM profiles WHERE id = ?", [id]);
   return c.json(serializeProfile(row ?? {}));
@@ -154,7 +150,6 @@ profiles.put("/:id/servers/:sid", (c) => {
         [profileId, serverId, enabled, disabledTools],
       );
     }
-    saveDb();
     const row = queryOne("SELECT * FROM profile_servers WHERE profile_id = ? AND server_id = ?", [
       profileId,
       serverId,

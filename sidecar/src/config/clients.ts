@@ -6,17 +6,22 @@ export type ClientFormat = "json" | "toml";
 export interface ClientMeta {
   id: string;
   name: string;
-  configPath: string;
+  configPathSegments: string[][];
   format: ClientFormat;
   topLevelKey: string;
   description: string;
+}
+
+export function resolveConfigPaths(client: ClientMeta): string[] {
+  const home = os.homedir();
+  return client.configPathSegments.map((segments) => path.join(home, ...segments));
 }
 
 export const ALL_CLIENTS: readonly ClientMeta[] = [
   {
     id: "claude-code",
     name: "Claude Code",
-    configPath: path.join(os.homedir(), ".claude", "settings.json"),
+    configPathSegments: [[".claude", "settings.json"]],
     format: "json",
     topLevelKey: "mcpServers",
     description: "Add to ~/.claude/settings.json → mcpServers",
@@ -24,7 +29,7 @@ export const ALL_CLIENTS: readonly ClientMeta[] = [
   {
     id: "codex",
     name: "Codex",
-    configPath: path.join(os.homedir(), ".codex", "config.toml"),
+    configPathSegments: [[".codex", "config.toml"]],
     format: "toml",
     topLevelKey: "mcp_servers",
     description: "Add to ~/.codex/config.toml or project .codex/config.toml",
@@ -32,7 +37,10 @@ export const ALL_CLIENTS: readonly ClientMeta[] = [
   {
     id: "opencode",
     name: "OpenCode",
-    configPath: path.join(os.homedir(), ".config", "opencode", "opencode.json"),
+    configPathSegments: [
+      [".config", "opencode", "opencode.json"],
+      [".config", "opencode", "opencode.jsonc"],
+    ],
     format: "json",
     topLevelKey: "mcp",
     description: "Add to ~/.config/opencode/opencode.json or project opencode.json",
@@ -40,7 +48,7 @@ export const ALL_CLIENTS: readonly ClientMeta[] = [
   {
     id: "cursor",
     name: "Cursor",
-    configPath: path.join(os.homedir(), ".cursor", "mcp.json"),
+    configPathSegments: [[".cursor", "mcp.json"]],
     format: "json",
     topLevelKey: "mcpServers",
     description: "Add to ~/.cursor/mcp.json or project .cursor/mcp.json",

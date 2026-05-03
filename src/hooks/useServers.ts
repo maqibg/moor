@@ -1,6 +1,7 @@
 import { useCallback, useState, type Dispatch, type SetStateAction } from "react";
-import { useApi } from "./useApi";
-import { apiPost, apiDelete } from "@/lib/api";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { api, apiPost, apiDelete } from "@/lib/api";
+import { useSSEEvent } from "@/contexts/SSEContext";
 import {
   applyServerAction,
   getServerStatusEventPayload,
@@ -20,7 +21,7 @@ interface RunServerMutationOptions {
   setData: ServerSetter;
   setServerAction: SetServerAction;
   clearServerAction: ClearServerAction;
-  refreshSilently: () => Promise<void>;
+  refreshSilently: () => void;
 }
 
 function getErrorMessage(err: unknown): string {
@@ -87,22 +88,54 @@ function useServerActionState(setData: ServerSetter) {
 }
 
 export function useServers() {
-  const { data: servers, loading, error, refresh, setData } = useApi<Server[]>("/api/servers", []);
+  const queryClient = useQueryClient();
+
+  const {
+    data: servers = [],
+    isLoading: loading,
+    error,
+  } = useQuery<Server[]>({
+    queryKey: ["servers"],
+    queryFn: () => api<Server[]>("/api/servers"),
+  });
+
+  const setData = useCallback(
+    (updater: SetStateAction<Server[]>) => {
+      queryClient.setQueryData<Server[]>(["servers"], (old) => {
+        const prev = old ?? [];
+        return typeof updater === "function" ? updater(prev) : updater;
+      });
+    },
+    [queryClient],
+  );
+
   const { serverActions, setServerAction, clearServerAction, mergeStatusEvent } =
     useServerActionState(setData);
 
-  const refreshSilently = useCallback(async () => {
-    await refresh({ silent: true });
-  }, [refresh]);
+  const refresh = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ["servers"] });
+  }, [queryClient]);
 
-  const addServer = useCallback(
-    async (config: Omit<Server, "id" | "status" | "createdAt" | "updatedAt">) => {
-      const server = await apiPost<Server>("/api/servers", config);
-      setData((prev) => [...prev, server]);
-      return server;
+  const refreshSilently = useCallback(async () => {
+    await queryClient.refetchQueries({ queryKey: ["servers"] });
+  }, [queryClient]);
+
+  const addServer = useMutation({
+    mutationFn: async (config: {
+      name: string;
+      connectionType: "stdio" | "http";
+      command?: string;
+      args?: string[];
+      url?: string;
+      env?: Record<string, string>;
+      headers?: Record<string, string>;
+    }) => {
+      return apiPost<Server>("/api/servers", config);
     },
-    [setData],
-  );
+    onSuccess: (server) => {
+      queryClient.setQueryData<Server[]>(["servers"], (prev) => [...(prev ?? []), server]);
+    },
+  });
 
   const startServer = useCallback(
     async (id: string) => {
@@ -134,27 +167,30 @@ export function useServers() {
     [clearServerAction, refreshSilently, setData, setServerAction],
   );
 
-  const removeServer = useCallback(
-    async (id: string) => {
+  const removeServer = useMutation({
+    mutationFn: async (id: string) => {
       await apiDelete(`/api/servers/${id}`);
-      setData((prev) => prev.filter((s) => s.id !== id));
-      clearServerAction(id);
     },
-    [clearServerAction, setData],
-  );
+    onSuccess: (_data, id) => {
+      queryClient.setQueryData<Server[]>(["servers"], (prev) => prev?.filter((s) => s.id !== id));
+    },
+  });
+
+  useSSEEvent("server:status", (data) => mergeStatusEvent(data));
+  useSSEEvent("server:tools", () => void refreshSilently());
 
   return {
     servers,
     loading,
-    error,
+    error: error?.message ?? null,
     refresh,
     refreshSilently,
     serverActions,
     mergeStatusEvent,
-    addServer,
+    addServer: addServer.mutateAsync,
     startServer,
     stopServer,
-    removeServer,
+    removeServer: removeServer.mutateAsync,
   };
 }
 

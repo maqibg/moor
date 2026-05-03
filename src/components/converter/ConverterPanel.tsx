@@ -1,4 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs } from "@/components/ui/tabs";
@@ -13,7 +15,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { CodeBlock } from "@/components/shared/CodeBlock";
-import { useApi } from "@/hooks/useApi";
 import { apiPost } from "@/lib/api";
 import { ArrowRight, AlertTriangle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -44,7 +45,7 @@ interface ConvertResult {
   targetClient: string;
 }
 
-interface Server {
+interface ConverterServer {
   id: string;
   name: string;
   connection_type: "stdio" | "http";
@@ -66,7 +67,10 @@ export function ConverterPanel() {
   const [error, setError] = useState<string | null>(null);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const { data: servers } = useApi<Server[]>("/api/servers", []);
+  const { data: servers = [] } = useQuery<ConverterServer[]>({
+    queryKey: ["servers"],
+    queryFn: () => api<ConverterServer[]>("/api/servers"),
+  });
 
   const [scanClient, setScanClient] = useState<ClientId>("claude-code");
   const [pasteClient, setPasteClient] = useState<ClientId>("claude-code");

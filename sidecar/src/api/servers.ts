@@ -1,13 +1,9 @@
 import { Hono } from "hono";
 import { serverManager } from "../services/server-manager.js";
-import { queryAll, queryOne, run, saveDb } from "../db/index.js";
+import { queryAll, queryOne, run } from "../db/index.js";
 import { serializeServer, serializeToolDiscovery } from "../db/serializers.js";
 
 const servers = new Hono();
-
-function getActiveProfileId(): string | undefined {
-  return queryOne("SELECT id FROM profiles WHERE is_active = 1", [])?.id as string | undefined;
-}
 
 servers.get("/", (c) => {
   const rows = queryAll(
@@ -56,13 +52,12 @@ servers.post("/", async (c) => {
     headers: body.headers,
     workingDir: body.workingDir,
   });
-  const activeProfileId = getActiveProfileId();
+  const activeProfileId = serverManager.getActiveProfileId();
   if (activeProfileId) {
     run(
       "INSERT OR IGNORE INTO profile_servers (profile_id, server_id, enabled, disabled_tools) VALUES (?, ?, 1, '[]')",
       [activeProfileId, server.id],
     );
-    saveDb();
   }
   const row = queryOne("SELECT * FROM mcp_servers WHERE id = ?", [server.id]);
   return c.json(serializeServer({ ...row, ...server }), 201);
@@ -104,7 +99,7 @@ servers.post("/:id/stop", async (c) => {
 });
 
 servers.get("/:id/tools", (c) => {
-  const profileId = c.req.query("profile_id") ?? getActiveProfileId();
+  const profileId = c.req.query("profile_id") ?? serverManager.getActiveProfileId() ?? undefined;
   const catalog = profileId
     ? serverManager.getToolCatalog(profileId)
     : serverManager.getToolCatalog();

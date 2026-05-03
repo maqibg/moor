@@ -15,9 +15,9 @@ import {
   assertStdioCommandAvailable,
   buildStdioEnvironment,
   findExecutableOnPath,
-  resolveHttpHeaders,
-  serverManager,
-} from "./server-manager.js";
+} from "./stdio-env.js";
+import { resolveHttpHeaders } from "./http-headers.js";
+import { serverManager } from "./server-manager.js";
 
 const fixturePath = path.join(process.cwd(), "src/test/fixtures/stdio-echo-server.mjs");
 let dataDir: string;

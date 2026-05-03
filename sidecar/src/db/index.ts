@@ -195,10 +195,6 @@ export function queryOne(sql: string, params: unknown[] = []): Record<string, un
   return row ? (row as Record<string, unknown>) : null;
 }
 
-export function saveDb() {
-  // node:sqlite writes directly to the database file; retained for existing callers.
-}
-
 export function closeDb() {
   if (sqlDb) {
     sqlDb.close();

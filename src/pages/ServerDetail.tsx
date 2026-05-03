@@ -1,5 +1,6 @@
-import { useApi } from "@/hooks/useApi";
-import { useServers } from "@/hooks/useServers";
+import { useState, useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +9,7 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Play, Square, RefreshCw, Copy, Check, Terminal } from "lucide-react";
 import { useProfiles } from "@/hooks/useProfiles";
-import { useState } from "react";
+import { useServers } from "@/hooks/useServers";
 import { cn } from "@/lib/utils";
 
 interface ServerDetailData {
@@ -36,16 +37,36 @@ interface ToolDetail {
 export function ServerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { startServer, stopServer } = useServers();
   const { profiles, updateProfileServer } = useProfiles();
   const activeProfile = profiles.find((profile) => profile.is_active);
-  const {
-    data: server,
-    loading,
-    refresh,
-  } = useApi<ServerDetailData>(`/api/servers/${id}`, {} as ServerDetailData);
-  const toolsPath = `/api/servers/${id}/tools${activeProfile ? `?profile_id=${activeProfile.id}` : ""}`;
-  const { data: tools, refresh: refreshTools } = useApi<ToolDetail[]>(toolsPath, []);
+
+  const { data: server, isLoading: loading } = useQuery<ServerDetailData>({
+    queryKey: ["servers", id],
+    queryFn: () => api<ServerDetailData>(`/api/servers/${id}`),
+    enabled: !!id,
+  });
+
+  const { data: tools = [] } = useQuery<ToolDetail[]>({
+    queryKey: ["servers", id, "tools", activeProfile?.id],
+    queryFn: () =>
+      api<ToolDetail[]>(
+        `/api/servers/${id}/tools${activeProfile ? `?profile_id=${activeProfile.id}` : ""}`,
+      ),
+    enabled: !!id,
+  });
+
+  const refresh = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: ["servers", id] }),
+    [queryClient, id],
+  );
+
+  const refreshTools = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: ["servers", id, "tools"] }),
+    [queryClient, id],
+  );
+
   const [copied, setCopied] = useState(false);
 
   if (loading || !server?.id) {

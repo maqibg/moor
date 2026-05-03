@@ -1,7 +1,6 @@
 import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
 import { parseCodexTomlConfig, parseJsonMcpConfig, type ParsedImport } from "./import-parser.js";
+import { ALL_CLIENTS, resolveConfigPaths } from "./clients.js";
 
 export type { ScannedServer, UnsupportedServer } from "./import-parser.js";
 
@@ -19,10 +18,11 @@ function readFileIfExists(configPath: string): string | null {
 function parseConfigFile(
   configPath: string,
   source: string,
-  parser: (content: string, source: string) => ParsedImport,
+  format: "json" | "toml",
 ): ParsedImport {
   const content = readFileIfExists(configPath);
   if (!content) return EMPTY;
+  const parser = format === "toml" ? parseCodexTomlConfig : parseJsonMcpConfig;
   return ignoreMissingMcpSections(parser(content, source), source);
 }
 
@@ -49,64 +49,28 @@ function mergeParsed(...results: ParsedImport[]): ParsedImport {
   };
 }
 
-function scanClaudeCodeConfig(): ParsedImport {
-  return parseConfigFile(
-    path.join(os.homedir(), ".claude", "settings.json"),
-    "claude-code",
-    parseJsonMcpConfig,
-  );
-}
-
-function scanCodexConfig(): ParsedImport {
-  return parseConfigFile(
-    path.join(os.homedir(), ".codex", "config.toml"),
-    "codex",
-    parseCodexTomlConfig,
-  );
-}
-
-function scanOpenCodeConfig(): ParsedImport {
-  const candidates = [
-    path.join(os.homedir(), ".config", "opencode", "opencode.json"),
-    path.join(os.homedir(), ".config", "opencode", "opencode.jsonc"),
-  ];
-  const results = candidates.map((p) => parseConfigFile(p, "opencode", parseJsonMcpConfig));
+function scanClient(client: (typeof ALL_CLIENTS)[number]): ParsedImport {
+  const paths = resolveConfigPaths(client);
+  const results = paths.map((p) => parseConfigFile(p, client.id, client.format));
   const merged = mergeParsed(...results);
 
-  const seen = new Set<string>();
-  merged.servers = merged.servers.filter((s) => {
-    if (seen.has(s.name)) return false;
-    seen.add(s.name);
-    return true;
-  });
+  if (paths.length > 1) {
+    const seen = new Set<string>();
+    merged.servers = merged.servers.filter((s) => {
+      if (seen.has(s.name)) return false;
+      seen.add(s.name);
+      return true;
+    });
+  }
 
   return merged;
 }
 
-function scanCursorConfig(): ParsedImport {
-  return parseConfigFile(
-    path.join(os.homedir(), ".cursor", "mcp.json"),
-    "cursor",
-    parseJsonMcpConfig,
-  );
-}
-
 export function scanAllConfigs(): ParsedImport {
-  return mergeParsed(
-    scanClaudeCodeConfig(),
-    scanCodexConfig(),
-    scanOpenCodeConfig(),
-    scanCursorConfig(),
-  );
+  return mergeParsed(...ALL_CLIENTS.map(scanClient));
 }
 
 export function scanClientConfig(clientId: string): ParsedImport {
-  const scanners: Record<string, () => ParsedImport> = {
-    "claude-code": scanClaudeCodeConfig,
-    codex: scanCodexConfig,
-    opencode: scanOpenCodeConfig,
-    cursor: scanCursorConfig,
-  };
-  const scanner = scanners[clientId];
-  return scanner ? scanner() : EMPTY;
+  const client = ALL_CLIENTS.find((c) => c.id === clientId);
+  return client ? scanClient(client) : EMPTY;
 }

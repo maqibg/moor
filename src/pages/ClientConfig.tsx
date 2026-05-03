@@ -1,8 +1,9 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs } from "@/components/ui/tabs";
 import { CodeBlock } from "@/components/shared/CodeBlock";
-import { useApi } from "@/hooks/useApi";
 import { Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ConverterPanel } from "@/components/converter/ConverterPanel";
@@ -48,7 +49,10 @@ const FALLBACK_SNIPPETS: ClientSnippet[] = [
 
 export function ClientConfig() {
   const [activeTab, setActiveTab] = useState("snippets");
-  const { data: snippets } = useApi<ClientSnippet[]>("/api/import/snippets", []);
+  const { data: snippets } = useQuery<ClientSnippet[]>({
+    queryKey: ["snippets"],
+    queryFn: () => api<ClientSnippet[]>("/api/import/snippets"),
+  });
 
   const displaySnippets = !snippets || snippets.length === 0 ? FALLBACK_SNIPPETS : snippets;
 
