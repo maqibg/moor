@@ -22,6 +22,7 @@ interface ServerDetailData {
   env: Record<string, string> | null;
   headers: Record<string, string> | null;
   working_dir: string | null;
+  auto_start: boolean;
   status: string;
   error_message: string | null;
 }
@@ -38,7 +39,7 @@ export function ServerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { startServer, stopServer } = useServers();
+  const { startServer, stopServer, updateServer } = useServers();
   const { profiles, updateProfileServer } = useProfiles();
   const activeProfile = profiles.find((profile) => profile.is_active);
 
@@ -101,6 +102,15 @@ export function ServerDetail() {
     }
     await updateProfileServer(activeProfile.id, id, { disabledTools: Array.from(disabledTools) });
     refreshTools();
+  };
+
+  const toggleAutoStart = async (value: boolean) => {
+    if (!id) return;
+    try {
+      await updateServer({ id, updates: { autoStart: value } });
+    } catch {
+      // 请求失败时 refresh 会还原 Switch 状态
+    }
   };
 
   const commandText =
@@ -216,8 +226,20 @@ export function ServerDetail() {
                 {server.connection_type}
               </Badge>
             </div>
-            {server.working_dir && (
+            <div className="flex items-center justify-between">
               <div>
+                <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
+                  Auto Start
+                </label>
+                <p className="text-[11px] text-[rgba(38,37,30,0.4)]">Moor 启动时自动启动</p>
+              </div>
+              <Switch
+                checked={server.auto_start}
+                onCheckedChange={(v) => void toggleAutoStart(v)}
+              />
+            </div>
+            {server.working_dir && (
+              <div className="col-span-2">
                 <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
                   Working Directory
                 </label>

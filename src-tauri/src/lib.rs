@@ -92,6 +92,25 @@ impl SidecarState {
         self.inner.shutting_down.store(true, Ordering::SeqCst);
         if let Ok(mut guard) = self.inner.child.lock() {
             if let Some(child) = guard.take() {
+                #[cfg(unix)]
+                {
+                    let pid = child.pid();
+                    let _ = std::process::Command::new("kill")
+                        .args(["-s", "TERM", &pid.to_string()])
+                        .status();
+                    let start = std::time::Instant::now();
+                    while start.elapsed() < Duration::from_secs(3) {
+                        let still_alive = std::process::Command::new("kill")
+                            .args(["-0", &pid.to_string()])
+                            .status()
+                            .map(|s| s.success())
+                            .unwrap_or(false);
+                        if !still_alive {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(200));
+                    }
+                }
                 let _ = child.kill();
             }
         }

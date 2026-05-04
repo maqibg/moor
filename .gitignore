@@ -68,3 +68,4 @@ src-tauri/binaries/*
 sidecar/dist/
 sidecar/node_modules/
 ~/.moor/
+.gitnexus

@@ -1,6 +1,6 @@
 import { useCallback, useState, type Dispatch, type SetStateAction } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, apiPost, apiDelete } from "@/lib/api";
+import { api, apiPost, apiPut, apiDelete } from "@/lib/api";
 import { useSSEEvent } from "@/contexts/SSEContext";
 import {
   applyServerAction,
@@ -129,6 +129,7 @@ export function useServers() {
       url?: string;
       env?: Record<string, string>;
       headers?: Record<string, string>;
+      autoStart?: boolean;
     }) => {
       return apiPost<Server>("/api/servers", config);
     },
@@ -167,6 +168,18 @@ export function useServers() {
     [clearServerAction, refreshSilently, setData, setServerAction],
   );
 
+  const updateServer = useMutation({
+    mutationFn: async ({ id, updates }: { id: string; updates: Record<string, unknown> }) => {
+      return apiPut<Server>(`/api/servers/${id}`, updates);
+    },
+    onSuccess: (updated, { id }) => {
+      queryClient.setQueryData<Server[]>(["servers"], (prev) =>
+        prev?.map((s) => (s.id === id ? { ...s, ...updated } : s)),
+      );
+      queryClient.invalidateQueries({ queryKey: ["servers", id] });
+    },
+  });
+
   const removeServer = useMutation({
     mutationFn: async (id: string) => {
       await apiDelete(`/api/servers/${id}`);
@@ -188,6 +201,7 @@ export function useServers() {
     serverActions,
     mergeStatusEvent,
     addServer: addServer.mutateAsync,
+    updateServer: updateServer.mutateAsync,
     startServer,
     stopServer,
     removeServer: removeServer.mutateAsync,
@@ -204,6 +218,7 @@ export interface Server {
   env?: Record<string, string> | null;
   headers?: Record<string, string> | null;
   working_dir?: string | null;
+  auto_start?: boolean;
   status: ServerStatus;
   error_message?: string | null;
   created_at: string;

@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { AlertTriangle, X } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 
 const CONNECTION_TYPES = [
   { value: "stdio", label: "stdio" },
@@ -26,6 +27,7 @@ interface AddServerFormProps {
     url?: string;
     env?: Record<string, string>;
     headers?: Record<string, string>;
+    autoStart?: boolean;
   }) => Promise<void>;
   onClose: () => void;
 }
@@ -39,6 +41,7 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
     url: "",
     env: "",
     headers: "",
+    autoStart: false,
   });
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -78,6 +81,7 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
         url: form.connectionType === "http" ? form.url : undefined,
         env,
         headers,
+        autoStart: form.autoStart,
       });
       onClose();
     } catch (err) {
@@ -172,6 +176,16 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
             </div>
           </>
         )}
+        <div className="flex items-center justify-between py-2">
+          <div className="space-y-0.5">
+            <Label>Auto Start</Label>
+            <p className="text-[11px] text-[rgba(38,37,30,0.4)]">自动在 Moor 启动时启动此服务器</p>
+          </div>
+          <Switch
+            checked={form.autoStart}
+            onCheckedChange={(v) => setForm((f) => ({ ...f, autoStart: v }))}
+          />
+        </div>
         <div className="space-y-1.5">
           <Label>Environment Variables (JSON, optional)</Label>
           <Input

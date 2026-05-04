@@ -93,6 +93,7 @@ export function runMigrations() {
       env TEXT,
       headers TEXT,
       working_dir TEXT,
+      auto_start INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'stopped' CHECK(status IN ('stopped', 'starting', 'running', 'error')),
       error_message TEXT,
       created_at TEXT NOT NULL,
@@ -139,6 +140,7 @@ export function runMigrations() {
 
   ensureColumn("tool_discoveries", "exposed_name", "TEXT");
   ensureColumn("mcp_servers", "headers", "TEXT");
+  ensureColumn("mcp_servers", "auto_start", "INTEGER NOT NULL DEFAULT 0");
 }
 
 function ensureColumn(table: string, column: string, definition: string) {

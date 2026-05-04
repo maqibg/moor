@@ -1,7 +1,16 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "./StatusBadge";
-import { AlertTriangle, Loader2, Play, Settings, Square, Terminal, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Loader2,
+  Play,
+  Settings,
+  Square,
+  Terminal,
+  Trash2,
+  Zap,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import type { Server } from "@/hooks/useServers";
 import type { ServerAction } from "@/hooks/useServersState";
@@ -53,6 +62,11 @@ function ServerIdentity({
         <span className="font-headline text-sm font-medium text-cursor-dark truncate">
           {server.name}
         </span>
+        {server.auto_start && (
+          <span title="Auto Start" className="inline-flex shrink-0">
+            <Zap className="h-3 w-3 text-gold" />
+          </span>
+        )}
         <StatusBadge status={displayStatus} />
       </div>
       {commandPreview && (

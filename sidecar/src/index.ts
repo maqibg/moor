@@ -101,6 +101,8 @@ async function main() {
     console.log(`MOOR_READY ${JSON.stringify({ port: info.port, baseUrl })}`);
     console.log(`MCP endpoint: ${baseUrl}/mcp`);
     console.log(`Health check: ${baseUrl}/api/health`);
+
+    void serverManager.startAutoStartServers();
   });
 }
 

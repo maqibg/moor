@@ -29,6 +29,7 @@ servers.post("/", async (c) => {
     env?: Record<string, string>;
     headers?: Record<string, string>;
     workingDir?: string;
+    autoStart?: boolean;
   }>();
   if (!body.name || !body.connectionType) {
     return c.json({ error: "name and connectionType are required" }, 400);
@@ -51,6 +52,7 @@ servers.post("/", async (c) => {
     env: body.env,
     headers: body.headers,
     workingDir: body.workingDir,
+    autoStart: body.autoStart,
   });
   const activeProfileId = serverManager.getActiveProfileId();
   if (activeProfileId) {

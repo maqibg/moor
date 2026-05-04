@@ -1,4 +1,3 @@
-import { EventEmitter } from "node:events";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import {
@@ -25,12 +24,15 @@ export interface ManagedServer {
   name: string;
   connectionType: "stdio" | "http";
   status: "stopped" | "starting" | "running" | "error";
+  autoStart: boolean;
 }
 
 interface ServerSession {
   client: Client;
   transport: Transport;
 }
+
+export type SessionFactory = (config: StoredServerConfig) => Promise<ServerSession>;
 
 interface StoredServerConfig {
   id: string;
@@ -42,32 +44,46 @@ interface StoredServerConfig {
   env: Record<string, string> | null;
   headers: Record<string, string> | null;
   working_dir: string | null;
+  auto_start: boolean;
 }
 
 function getAppVersion(): string {
   return typeof APP_VERSION === "undefined" ? "0.0.0-dev" : APP_VERSION;
 }
 
-class ServerManager extends EventEmitter {
+export class ServerManager {
   private servers: Map<string, ManagedServer> = new Map();
   private sessions: Map<string, ServerSession> = new Map();
+  private startPromises: Map<string, Promise<void>> = new Map();
+  private sessionFactory: SessionFactory;
+
+  constructor(sessionFactory?: SessionFactory) {
+    this.sessionFactory = sessionFactory ?? defaultSessionFactory;
+  }
 
   loadFromDb() {
     this.servers.clear();
-    const rows = queryAll("SELECT * FROM mcp_servers", []);
-    for (const row of rows) {
-      this.servers.set(row.id as string, {
-        id: row.id as string,
-        name: row.name as string,
-        connectionType: row.connection_type as "stdio" | "http",
-        status: row.status as ManagedServer["status"],
-      });
-    }
+    transaction(() => {
+      run(
+        "UPDATE mcp_servers SET status = 'stopped', error_message = NULL WHERE status IN ('running', 'starting')",
+      );
+      const rows = queryAll("SELECT * FROM mcp_servers", []);
+      for (const row of rows) {
+        this.servers.set(row.id as string, {
+          id: row.id as string,
+          name: row.name as string,
+          connectionType: row.connection_type as "stdio" | "http",
+          status: row.status as ManagedServer["status"],
+          autoStart: Boolean(row.auto_start),
+        });
+      }
+    });
   }
 
   resetForTest() {
     this.servers.clear();
     this.sessions.clear();
+    this.startPromises.clear();
   }
 
   getServer(id: string): ManagedServer | undefined {
@@ -92,12 +108,13 @@ class ServerManager extends EventEmitter {
     env?: Record<string, string>;
     headers?: Record<string, string>;
     workingDir?: string;
+    autoStart?: boolean;
   }): ManagedServer {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     run(
-      `INSERT INTO mcp_servers (id, name, connection_type, command, args, url, env, headers, working_dir, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'stopped', ?, ?)`,
+      `INSERT INTO mcp_servers (id, name, connection_type, command, args, url, env, headers, working_dir, auto_start, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'stopped', ?, ?)`,
       [
         id,
         config.name,
@@ -108,6 +125,7 @@ class ServerManager extends EventEmitter {
         config.env ? JSON.stringify(config.env) : null,
         config.headers ? JSON.stringify(config.headers) : null,
         config.workingDir ?? null,
+        config.autoStart ? 1 : 0,
         now,
         now,
       ],
@@ -118,6 +136,7 @@ class ServerManager extends EventEmitter {
       name: config.name,
       connectionType: config.connectionType,
       status: "stopped",
+      autoStart: config.autoStart ?? false,
     };
     this.servers.set(id, server);
     return server;
@@ -136,6 +155,7 @@ class ServerManager extends EventEmitter {
       headers: "headers",
       workingDir: "working_dir",
       working_dir: "working_dir",
+      autoStart: "auto_start",
     };
     const setClauses: string[] = [];
     const values: unknown[] = [];
@@ -144,7 +164,13 @@ class ServerManager extends EventEmitter {
       if (field in updates) {
         setClauses.push(`${col} = ?`);
         const val = updates[field];
-        values.push(typeof val === "object" && val !== null ? JSON.stringify(val) : val);
+        if (field === "autoStart") {
+          values.push(val ? 1 : 0);
+        } else if (typeof val === "object" && val !== null) {
+          values.push(JSON.stringify(val));
+        } else {
+          values.push(val);
+        }
       }
     }
 
@@ -155,6 +181,7 @@ class ServerManager extends EventEmitter {
 
     run(`UPDATE mcp_servers SET ${setClauses.join(", ")} WHERE id = ?`, values);
     if (updates.name) server.name = updates.name as string;
+    if ("autoStart" in updates) server.autoStart = Boolean(updates.autoStart);
     return server;
   }
 
@@ -171,11 +198,23 @@ class ServerManager extends EventEmitter {
     const server = this.servers.get(id);
     if (!server) throw new Error(`Server ${id} not found`);
     if (server.status === "running") return;
+    const existingStart = this.startPromises.get(id);
+    if (existingStart) return existingStart;
 
+    const startPromise = this.startServerSession(id);
+    this.startPromises.set(id, startPromise);
+    try {
+      await startPromise;
+    } finally {
+      this.startPromises.delete(id);
+    }
+  }
+
+  private async startServerSession(id: string): Promise<void> {
     this.setServerStatus(id, "starting");
     try {
       const config = this.getStoredServerConfig(id);
-      const session = await this.createSession(config);
+      const session = await this.sessionFactory(config);
       this.sessions.set(id, session);
 
       const toolsResult = await session.client.listTools();
@@ -207,6 +246,17 @@ class ServerManager extends EventEmitter {
 
   async stopAll() {
     await Promise.all(Array.from(this.servers.keys()).map((id) => this.stopServer(id)));
+  }
+
+  autoStartEligibleServers(): ManagedServer[] {
+    return this.getActiveProfileServers()
+      .filter((ps) => ps.server.autoStart)
+      .map((ps) => ps.server);
+  }
+
+  async startAutoStartServers(): Promise<void> {
+    const servers = this.autoStartEligibleServers();
+    await Promise.allSettled(servers.map((server) => this.startServer(server.id)));
   }
 
   async callToolByExposedName(exposedName: string, args: unknown): Promise<unknown> {
@@ -337,47 +387,48 @@ class ServerManager extends EventEmitter {
       env: parseJsonValue(row.env, null) as Record<string, string> | null,
       headers: parseJsonValue(row.headers, null) as Record<string, string> | null,
       working_dir: row.working_dir as string | null,
+      auto_start: Boolean(row.auto_start),
     };
   }
+}
 
-  private async createSession(config: StoredServerConfig): Promise<ServerSession> {
-    const version = getAppVersion();
-    const client = new Client({ name: `moor-${config.name}`, version }, { capabilities: {} });
-    const transport = await this.createTransport(config);
-    await client.connect(transport);
-    return { client, transport };
+async function createTransport(config: StoredServerConfig): Promise<Transport> {
+  if (config.connection_type === "stdio") {
+    if (!config.command) throw new Error("stdio server requires command");
+    const env = buildStdioEnvironment({ ...getDefaultEnvironment(), ...process.env }, config.env);
+    assertStdioCommandAvailable(config.command, env);
+    return new StdioClientTransport({
+      command: config.command,
+      args: config.args ?? [],
+      cwd: config.working_dir ?? undefined,
+      env,
+      stderr: "pipe",
+    });
   }
 
-  private async createTransport(config: StoredServerConfig): Promise<Transport> {
-    if (config.connection_type === "stdio") {
-      if (!config.command) throw new Error("stdio server requires command");
-      const env = buildStdioEnvironment({ ...getDefaultEnvironment(), ...process.env }, config.env);
-      assertStdioCommandAvailable(config.command, env);
-      return new StdioClientTransport({
-        command: config.command,
-        args: config.args ?? [],
-        cwd: config.working_dir ?? undefined,
-        env,
-        stderr: "pipe",
-      });
-    }
-
-    if (!config.url) throw new Error("http server requires url");
-    const url = new URL(config.url);
-    const requestInit = { headers: resolveHttpHeaders(config.headers) };
-    try {
-      const transport = new StreamableHTTPClientTransport(url, { requestInit });
-      const probe = new Client(
-        { name: `moor-probe-${config.name}`, version: getAppVersion() },
-        { capabilities: {} },
-      );
-      await probe.connect(transport);
-      await probe.close();
-      return new StreamableHTTPClientTransport(url, { requestInit });
-    } catch {
-      return new SSEClientTransport(url, { requestInit });
-    }
+  if (!config.url) throw new Error("http server requires url");
+  const url = new URL(config.url);
+  const requestInit = { headers: resolveHttpHeaders(config.headers) };
+  try {
+    const transport = new StreamableHTTPClientTransport(url, { requestInit });
+    const probe = new Client(
+      { name: `moor-probe-${config.name}`, version: getAppVersion() },
+      { capabilities: {} },
+    );
+    await probe.connect(transport);
+    await probe.close();
+    return new StreamableHTTPClientTransport(url, { requestInit });
+  } catch {
+    return new SSEClientTransport(url, { requestInit });
   }
+}
+
+async function defaultSessionFactory(config: StoredServerConfig): Promise<ServerSession> {
+  const version = getAppVersion();
+  const client = new Client({ name: `moor-${config.name}`, version }, { capabilities: {} });
+  const transport = await createTransport(config);
+  await client.connect(transport);
+  return { client, transport };
 }
 
 export const serverManager = new ServerManager();

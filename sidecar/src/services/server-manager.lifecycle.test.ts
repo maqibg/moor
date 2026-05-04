@@ -18,12 +18,65 @@ import {
   findExecutableOnPath,
 } from "./stdio-env.js";
 import { resolveHttpHeaders } from "./http-headers.js";
-import { serverManager } from "./server-manager.js";
+import { type ManagedServer, ServerManager, serverManager } from "./server-manager.js";
 
 const fixturePath = fileURLToPath(
   new URL("../test/fixtures/stdio-echo-server.mjs", import.meta.url),
 );
 let dataDir: string;
+
+interface TestManager {
+  addServer: typeof serverManager.addServer;
+  getServer: typeof serverManager.getServer;
+  loadFromDb: typeof serverManager.loadFromDb;
+  startAutoStartServers: typeof serverManager.startAutoStartServers;
+  startServer: typeof serverManager.startServer;
+  stopAll: typeof serverManager.stopAll;
+}
+
+type TestSessionFactory = NonNullable<ConstructorParameters<typeof ServerManager>[0]>;
+type TestServerSession = Awaited<ReturnType<TestSessionFactory>>;
+
+function createFakeSession(): TestServerSession {
+  return {
+    client: {
+      listTools: async () => ({ tools: [] }),
+      close: async () => undefined,
+    },
+    transport: {},
+  } as unknown as TestServerSession;
+}
+
+function createTestManager(sessionFactory: TestSessionFactory): TestManager {
+  const manager = new ServerManager(sessionFactory);
+  manager.loadFromDb();
+  return manager;
+}
+
+function addServerToActiveProfile(server: ManagedServer) {
+  const profile = queryOne("SELECT id FROM profiles WHERE is_active = 1", []);
+  run(
+    "INSERT INTO profile_servers (profile_id, server_id, enabled, disabled_tools) VALUES (?, ?, 1, '[]')",
+    [profile?.id, server.id],
+  );
+}
+
+function addAutoStartServer(manager: TestManager, name: string): ManagedServer {
+  const server = manager.addServer({
+    name,
+    connectionType: "stdio",
+    command: process.execPath,
+    autoStart: true,
+  });
+  addServerToActiveProfile(server);
+  return server;
+}
+
+function setAutoStartOrder(manager: TestManager, servers: ManagedServer[]) {
+  (
+    manager as unknown as { autoStartEligibleServers: () => ManagedServer[] }
+  ).autoStartEligibleServers = () => servers;
+}
 
 describe("ServerManager MCP lifecycle", () => {
   beforeEach(async () => {
@@ -49,11 +102,7 @@ describe("ServerManager MCP lifecycle", () => {
       command: process.execPath,
       args: [fixturePath],
     });
-    const profile = queryOne("SELECT id FROM profiles WHERE is_active = 1", []);
-    run(
-      "INSERT INTO profile_servers (profile_id, server_id, enabled, disabled_tools) VALUES (?, ?, 1, '[]')",
-      [profile?.id, managed.id],
-    );
+    addServerToActiveProfile(managed);
 
     await serverManager.startServer(managed.id);
 
@@ -65,6 +114,78 @@ describe("ServerManager MCP lifecycle", () => {
     ).resolves.toMatchObject({
       content: [{ type: "text", text: "hello" }],
     });
+  });
+
+  it("reuses the in-flight start when a server is already starting", async () => {
+    let releaseStart: () => void = () => undefined;
+    const pendingStart = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    const startCalls: string[] = [];
+    const manager = createTestManager(async (config) => {
+      startCalls.push(config.name);
+      await pendingStart;
+      return createFakeSession();
+    });
+    const managed = addAutoStartServer(manager, "Slow Fixture");
+
+    const firstStart = manager.startServer(managed.id);
+    expect(startCalls).toEqual(["Slow Fixture"]);
+    expect(manager.getServer(managed.id)?.status).toBe("starting");
+
+    const secondStart = manager.startServer(managed.id);
+    expect(startCalls).toEqual(["Slow Fixture"]);
+
+    releaseStart();
+    await Promise.all([firstStart, secondStart]);
+    expect(startCalls).toEqual(["Slow Fixture"]);
+  });
+
+  it("starts auto-start servers concurrently so a pending server does not block later servers", async () => {
+    let releaseSlowStart: () => void = () => undefined;
+    const pendingSlowStart = new Promise<void>((resolve) => {
+      releaseSlowStart = resolve;
+    });
+    const startCalls: string[] = [];
+    const manager = createTestManager(async (config) => {
+      startCalls.push(config.name);
+      if (config.name === "Slow Fixture") {
+        await pendingSlowStart;
+      }
+      return createFakeSession();
+    });
+    const slow = addAutoStartServer(manager, "Slow Fixture");
+    const fast = addAutoStartServer(manager, "Fast Fixture");
+    setAutoStartOrder(manager, [slow, fast]);
+
+    const autoStart = manager.startAutoStartServers();
+    await Promise.resolve();
+
+    expect(startCalls).toEqual(["Slow Fixture", "Fast Fixture"]);
+
+    releaseSlowStart();
+    await autoStart;
+  });
+
+  it("continues auto-starting remaining servers when one server fails", async () => {
+    const startCalls: string[] = [];
+    const manager = createTestManager(async (config) => {
+      startCalls.push(config.name);
+      if (config.name === "Broken Fixture") {
+        throw new Error("fixture failed");
+      }
+      return createFakeSession();
+    });
+    const broken = addAutoStartServer(manager, "Broken Fixture");
+    const healthy = addAutoStartServer(manager, "Healthy Fixture");
+    setAutoStartOrder(manager, [broken, healthy]);
+
+    await manager.startAutoStartServers();
+
+    expect(startCalls).toEqual(expect.arrayContaining(["Broken Fixture", "Healthy Fixture"]));
+    expect(startCalls).toHaveLength(2);
+    expect(manager.getServer(broken.id)?.status).toBe("error");
+    expect(manager.getServer(healthy.id)?.status).toBe("running");
   });
 
   it("resolves env placeholders for HTTP transport headers", () => {

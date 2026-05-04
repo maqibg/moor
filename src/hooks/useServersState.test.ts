@@ -31,8 +31,9 @@ describe("useServers state helpers", () => {
 
     expect(
       mergeServerStatusEvent(servers, {
-        type: "server:status",
-        data: { serverId: "server-1", status: "error", errorMessage: "uvx not found" },
+        serverId: "server-1",
+        status: "error",
+        errorMessage: "uvx not found",
       }),
     ).toEqual([server({ status: "error", error_message: "uvx not found" })]);
   });
@@ -54,8 +55,8 @@ describe("useServers state helpers", () => {
 
     expect(
       mergeServerStatusEvent(servers, {
-        type: "server:status",
-        data: { serverId: "server-1", status: "running" },
+        serverId: "server-1",
+        status: "running",
       }),
     ).toEqual([server({ status: "running", error_message: null })]);
   });

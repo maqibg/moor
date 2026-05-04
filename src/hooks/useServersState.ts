@@ -39,17 +39,6 @@ export function getServerStatusEventPayload(eventData: unknown): ServerStatusEve
   };
 }
 
-function isServerStatusEventPayload(value: unknown): value is ServerStatusEventPayload {
-  if (!isRecord(value)) return false;
-  return (
-    typeof value.serverId === "string" &&
-    isServerStatus(value.status) &&
-    (value.errorMessage === undefined ||
-      value.errorMessage === null ||
-      typeof value.errorMessage === "string")
-  );
-}
-
 export function applyServerAction<TServer extends ServerStateItem>(
   servers: TServer[],
   serverId: string,
@@ -66,13 +55,8 @@ export function applyServerAction<TServer extends ServerStateItem>(
 
 export function mergeServerStatusEvent<TServer extends ServerStateItem>(
   servers: TServer[],
-  eventData: unknown,
+  payload: ServerStatusEventPayload,
 ): TServer[] {
-  const payload = isServerStatusEventPayload(eventData)
-    ? eventData
-    : getServerStatusEventPayload(eventData);
-  if (!payload) return servers;
-
   return servers.map((server) => {
     if (server.id !== payload.serverId) return server;
 

@@ -16,6 +16,7 @@ export function serializeServer<T extends DbRow>(row: T): T {
     args: parseJsonValue(row.args, []),
     env: parseJsonValue(row.env, {}),
     headers: parseJsonValue(row.headers, null),
+    auto_start: Boolean(row.auto_start),
   };
 }
 

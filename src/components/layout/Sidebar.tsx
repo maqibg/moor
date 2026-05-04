@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { MoorLogo } from "@/components/icons/MoorLogo";
 import { LayoutDashboard, Server, FolderOpen, FileText, Settings, HelpCircle } from "lucide-react";
 
 const navItems = [
@@ -15,7 +16,7 @@ export function Sidebar() {
     <aside className="w-[220px] shrink-0 border-r border-[rgba(38,37,30,0.1)] bg-surface-300 flex flex-col">
       <div className="p-5 flex items-center gap-3">
         <div className="h-8 w-8 rounded-lg bg-cursor-dark flex items-center justify-center">
-          <span className="text-surface-200 font-headline text-sm font-bold">M</span>
+          <MoorLogo className="h-7 w-7 text-surface-200" />
         </div>
         <div>
           <span className="font-headline text-lg tracking-tight text-cursor-dark leading-tight block">
