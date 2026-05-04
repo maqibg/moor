@@ -72,7 +72,7 @@ export function Dashboard() {
   const running = servers.filter((s) => s.status === "running").length;
   const stopped = servers.filter((s) => s.status === "stopped").length;
   const errored = servers.filter((s) => s.status === "error").length;
-  const activeProfile = profiles.find((p) => p.is_active);
+  const activeProfile = profiles.find((p) => p.isActive);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(mcpEndpoint);
@@ -206,7 +206,7 @@ export function Dashboard() {
                         )}
                       />
                       <span className="font-headline text-sm text-cursor-dark truncate">
-                        {log.tool_name}
+                        {log.toolName}
                       </span>
                       {log.error && (
                         <Badge variant="error" className="text-[10px]">
@@ -215,7 +215,7 @@ export function Dashboard() {
                       )}
                     </div>
                     <span className="font-mono text-[11px] text-[rgba(38,37,30,0.35)] shrink-0">
-                      {log.duration_ms ? `${log.duration_ms}ms` : "—"}
+                      {log.durationMs ? `${log.durationMs}ms` : "—"}
                     </span>
                   </div>
                 ))}

@@ -13,11 +13,11 @@ import { cn } from "@/lib/utils";
 
 interface ProfileServerState {
   enabled: boolean;
-  disabled_tools: string[];
+  disabledTools: string[];
 }
 
 interface ProfileDetailData extends Profile {
-  servers: Array<ServerType & { profile_server: ProfileServerState }>;
+  servers: Array<ServerType & { profileServer: ProfileServerState }>;
 }
 
 export function ProfileDetail() {
@@ -60,7 +60,7 @@ export function ProfileDetail() {
     refresh();
   };
 
-  const enabledCount = profile.servers.filter((s) => s.profile_server.enabled).length;
+  const enabledCount = profile.servers.filter((s) => s.profileServer.enabled).length;
 
   return (
     <div className="space-y-6 animate-fade-in-up">
@@ -79,7 +79,7 @@ export function ProfileDetail() {
             <h1 className="font-headline text-[28px] tracking-tight text-cursor-dark leading-tight">
               {profile.name}
             </h1>
-            {profile.is_active ? (
+            {profile.isActive ? (
               <Badge variant="success">
                 <span className="relative flex h-1.5 w-1.5 mr-1.5">
                   <span className="animate-ping-slow absolute inline-flex h-full w-full rounded-full bg-success-muted opacity-50" />
@@ -116,14 +116,14 @@ export function ProfileDetail() {
                 key={server.id}
                 className={cn(
                   "flex items-center justify-between py-3 px-4 rounded-xl transition-all duration-200",
-                  server.profile_server.enabled
+                  server.profileServer.enabled
                     ? "bg-surface-100 border border-[rgba(38,37,30,0.08)]"
                     : "hover:bg-surface-300/40",
                 )}
               >
                 <div className="flex items-center gap-3">
                   <Switch
-                    checked={server.profile_server.enabled}
+                    checked={server.profileServer.enabled}
                     onCheckedChange={(v) => toggleServer(server.id, v)}
                   />
                   <div
@@ -139,11 +139,11 @@ export function ProfileDetail() {
                   <div>
                     <span className="font-headline text-sm text-cursor-dark">{server.name}</span>
                     <Badge variant="subtle" className="ml-2 text-[10px]">
-                      {server.connection_type}
+                      {server.connectionType}
                     </Badge>
                   </div>
                 </div>
-                {server.profile_server.enabled && (
+                {server.profileServer.enabled && (
                   <div className="flex items-center gap-1.5">
                     <span className="h-1.5 w-1.5 rounded-full bg-success-muted" />
                     <span className="font-body text-xs text-[rgba(38,37,30,0.4)]">Enabled</span>

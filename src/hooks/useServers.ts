@@ -211,16 +211,16 @@ export function useServers() {
 export interface Server {
   id: string;
   name: string;
-  connection_type: "stdio" | "http";
+  connectionType: "stdio" | "http";
   command?: string | null;
   args?: string[] | null;
   url?: string | null;
   env?: Record<string, string> | null;
   headers?: Record<string, string> | null;
-  working_dir?: string | null;
-  auto_start?: boolean;
+  workingDir?: string | null;
+  autoStart?: boolean;
   status: ServerStatus;
-  error_message?: string | null;
-  created_at: string;
-  updated_at: string;
+  errorMessage?: string | null;
+  createdAt: string;
+  updatedAt: string;
 }

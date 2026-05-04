@@ -64,7 +64,7 @@ profiles.get("/:id", (c) => {
     const disabledTools = row.disabled_tools ?? "[]";
     return {
       ...serializeServer(row),
-      profile_server: serializeProfileServer({
+      profileServer: serializeProfileServer({
         profile_id: id,
         server_id: row.id,
         enabled,

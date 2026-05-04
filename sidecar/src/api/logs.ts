@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { queryAll, queryOne } from "../db/index.js";
-import { serializeAuditLog } from "../db/serializers.js";
+import { serializeAuditLog, keysToCamelCase } from "../db/serializers.js";
 
 const logs = new Hono();
 
@@ -58,8 +58,8 @@ logs.get("/stats", (c) => {
     errorCalls,
     errorRate: totalCalls > 0 ? errorCalls / totalCalls : 0,
     avgDurationMs: avgDuration,
-    topTools,
-    topServers,
+    topTools: topTools.map(keysToCamelCase),
+    topServers: topServers.map(keysToCamelCase),
   });
 });
 

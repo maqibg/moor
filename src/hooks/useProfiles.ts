@@ -76,8 +76,8 @@ export function useProfiles() {
 export interface Profile {
   id: string;
   name: string;
-  is_active: boolean;
-  server_count?: number;
-  created_at: string;
-  updated_at: string;
+  isActive: boolean;
+  serverCount?: number;
+  createdAt: string;
+  updatedAt: string;
 }

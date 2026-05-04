@@ -4,7 +4,7 @@ import { applyServerAction, mergeServerStatusEvent, type ServerStateItem } from 
 const server = (overrides: Partial<ServerStateItem> = {}): ServerStateItem => ({
   id: "server-1",
   status: "stopped",
-  error_message: null,
+  errorMessage: null,
   ...overrides,
 });
 
@@ -13,16 +13,16 @@ describe("useServers state helpers", () => {
     const servers = [server(), server({ id: "server-2" })];
 
     expect(applyServerAction(servers, "server-1", "starting")).toEqual([
-      server({ status: "starting", error_message: null }),
+      server({ status: "starting", errorMessage: null }),
       server({ id: "server-2" }),
     ]);
   });
 
   it("keeps runtime status while clearing previous errors when stop is requested", () => {
-    const servers = [server({ status: "running", error_message: "previous error" })];
+    const servers = [server({ status: "running", errorMessage: "previous error" })];
 
     expect(applyServerAction(servers, "server-1", "stopping")).toEqual([
-      server({ status: "running", error_message: null }),
+      server({ status: "running", errorMessage: null }),
     ]);
   });
 
@@ -35,7 +35,7 @@ describe("useServers state helpers", () => {
         status: "error",
         errorMessage: "uvx not found",
       }),
-    ).toEqual([server({ status: "error", error_message: "uvx not found" })]);
+    ).toEqual([server({ status: "error", errorMessage: "uvx not found" })]);
   });
 
   it("merges parsed status event payloads without reparsing event envelopes", () => {
@@ -47,17 +47,17 @@ describe("useServers state helpers", () => {
         status: "running",
         errorMessage: null,
       }),
-    ).toEqual([server({ status: "running", error_message: null })]);
+    ).toEqual([server({ status: "running", errorMessage: null })]);
   });
 
   it("clears previous errors when a server reaches running", () => {
-    const servers = [server({ status: "error", error_message: "uvx not found" })];
+    const servers = [server({ status: "error", errorMessage: "uvx not found" })];
 
     expect(
       mergeServerStatusEvent(servers, {
         serverId: "server-1",
         status: "running",
       }),
-    ).toEqual([server({ status: "running", error_message: null })]);
+    ).toEqual([server({ status: "running", errorMessage: null })]);
   });
 });

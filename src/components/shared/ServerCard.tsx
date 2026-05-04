@@ -25,7 +25,7 @@ interface ServerCardProps {
 }
 
 function getCommandPreview(server: Server): string {
-  return server.connection_type === "stdio"
+  return server.connectionType === "stdio"
     ? `${server.command || ""} ${(server.args || []).join(" ")}`.trim()
     : server.url || "";
 }
@@ -62,7 +62,7 @@ function ServerIdentity({
         <span className="font-headline text-sm font-medium text-cursor-dark truncate">
           {server.name}
         </span>
-        {server.auto_start && (
+        {server.autoStart && (
           <span title="Auto Start" className="inline-flex shrink-0">
             <Zap className="h-3 w-3 text-gold" />
           </span>
@@ -229,7 +229,7 @@ export function ServerCard({ server, action, onStart, onStop, onRemove }: Server
               onRemove={onRemove}
             />
           </div>
-          {isError && server.error_message && <ServerErrorMessage message={server.error_message} />}
+          {isError && server.errorMessage && <ServerErrorMessage message={server.errorMessage} />}
         </div>
       </CardContent>
     </Card>

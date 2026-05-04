@@ -8,7 +8,7 @@ export function Header() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  const activeProfile = profiles.find((p) => p.is_active);
+  const activeProfile = profiles.find((p) => p.isActive);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -55,12 +55,12 @@ export function Header() {
                   }}
                   className={cn(
                     "w-full text-left px-3 py-2 text-sm font-headline transition-colors duration-150 flex items-center gap-2.5 rounded-lg mx-1",
-                    profile.is_active
+                    profile.isActive
                       ? "text-cursor-dark font-medium bg-surface-300"
                       : "text-[rgba(38,37,30,0.55)] hover:bg-surface-300/60 hover:text-cursor-dark",
                   )}
                 >
-                  {profile.is_active ? (
+                  {profile.isActive ? (
                     <Check className="h-3.5 w-3.5 text-success-muted" />
                   ) : (
                     <span className="h-3.5 w-3.5" />

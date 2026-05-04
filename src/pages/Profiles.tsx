@@ -83,14 +83,14 @@ export function Profiles() {
               key={profile.id}
               className={cn(
                 "group cursor-pointer transition-all duration-200 hover:shadow-[0_12px_40px_-12px_rgba(0,0,0,0.06)]",
-                profile.is_active
+                profile.isActive
                   ? "ring-2 ring-cursor-orange/20 border-cursor-orange/30"
                   : "hover:border-[rgba(38,37,30,0.15)]",
               )}
               onClick={() => navigate(`/profiles/${profile.id}`)}
             >
               <CardContent className="p-5 relative">
-                {profile.is_active && (
+                {profile.isActive && (
                   <div className="absolute top-4 right-4 text-cursor-orange">
                     <Check className="h-5 w-5" />
                   </div>
@@ -105,26 +105,26 @@ export function Profiles() {
                 </div>
                 <h3 className="font-headline text-base text-cursor-dark mb-1">{profile.name}</h3>
                 <p className="font-body text-xs text-[rgba(38,37,30,0.45)] mb-5">
-                  {profile.is_active ? "Currently active" : "Click to manage"}
+                  {profile.isActive ? "Currently active" : "Click to manage"}
                 </p>
                 <div className="flex items-center gap-2 pt-4 border-t border-[rgba(38,37,30,0.06)]">
                   <span
                     className={cn(
                       "h-2 w-2 rounded-full",
-                      profile.is_active ? "bg-success-muted" : "bg-[rgba(38,37,30,0.2)]",
+                      profile.isActive ? "bg-success-muted" : "bg-[rgba(38,37,30,0.2)]",
                     )}
                   />
                   <span className="font-body text-xs text-[rgba(38,37,30,0.4)]">
-                    {profile.server_count ?? 0} servers
+                    {profile.serverCount ?? 0} servers
                   </span>
                 </div>
                 {/* Actions overlay */}
                 <div
                   className="absolute top-4 right-4 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                  style={{ opacity: profile.is_active ? undefined : undefined }}
+                  style={{ opacity: profile.isActive ? undefined : undefined }}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {!profile.is_active && (
+                  {!profile.isActive && (
                     <>
                       <Button
                         variant="ghost"

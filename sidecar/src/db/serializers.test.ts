@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { serializeAuditLog, serializeServer, serializeToolDiscovery } from "./serializers.js";
 
 describe("db serializers", () => {
-  it("parses JSON fields before API responses", () => {
+  it("parses JSON fields and converts keys to camelCase", () => {
     expect(
       serializeServer({
         id: "s1",
@@ -14,6 +14,8 @@ describe("db serializers", () => {
         status: "stopped",
       }),
     ).toMatchObject({
+      id: "s1",
+      connectionType: "stdio",
       args: ["/tmp"],
       env: { TOKEN: "x" },
       headers: { Authorization: "Bearer {env:TOKEN}" },
@@ -27,12 +29,15 @@ describe("db serializers", () => {
         args: null,
         env: null,
         headers: null,
+        auto_start: 0,
         status: "stopped",
       }),
     ).toMatchObject({
+      connectionType: "http",
       args: [],
       env: {},
       headers: null,
+      autoStart: false,
     });
 
     expect(
@@ -41,8 +46,19 @@ describe("db serializers", () => {
         tool_name: "read",
         exposed_name: "read",
         input_schema: '{"type":"object"}',
-      }).input_schema,
+      }).inputSchema,
     ).toEqual({ type: "object" });
+
+    expect(
+      serializeToolDiscovery(
+        serializeToolDiscovery({
+          server_id: "s1",
+          tool_name: "write",
+          exposed_name: "write",
+          input_schema: '{"type":"object","properties":{"path":{"type":"string"}}}',
+        }),
+      ).inputSchema,
+    ).toEqual({ type: "object", properties: { path: { type: "string" } } });
 
     expect(
       serializeAuditLog({

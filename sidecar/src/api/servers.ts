@@ -124,13 +124,13 @@ servers.get("/:id/tools", (c) => {
   );
   const tools = serverManager.getDiscoveredTools(c.req.param("id")).map((row) => {
     const serialized = serializeToolDiscovery(row);
-    const rawToolName = serialized.tool_name as string;
+    const rawToolName = serialized.toolName as string;
     const catalogEntry = catalog.find(
       (tool) => tool.serverId === c.req.param("id") && tool.toolName === rawToolName,
     );
     return {
       ...serialized,
-      exposed_name: catalogEntry?.exposedName ?? rawToolName,
+      exposedName: catalogEntry?.exposedName ?? rawToolName,
       disabled: disabledForServer.has(rawToolName),
     };
   });

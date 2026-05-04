@@ -48,7 +48,7 @@ interface ConvertResult {
 interface ConverterServer {
   id: string;
   name: string;
-  connection_type: "stdio" | "http";
+  connectionType: "stdio" | "http";
 }
 
 function isClientId(value: string): value is ClientId {
@@ -178,7 +178,7 @@ export function ConverterPanel() {
                     />
                     <span className="font-headline">{s.name}</span>
                     <span className="text-[10px] text-[rgba(38,37,30,0.35)] ml-auto uppercase">
-                      {s.connection_type}
+                      {s.connectionType}
                     </span>
                   </label>
                 ))

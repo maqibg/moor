@@ -5,14 +5,14 @@ import { api } from "@/lib/api";
 export interface AuditLogEntry {
   id: string;
   timestamp: string;
-  profile_id: string | null;
-  server_id: string | null;
-  tool_name: string;
+  profileId: string | null;
+  serverId: string | null;
+  toolName: string;
   arguments: unknown;
   result: unknown | null;
   error: string | null;
-  duration_ms: number | null;
-  agent_info: string | null;
+  durationMs: number | null;
+  agentInfo: string | null;
 }
 
 export interface LogStats {
@@ -20,8 +20,8 @@ export interface LogStats {
   errorCalls: number;
   errorRate: number;
   avgDurationMs: number | null;
-  topTools: Array<{ tool_name: string; count: number; avg_duration: number }>;
-  topServers: Array<{ server_id: string; count: number }>;
+  topTools: Array<{ toolName: string; count: number; avgDuration: number }>;
+  topServers: Array<{ serverId: string; count: number }>;
 }
 
 const DEFAULT_STATS: LogStats = {

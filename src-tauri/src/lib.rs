@@ -50,6 +50,7 @@ struct SidecarInner {
     legacy_data_dir: Option<PathBuf>,
     restart_count: AtomicUsize,
     shutting_down: AtomicBool,
+    terminated_child_pid: Mutex<Option<u32>>,
 }
 
 impl SidecarState {
@@ -63,6 +64,7 @@ impl SidecarState {
                 legacy_data_dir,
                 restart_count: AtomicUsize::new(0),
                 shutting_down: AtomicBool::new(false),
+                terminated_child_pid: Mutex::new(None),
             }),
         }
     }
@@ -78,9 +80,26 @@ impl SidecarState {
     }
 
     fn set_child(&self, child: CommandChild) {
+        if let Ok(mut terminated_pid) = self.inner.terminated_child_pid.lock() {
+            *terminated_pid = None;
+        }
         if let Ok(mut guard) = self.inner.child.lock() {
             *guard = Some(child);
         }
+    }
+
+    fn mark_child_terminated(&self, pid: u32) {
+        if let Ok(mut terminated_pid) = self.inner.terminated_child_pid.lock() {
+            *terminated_pid = Some(pid);
+        }
+    }
+
+    fn is_child_terminated(&self, pid: u32) -> bool {
+        self.inner
+            .terminated_child_pid
+            .lock()
+            .map(|terminated_pid| *terminated_pid == Some(pid))
+            .unwrap_or(false)
     }
 
     fn should_restart(&self) -> bool {
@@ -100,15 +119,13 @@ impl SidecarState {
                         .status();
                     let start = std::time::Instant::now();
                     while start.elapsed() < Duration::from_secs(3) {
-                        let still_alive = std::process::Command::new("kill")
-                            .args(["-0", &pid.to_string()])
-                            .status()
-                            .map(|s| s.success())
-                            .unwrap_or(false);
-                        if !still_alive {
+                        if self.is_child_terminated(pid) {
                             break;
                         }
                         std::thread::sleep(Duration::from_millis(200));
+                    }
+                    if self.is_child_terminated(pid) {
+                        return;
                     }
                 }
                 let _ = child.kill();
@@ -180,6 +197,7 @@ fn spawn_sidecar(app: &AppHandle, state: SidecarState) -> Result<(), String> {
         .args(args)
         .spawn()
         .map_err(|err| err.to_string())?;
+    let child_pid = child.pid();
     state.set_child(child);
 
     let app_handle = app.clone();
@@ -203,6 +221,7 @@ fn spawn_sidecar(app: &AppHandle, state: SidecarState) -> Result<(), String> {
                 }
                 CommandEvent::Error(error) => eprintln!("Moor sidecar error: {error}"),
                 CommandEvent::Terminated(_) => {
+                    state_for_events.mark_child_terminated(child_pid);
                     state_for_events.set_info(None);
                     if state_for_events.should_restart() {
                         let app_for_restart = app_handle.clone();

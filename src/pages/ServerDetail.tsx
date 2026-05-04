@@ -15,23 +15,23 @@ import { cn } from "@/lib/utils";
 interface ServerDetailData {
   id: string;
   name: string;
-  connection_type: "stdio" | "http";
+  connectionType: "stdio" | "http";
   command: string | null;
   args: string[] | null;
   url: string | null;
   env: Record<string, string> | null;
   headers: Record<string, string> | null;
-  working_dir: string | null;
-  auto_start: boolean;
+  workingDir: string | null;
+  autoStart: boolean;
   status: string;
-  error_message: string | null;
+  errorMessage: string | null;
 }
 
 interface ToolDetail {
-  tool_name: string;
-  exposed_name: string;
+  toolName: string;
+  exposedName: string;
   description: string | null;
-  input_schema: unknown;
+  inputSchema: unknown;
   disabled: boolean;
 }
 
@@ -41,7 +41,7 @@ export function ServerDetail() {
   const queryClient = useQueryClient();
   const { startServer, stopServer, updateServer } = useServers();
   const { profiles, updateProfileServer } = useProfiles();
-  const activeProfile = profiles.find((profile) => profile.is_active);
+  const activeProfile = profiles.find((profile) => profile.isActive);
 
   const { data: server, isLoading: loading } = useQuery<ServerDetailData>({
     queryKey: ["servers", id],
@@ -93,7 +93,7 @@ export function ServerDetail() {
   const toggleTool = async (toolName: string, enabled: boolean) => {
     if (!activeProfile || !id) return;
     const disabledTools = new Set(
-      tools.filter((tool) => tool.disabled).map((tool) => tool.tool_name),
+      tools.filter((tool) => tool.disabled).map((tool) => tool.toolName),
     );
     if (enabled) {
       disabledTools.delete(toolName);
@@ -114,7 +114,7 @@ export function ServerDetail() {
   };
 
   const commandText =
-    server.connection_type === "stdio"
+    server.connectionType === "stdio"
       ? `${server.command || ""} ${server.args?.join(" ") || ""}`.trim()
       : server.url || "";
 
@@ -195,7 +195,7 @@ export function ServerDetail() {
           {commandText && (
             <div>
               <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-2 block uppercase tracking-wider">
-                {server.connection_type === "stdio" ? "Command" : "URL"}
+                {server.connectionType === "stdio" ? "Command" : "URL"}
               </label>
               <div className="bg-cursor-dark rounded-xl border border-[rgba(38,37,30,0.15)] p-4 relative group">
                 <pre className="font-mono text-xs text-[rgba(242,241,237,0.85)] overflow-x-auto whitespace-pre-wrap pr-10">
@@ -223,7 +223,7 @@ export function ServerDetail() {
                 Connection Type
               </label>
               <Badge variant="outline" className="capitalize">
-                {server.connection_type}
+                {server.connectionType}
               </Badge>
             </div>
             <div className="flex items-center justify-between">
@@ -233,18 +233,15 @@ export function ServerDetail() {
                 </label>
                 <p className="text-[11px] text-[rgba(38,37,30,0.4)]">Moor 启动时自动启动</p>
               </div>
-              <Switch
-                checked={server.auto_start}
-                onCheckedChange={(v) => void toggleAutoStart(v)}
-              />
+              <Switch checked={server.autoStart} onCheckedChange={(v) => void toggleAutoStart(v)} />
             </div>
-            {server.working_dir && (
+            {server.workingDir && (
               <div className="col-span-2">
                 <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
                   Working Directory
                 </label>
                 <p className="font-mono text-xs text-[rgba(38,37,30,0.55)] bg-surface-300 rounded-lg px-3 py-2">
-                  {server.working_dir}
+                  {server.workingDir}
                 </p>
               </div>
             )}
@@ -308,10 +305,10 @@ export function ServerDetail() {
             </div>
           )}
 
-          {server.error_message && (
+          {server.errorMessage && (
             <div className="rounded-xl bg-error-warm/8 border border-error-warm/20 p-4">
               <label className="font-headline text-xs text-error-warm mb-1.5 block">Error</label>
-              <p className="font-mono text-xs text-error-warm">{server.error_message}</p>
+              <p className="font-mono text-xs text-error-warm">{server.errorMessage}</p>
             </div>
           )}
         </CardContent>
@@ -342,7 +339,7 @@ export function ServerDetail() {
             <div className="space-y-2">
               {tools.map((tool) => (
                 <div
-                  key={tool.tool_name}
+                  key={tool.toolName}
                   className={cn(
                     "flex items-center justify-between p-4 rounded-xl border transition-all duration-200",
                     tool.disabled
@@ -353,9 +350,9 @@ export function ServerDetail() {
                   <div className="min-w-0 flex-1 mr-4">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="font-mono text-[13px] font-medium text-cursor-dark">
-                        {tool.exposed_name}
+                        {tool.exposedName}
                       </span>
-                      <ToolCategoryBadge name={tool.exposed_name} />
+                      <ToolCategoryBadge name={tool.exposedName} />
                     </div>
                     {tool.description && (
                       <p className="font-body text-xs text-[rgba(38,37,30,0.5)] truncate">
@@ -366,7 +363,7 @@ export function ServerDetail() {
                   <Switch
                     checked={!tool.disabled}
                     disabled={!activeProfile}
-                    onCheckedChange={(v) => toggleTool(tool.tool_name, v)}
+                    onCheckedChange={(v) => toggleTool(tool.toolName, v)}
                   />
                 </div>
               ))}

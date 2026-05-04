@@ -123,8 +123,8 @@ export function AuditLogs() {
           <CardContent>
             <div className="flex flex-wrap gap-2">
               {stats.topTools.map((t) => (
-                <Badge key={t.tool_name} variant="subtle" className="text-xs">
-                  {t.tool_name} <span className="text-[rgba(38,37,30,0.4)] ml-1">({t.count})</span>
+                <Badge key={t.toolName} variant="subtle" className="text-xs">
+                  {t.toolName} <span className="text-[rgba(38,37,30,0.4)] ml-1">({t.count})</span>
                 </Badge>
               ))}
             </div>
@@ -196,7 +196,7 @@ export function AuditLogs() {
                           {new Date(log.timestamp).toLocaleTimeString()}
                         </td>
                         <td className="px-4 py-2.5 font-headline text-sm text-cursor-dark">
-                          {log.tool_name}
+                          {log.toolName}
                         </td>
                         <td className="px-4 py-2.5">
                           <Badge variant={log.error ? "error" : "success"} className="text-[10px]">
@@ -204,10 +204,10 @@ export function AuditLogs() {
                           </Badge>
                         </td>
                         <td className="px-4 py-2.5 font-mono text-[11px] text-[rgba(38,37,30,0.45)]">
-                          {log.duration_ms ? `${log.duration_ms}ms` : "—"}
+                          {log.durationMs ? `${log.durationMs}ms` : "—"}
                         </td>
                         <td className="px-4 py-2.5 font-body text-[11px] text-[rgba(38,37,30,0.35)] truncate max-w-[120px]">
-                          {log.agent_info || "—"}
+                          {log.agentInfo || "—"}
                         </td>
                         <td className="px-2">
                           {expandedLog === log.id ? (

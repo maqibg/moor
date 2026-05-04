@@ -4,7 +4,7 @@ export type ServerStatus = "stopped" | "starting" | "running" | "error";
 export interface ServerStateItem {
   id: string;
   status: ServerStatus;
-  error_message?: string | null;
+  errorMessage?: string | null;
 }
 
 export interface ServerStatusEventPayload {
@@ -47,9 +47,9 @@ export function applyServerAction<TServer extends ServerStateItem>(
   return servers.map((server) => {
     if (server.id !== serverId) return server;
     if (action === "starting") {
-      return { ...server, status: "starting", error_message: null };
+      return { ...server, status: "starting", errorMessage: null };
     }
-    return { ...server, error_message: null };
+    return { ...server, errorMessage: null };
   });
 }
 
@@ -63,7 +63,7 @@ export function mergeServerStatusEvent<TServer extends ServerStateItem>(
     return {
       ...server,
       status: payload.status,
-      error_message: payload.status === "error" ? payload.errorMessage : null,
+      errorMessage: payload.status === "error" ? payload.errorMessage : null,
     };
   });
 }
