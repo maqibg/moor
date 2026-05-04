@@ -135,6 +135,7 @@ pnpm changeset version
 pnpm version:sync
   ├─ reads sidecar/package.json version (source)
   ├─ syncs → package.json (root)
+  ├─ syncs → packages/types/package.json
   ├─ syncs → src-tauri/tauri.conf.json
   └─ syncs → src-tauri/Cargo.toml
 ```
@@ -143,7 +144,7 @@ pnpm version:sync
 
 - 移除 `fixed` 选项（根包 `moor` 不是 workspace 成员，无法被 changeset 发现）
 - `sync-version.mjs` source of truth 从根 `package.json` 改为 `sidecar/package.json`
-- targets 从 `[tauri.conf.json, Cargo.toml, sidecar/package.json]` 改为 `[package.json, tauri.conf.json, Cargo.toml]`
+- targets 从 `[tauri.conf.json, Cargo.toml, sidecar/package.json]` 改为 `[package.json, packages/types/package.json, tauri.conf.json, Cargo.toml]`
 
 ## 6. 文件变更清单
 

@@ -82,6 +82,12 @@ export function syncVersions({
       write: writeJsonVersion,
     },
     {
+      name: "packages/types/package.json",
+      path: path.join(root, "packages", "types", "package.json"),
+      read: readJsonVersion,
+      write: writeJsonVersion,
+    },
+    {
       name: "tauri.conf.json",
       path: path.join(root, "src-tauri", "tauri.conf.json"),
       read: readJsonVersion,

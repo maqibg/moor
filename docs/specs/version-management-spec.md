@@ -6,13 +6,14 @@ Moor 使用 `@changesets/cli` 实现自动版本号管理和 changelog 生成。
 
 ## 版本号分布
 
-版本号从 `package.json` 同步到以下位置：
+版本号以 `sidecar/package.json` 为唯一来源（changeset 直接管理的 workspace 成员），通过 `sync-version.mjs` 同步到以下位置：
 
-| 文件                        | 同步方式                       |
-| --------------------------- | ------------------------------ |
-| `src-tauri/tauri.conf.json` | 脚本写入 `version` 字段        |
-| `src-tauri/Cargo.toml`      | 脚本正则替换 `version = "..."` |
-| `sidecar/package.json`      | 脚本写入 `version` 字段        |
+| 文件                          | 同步方式                       |
+| ----------------------------- | ------------------------------ |
+| `package.json`（根目录）      | 脚本写入 `version` 字段        |
+| `packages/types/package.json` | 脚本写入 `version` 字段        |
+| `src-tauri/tauri.conf.json`   | 脚本写入 `version` 字段        |
+| `src-tauri/Cargo.toml`        | 脚本正则替换 `version = "..."` |
 
 运行时版本号通过构建时注入获取：
 
@@ -48,7 +49,7 @@ pnpm release
 自动执行：
 
 1. `changeset version` — 消费 pending changesets，更新 `package.json` 版本号和 `CHANGELOG.md`
-2. `version:sync` — 同步版本号到 `tauri.conf.json` / `Cargo.toml` / `sidecar/package.json`
+2. `version:sync` — 同步版本号到 `package.json` / `packages/types/package.json` / `tauri.conf.json` / `Cargo.toml`
 3. `git add -A && git commit` — 提交所有版本相关文件
 4. `git tag v<version>` — 创建版本 tag
 
@@ -77,8 +78,8 @@ pnpm release:exit
 
 `scripts/sync-version.mjs` 负责版本号同步：
 
-- 读取根 `package.json` 的 `version` 作为期望值
-- 同步到 `tauri.conf.json`、`Cargo.toml`、`sidecar/package.json`
+- 读取 `sidecar/package.json` 的 `version` 作为 source of truth
+- 同步到根 `package.json`、`tauri.conf.json`、`Cargo.toml`
 - `--check` 模式：仅校验一致性，不写入（CI 使用）
 
 ### 构建时自动同步
@@ -99,7 +100,7 @@ GitHub Actions Release 工作流在构建前执行 `node scripts/sync-version.mj
 
 ### changesets 配置（`.changeset/config.json`）
 
-- **Fixed Versioning**：`moor` 和 `moor-sidecar` 始终保持相同版本号
+- **版本同步**：通过 `sync-version.mjs` 将 `sidecar/package.json` 版本号同步到根 `package.json`、`tauri.conf.json`、`Cargo.toml`
 - **不发布 npm**：`privatePackages: { version: true, tag: false }`
 - **不自动 commit**：`commit: false`（由 release 脚本控制）
 

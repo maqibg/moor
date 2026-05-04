@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react" alt="React 19">
   <img src="https://img.shields.io/badge/Tauri-2-24C8D8?logo=tauri" alt="Tauri 2">
-  <img src="https://img.shields.io/badge/Node.js-20+-339933?logo=nodedotjs" alt="Node.js 20+">
+  <img src="https://img.shields.io/badge/Node.js-22+-339933?logo=nodedotjs" alt="Node.js 22+">
   <img src="https://img.shields.io/badge/platform-macOS-black?logo=apple" alt="macOS">
   <img src="https://img.shields.io/badge/pnpm-10+-F69220?logo=pnpm" alt="pnpm">
 </p>
@@ -27,10 +27,11 @@
   <a href="#api">API</a>
 </p>
 
-<p align="center">
-  <a href="README.md">English</a> ·
-  <b>中文</b>
-</p>
+<!-- README-I18N:START -->
+
+[English](./README.md) | **汉语**
+
+<!-- README-I18N:END -->
 
 ---
 
@@ -50,7 +51,7 @@
 
 ### 从源码构建
 
-需要 macOS（Apple Silicon / Intel）、Node.js >= 20、pnpm >= 9 和 Rust >= 1.77。
+需要 macOS（Apple Silicon / Intel）、Node.js >= 22、pnpm >= 10 和 Rust >= 1.77。
 
 ```bash
 git clone https://github.com/yourusername/moor.git
@@ -68,10 +69,10 @@ vp install
 
 ### 扫描现有配置
 
-Moor 可以自动检测你已为 Claude Code、Codex 和 OpenCode 配置的 MCP Server：
+Moor 可以自动检测你已为 Claude Code、Codex、OpenCode 和 Cursor 配置的 MCP Server：
 
 1. 进入 **Servers** → **Scan Configs**
-2. 点击 **Scan** — Moor 会读取 `~/.claude/settings.json`、`~/.codex/config.toml` 以及 `~/.config/opencode/opencode.json` / `.jsonc`
+2. 点击 **Scan** — Moor 会读取 `~/.claude/settings.json`、`~/.codex/config.toml`、`~/.config/opencode/opencode.json` / `.jsonc` 以及 `~/.cursor/mcp.json`
 3. 选择要导入的 Server
 
 你也可以通过 **Import JSON** 粘贴 JSON MCP 配置。Moor 支持导入 stdio 和 HTTP/SSE Server，对于不支持的条目（例如 OpenAPI 配置）会报告但不会保存。
@@ -131,12 +132,13 @@ Moor 会处理剩下的一切——聚合 `tools/list`、路由 `tools/call`、�
 - **Claude Code**: `~/.claude/settings.json`
 - **Codex**: `~/.codex/config.toml`
 - **OpenCode**: `~/.config/opencode/opencode.json` / `.jsonc`
+- **Cursor**: `~/.cursor/mcp.json`
 
 也支持手动输入和粘贴 JSON 批量导入 stdio 与 HTTP/SSE Server。
 
 ### 客户端配置
 
-为 Claude Code、Codex 和 OpenCode 生成即拷即用的配置片段。片段仅包含 `/mcp` 端点；Moor 的 `X-Moor-Token` 保留给内部管理 API 使用。
+为 Claude Code、Codex、OpenCode 和 Cursor 生成即拷即用的配置片段。片段仅包含 `/mcp` 端点；Moor 的 `X-Moor-Token` 保留给内部管理 API 使用。
 
 ### 审计日志
 
@@ -166,19 +168,19 @@ Server 状态变更和 Profile 切换通过 SSE 推送到 UI，无需刷新页�
 Moor.app
 ├── UI Layer          React + Vite + TypeScript + Tailwind CSS v4 + shadcn/ui
 ├── Desktop Layer     Tauri 2 / Rust
-│   ├── 窗口管理 + 托盘图标
-│   ├── macOS Keychain 访问
-│   └── Sidecar 进程生命周期管理
-├── Gateway Daemon    Node.js / TypeScript Sidecar（打包为 SEA 独立二进制）
-│   ├── MCP 协议网关   POST /mcp — 初始化、tools/list、tools/call
-│   ├── Server 管理    stdio 子进程 + HTTP/SSE 客户端
-│   ├── Profile 路由   全局激活 Profile，热切换
-│   ├── 审计日志       异步批量写入（500ms / 50 条刷盘）
-│   └── SSE 推送       实时状态同步到 WebView
+│   ├── Window management + tray icon
+│   ├── macOS Keychain access
+│   └── Sidecar process lifecycle management
+├── Gateway Daemon    Node.js / TypeScript Sidecar (bundled as SEA standalone binary)
+│   ├── MCP protocol gateway   POST /mcp — init, tools/list, tools/call
+│   ├── Server management      stdio spawn + HTTP/SSE client
+│   ├── Profile routing        Global active Profile, hot-swap
+│   ├── Audit logging          Async batch write (500ms / 50 entries)
+│   └── SSE push               Real-time status sync to WebView
 └── Storage           SQLite (node:sqlite)
-    ├── servers (配置、状态)
-    ├── profiles (Server 分组 + 工具开关)
-    └── audit_logs (工具调用、参数、结果、错误)
+    ├── servers (configs, status)
+    ├── profiles (server groups + tool toggles)
+    └── audit_logs (tool calls, params, results, errors)
 ```
 
 </details>
@@ -200,8 +202,8 @@ WebView ◀──SSE──── /api/events
 ### 前置要求
 
 - macOS（Apple Silicon / Intel）
-- [Node.js](https://nodejs.org) >= 20
-- [pnpm](https://pnpm.io) >= 9
+- [Node.js](https://nodejs.org) >= 22
+- [pnpm](https://pnpm.io) >= 10
 - [Rust](https://rustup.rs) >= 1.77
 - [Xcode Command Line Tools](https://developer.apple.com/xcode/resources/)
 
@@ -237,7 +239,7 @@ pnpm tauri build
 输出：
 
 - `src-tauri/target/release/bundle/macos/Moor.app`
-- `src-tauri/target/release/bundle/dmg/Moor_0.1.0_aarch64.dmg`
+- `src-tauri/target/release/bundle/dmg/Moor_<version>_aarch64.dmg`
 
 ### 代码质量
 
@@ -307,6 +309,7 @@ vp test
 | `POST` | `/api/import/scan`    | 扫描本地客户端配置   |
 | `POST` | `/api/import/parse`   | 预览粘贴的 JSON 导入 |
 | `POST` | `/api/import/execute` | 执行导入             |
+| `POST` | `/api/import/convert` | 客户端配置互转       |
 
 ## 技术栈
 
@@ -334,6 +337,6 @@ vp test
 
 [![Star History Chart](https://api.star-history.com/svg?repos=varandrew/moor&type=Date)](https://www.star-history.com/#varandrew/moor&Date)
 
-## License
+## 许可证
 
 [MIT](LICENSE)

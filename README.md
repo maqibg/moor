@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react" alt="React 19">
   <img src="https://img.shields.io/badge/Tauri-2-24C8D8?logo=tauri" alt="Tauri 2">
-  <img src="https://img.shields.io/badge/Node.js-20+-339933?logo=nodedotjs" alt="Node.js 20+">
+  <img src="https://img.shields.io/badge/Node.js-22+-339933?logo=nodedotjs" alt="Node.js 22+">
   <img src="https://img.shields.io/badge/platform-macOS-black?logo=apple" alt="macOS">
   <img src="https://img.shields.io/badge/pnpm-10+-F69220?logo=pnpm" alt="pnpm">
 </p>
@@ -27,10 +27,11 @@
   <a href="#api">API</a>
 </p>
 
-<p align="center">
-  <b>English</b> ·
-  <a href="README.zh.md">中文</a>
-</p>
+<!-- README-I18N:START -->
+
+**English** | [汉语](./README.zh.md)
+
+<!-- README-I18N:END -->
 
 ---
 
@@ -50,7 +51,7 @@ Download the `.dmg` from [Releases](https://github.com/yourusername/moor/release
 
 ### Build from Source
 
-Requires macOS (Apple Silicon / Intel), Node.js >= 20, pnpm >= 9, and Rust >= 1.77.
+Requires macOS (Apple Silicon / Intel), Node.js >= 22, pnpm >= 10, and Rust >= 1.77.
 
 ```bash
 git clone https://github.com/yourusername/moor.git
@@ -68,10 +69,10 @@ Open **Moor.app**. The Dashboard shows your active Profile, server status, and r
 
 ### Scan Existing Configs
 
-Moor can automatically detect MCP servers you've already configured for Claude Code, Codex, and OpenCode:
+Moor can automatically detect MCP servers you've already configured for Claude Code, Codex, OpenCode, and Cursor:
 
 1. Go to **Servers** → **Import**
-2. Click **Scan** — Moor reads `~/.claude/settings.json`, `~/.codex/config.toml`, and `~/.config/opencode/opencode.json` / `.jsonc`
+2. Click **Scan** — Moor reads `~/.claude/settings.json`, `~/.codex/config.toml`, `~/.config/opencode/opencode.json` / `.jsonc`, and `~/.cursor/mcp.json`
 3. Select the servers you want to import
 
 You can also paste a JSON MCP configuration with **Import JSON**. Moor imports stdio and HTTP/SSE servers, and reports unsupported entries such as OpenAPI configs without saving them.
@@ -131,12 +132,13 @@ One-click import from:
 - **Claude Code**: `~/.claude/settings.json`
 - **Codex**: `~/.codex/config.toml`
 - **OpenCode**: `~/.config/opencode/opencode.json` / `.jsonc`
+- **Cursor**: `~/.cursor/mcp.json`
 
 Manual entry and pasted JSON batch import are also supported for stdio and HTTP/SSE servers.
 
 ### Client Configuration
 
-Generate ready-to-copy configuration snippets for Claude Code, Codex, and OpenCode. The snippets contain only the `/mcp` endpoint; Moor's `X-Moor-Token` is reserved for internal management API calls.
+Generate ready-to-copy configuration snippets for Claude Code, Codex, OpenCode, and Cursor. The snippets contain only the `/mcp` endpoint; Moor's `X-Moor-Token` is reserved for internal management API calls.
 
 ### Audit Logs
 
@@ -200,8 +202,8 @@ WebView ◀──SSE──── /api/events
 ### Prerequisites
 
 - macOS (Apple Silicon / Intel)
-- [Node.js](https://nodejs.org) >= 20
-- [pnpm](https://pnpm.io) >= 9
+- [Node.js](https://nodejs.org) >= 22
+- [pnpm](https://pnpm.io) >= 10
 - [Rust](https://rustup.rs) >= 1.77
 - [Xcode Command Line Tools](https://developer.apple.com/xcode/resources/)
 
@@ -237,7 +239,7 @@ pnpm tauri build
 Outputs:
 
 - `src-tauri/target/release/bundle/macos/Moor.app`
-- `src-tauri/target/release/bundle/dmg/Moor_0.1.0_aarch64.dmg`
+- `src-tauri/target/release/bundle/dmg/Moor_<version>_aarch64.dmg`
 
 ### Code Quality
 
@@ -299,14 +301,15 @@ vp test
 
 ### Other
 
-| Method | Path                  | Description                |
-| ------ | --------------------- | -------------------------- |
-| `GET`  | `/api/health`         | Health check               |
-| `GET`  | `/api/runtime`        | Runtime info (port, URL)   |
-| `GET`  | `/api/events`         | SSE real-time event stream |
-| `POST` | `/api/import/scan`    | Scan local client configs  |
-| `POST` | `/api/import/parse`   | Preview pasted JSON import |
-| `POST` | `/api/import/execute` | Execute import             |
+| Method | Path                  | Description                     |
+| ------ | --------------------- | ------------------------------- |
+| `GET`  | `/api/health`         | Health check                    |
+| `GET`  | `/api/runtime`        | Runtime info (port, URL)        |
+| `GET`  | `/api/events`         | SSE real-time event stream      |
+| `POST` | `/api/import/scan`    | Scan local client configs       |
+| `POST` | `/api/import/parse`   | Preview pasted JSON import      |
+| `POST` | `/api/import/execute` | Execute import                  |
+| `POST` | `/api/import/convert` | Convert configs between clients |
 
 ## Tech Stack
 

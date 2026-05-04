@@ -79,13 +79,15 @@
 
 ### AD-7: Config Import — Progressive Scan
 
-- **Decision**: MVP 自动扫描 Claude Code + Cursor 配置，手动添加其他
-- **Why**: 这两个最常见且有固定配置路径，其他客户端通过手动添加覆盖
+- **Decision**: 自动扫描 Claude Code、Codex、OpenCode 和 Cursor 配置，手动添加其他
+- **Why**: 这四个最常见且有固定配置路径，其他客户端通过手动添加覆盖
 - **Scan Paths**:
   - Claude Code: `~/.claude/settings.json` → `mcpServers` 字段
-  - Cursor: `.cursor/mcp.json` 或全局 Cursor 设置
+  - Codex: `~/.codex/config.toml` → `mcp_servers` 字段
+  - OpenCode: `~/.config/opencode/opencode.json` / `.jsonc` → `mcp` 字段
+  - Cursor: `~/.cursor/mcp.json` → `mcpServers` 字段
   - Manual: 用户输入 command + args + env
-- **Consequences**: 需要解析 JSON (Claude Code) 和可能的 JSON (Cursor) 格式
+- **Consequences**: 需要解析 JSON 和 TOML 格式
 
 ### AD-8: Profile Routing — Global Active Profile
 
@@ -163,7 +165,9 @@ MCPServer
 ├─ args: string[]? (for stdio)
 ├─ url: string? (for http)
 ├─ env: Record<string, string>
+├─ headers: Record<string, string>? (for http)
 ├─ working_dir: string?
+├─ auto_start: boolean
 ├─ status: "stopped" | "starting" | "running" | "error"
 ├─ created_at: timestamp
 └─ updated_at: timestamp
@@ -221,7 +225,9 @@ GET    /api/logs/stats                 # Aggregate statistics
 
 # Import
 POST   /api/import/scan                # Scan local client configs
+POST   /api/import/parse               # Preview pasted JSON import
 POST   /api/import/execute             # Execute import
+POST   /api/import/convert             # Convert configs between clients
 
 # MCP Gateway (for Agent connections)
 ALL    /mcp                            # MCP protocol endpoint (Streamable HTTP)
