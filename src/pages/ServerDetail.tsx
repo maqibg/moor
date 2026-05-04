@@ -231,7 +231,9 @@ export function ServerDetail() {
                 <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
                   Auto Start
                 </label>
-                <p className="text-[11px] text-[rgba(38,37,30,0.4)]">Moor 启动时自动启动</p>
+                <p className="text-[11px] text-[rgba(38,37,30,0.4)]">
+                  Start automatically when Moor launches
+                </p>
               </div>
               <Switch checked={server.autoStart} onCheckedChange={(v) => void toggleAutoStart(v)} />
             </div>

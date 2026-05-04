@@ -688,7 +688,7 @@ describe("convert API validation", () => {
     const body = await response.json();
     expect(body.content).toContain('"remote"');
     expect(body.warnings).toEqual(
-      expect.arrayContaining([expect.stringContaining('已跳过不支持的 server "openapi"')]),
+      expect.arrayContaining([expect.stringContaining('Skipped unsupported server "openapi"')]),
     );
   });
 
@@ -702,7 +702,7 @@ describe("convert API validation", () => {
 
     expect(response.status).toBe(422);
     await expect(response.json()).resolves.toEqual({
-      error: expect.stringContaining("解析错误"),
+      error: expect.stringContaining("Parse error"),
     });
   });
 });

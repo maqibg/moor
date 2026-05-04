@@ -108,9 +108,9 @@ function resolveFromMoor(serverIds: string[]): ScannedServer[] {
 
 function parsedImportWarnings(parsed: ParsedImport): string[] {
   return [
-    ...parsed.errors.map((error) => `解析错误：${error}`),
+    ...parsed.errors.map((error) => `Parse error: ${error}`),
     ...parsed.unsupported.map(
-      (server) => `已跳过不支持的 server "${server.name}"：${server.reason}`,
+      (server) => `Skipped unsupported server "${server.name}": ${server.reason}`,
     ),
   ];
 }

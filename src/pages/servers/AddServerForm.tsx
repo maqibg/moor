@@ -179,7 +179,9 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
         <div className="flex items-center justify-between py-2">
           <div className="space-y-0.5">
             <Label>Auto Start</Label>
-            <p className="text-[11px] text-[rgba(38,37,30,0.4)]">自动在 Moor 启动时启动此服务器</p>
+            <p className="text-[11px] text-[rgba(38,37,30,0.4)]">
+              Automatically start this server when Moor launches
+            </p>
           </div>
           <Switch
             checked={form.autoStart}

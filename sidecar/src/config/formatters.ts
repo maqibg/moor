@@ -124,7 +124,9 @@ function buildWarnings(servers: ScannedServer[], target: ClientMeta): string[] {
   const warnings: string[] = [];
 
   if (servers.some((s) => nonEmpty(s.headers)) && target.id === "codex") {
-    warnings.push("Headers 已映射为 Codex 的 http_headers/env_http_headers，请手动检查");
+    warnings.push(
+      "Headers have been mapped to Codex's http_headers/env_http_headers. Please verify manually.",
+    );
   }
 
   const unconvertedCodexHeaders = servers.flatMap((s) =>
@@ -132,16 +134,18 @@ function buildWarnings(servers: ScannedServer[], target: ClientMeta): string[] {
   );
   if (unconvertedCodexHeaders.length > 0) {
     warnings.push(
-      `以下 Header 包含 Codex 无法无损表达的环境变量组合，已保留原值：${unconvertedCodexHeaders.join(", ")}`,
+      `The following headers contain env variable combinations that Codex cannot express losslessly. Original values retained: ${unconvertedCodexHeaders.join(", ")}`,
     );
   }
 
   if (servers.some((s) => s.workingDir) && (target.id === "opencode" || target.id === "cursor")) {
-    warnings.push(`${target.name} 不原生支持 workingDir 字段，已忽略`);
+    warnings.push(
+      `${target.name} does not natively support the workingDir field. It has been ignored.`,
+    );
   }
 
   if (servers.some((s) => nonEmpty(s.env)) && target.id === "opencode") {
-    warnings.push("环境变量已映射为 environment 字段");
+    warnings.push("Environment variables have been mapped to the environment field.");
   }
 
   return warnings;
@@ -257,7 +261,9 @@ export function formatForCursor(servers: ScannedServer[], client: ClientMeta): F
   const httpServers = servers.filter((s) => s.connectionType === "http");
   const extraWarnings =
     httpServers.length > 0
-      ? ['HTTP 服务器默认使用 streamable-http 传输。如需 SSE，请将 type 字段改为 "sse"']
+      ? [
+          'HTTP servers use streamable-http transport by default. For SSE, change the type field to "sse".',
+        ]
       : [];
 
   return formatJsonMcpServers(servers, client, "mcpServers", extraWarnings);
