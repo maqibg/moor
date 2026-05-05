@@ -1,10 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-
-interface SidecarInfo {
-  port: number;
-  baseUrl: string;
-  apiToken: string;
-}
+import type { SidecarInfo } from "@moor/types";
 
 const defaultRuntime = (): SidecarInfo => ({
   port: 9223,
@@ -35,6 +30,10 @@ const getRuntimeInfo = async (): Promise<SidecarInfo> => {
 };
 
 let runtimeInfo: SidecarInfo | null = null;
+
+export function resetRuntime(): void {
+  runtimeInfo = null;
+}
 
 export async function getApiRuntime(): Promise<SidecarInfo> {
   if (!runtimeInfo) {

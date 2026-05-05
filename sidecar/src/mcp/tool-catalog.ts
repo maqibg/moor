@@ -1,12 +1,4 @@
-export interface MCPTool {
-  name: string;
-  description?: string;
-  inputSchema?: {
-    type: "object";
-    properties?: Record<string, unknown>;
-    required?: string[];
-  };
-}
+import type { MCPTool, ToolCatalogEntry } from "@moor/types";
 
 export interface ToolCatalogRow {
   serverId: string;
@@ -15,15 +7,6 @@ export interface ToolCatalogRow {
   toolName: string;
   description: string | null;
   inputSchema: unknown;
-}
-
-export interface ToolCatalogEntry {
-  serverId: string;
-  serverName: string;
-  toolName: string;
-  exposedName: string;
-  description?: string;
-  inputSchema?: MCPTool["inputSchema"];
 }
 
 export function normalizeServerName(name: string): string {

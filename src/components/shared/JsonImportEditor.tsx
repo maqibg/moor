@@ -52,7 +52,7 @@ const moorEditorTheme = EditorView.theme(
     },
     ".cm-gutters": {
       backgroundColor: "rgba(38, 37, 30, 0.035)",
-      borderRight: "1px solid rgba(38, 37, 30, 0.08)",
+      borderRight: "1px solid var(--fg-08)",
       color: "rgba(38, 37, 30, 0.36)",
       fontFamily:
         "var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
@@ -65,13 +65,13 @@ const moorEditorTheme = EditorView.theme(
       color: "#26251e",
     },
     ".cm-foldPlaceholder": {
-      backgroundColor: "rgba(38, 37, 30, 0.06)",
-      border: "1px solid rgba(38, 37, 30, 0.1)",
-      color: "rgba(38, 37, 30, 0.55)",
+      backgroundColor: "var(--fg-06)",
+      border: "1px solid var(--fg-10)",
+      color: "var(--fg-55)",
     },
     ".cm-tooltip": {
       backgroundColor: "#e6e5e0",
-      border: "1px solid rgba(38, 37, 30, 0.12)",
+      border: "1px solid var(--fg-12)",
       color: "#26251e",
       fontFamily: "var(--font-headline), system-ui, sans-serif",
     },
@@ -83,7 +83,7 @@ const moorEditorTheme = EditorView.theme(
       color: "#cf2d56",
     },
     ".cm-placeholder": {
-      color: "rgba(38, 37, 30, 0.35)",
+      color: "var(--fg-35)",
     },
     ".cm-selectionBackground": {
       backgroundColor: "rgba(245, 78, 0, 0.16) !important",
@@ -117,7 +117,7 @@ export function JsonImportEditor({
   );
 
   return (
-    <div className="overflow-hidden rounded-xl border border-[rgba(38,37,30,0.1)] bg-surface-200/40 focus-within:border-[rgba(38,37,30,0.22)]">
+    <div className="overflow-hidden rounded-xl border border-[var(--fg-10)] bg-surface-200/40 focus-within:border-[var(--fg-20)]">
       <CodeMirror
         value={value}
         height="300px"

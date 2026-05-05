@@ -1,7 +1,10 @@
 import { Hono } from "hono";
 import { serverManager } from "../services/server-manager.js";
+import { profileService } from "../services/profiles.js";
 import { queryAll, queryOne, run } from "../db/index.js";
 import { serializeServer, serializeToolDiscovery } from "../db/serializers.js";
+import { createServerSchema } from "./schemas.js";
+import { validate } from "./validate.js";
 
 const servers = new Hono();
 
@@ -20,47 +23,11 @@ servers.get("/", (c) => {
 });
 
 servers.post("/", async (c) => {
-  const body = await c.req.json<{
-    name?: string;
-    connectionType?: string;
-    command?: string;
-    args?: string[];
-    url?: string;
-    env?: Record<string, string>;
-    headers?: Record<string, string>;
-    workingDir?: string;
-    autoStart?: boolean;
-  }>();
-  if (!body.name || !body.connectionType) {
-    return c.json({ error: "name and connectionType are required" }, 400);
-  }
-  if (body.connectionType !== "stdio" && body.connectionType !== "http") {
-    return c.json({ error: "connectionType must be stdio or http" }, 400);
-  }
-  if (body.connectionType === "stdio" && !body.command) {
-    return c.json({ error: "command is required for stdio servers" }, 400);
-  }
-  if (body.connectionType === "http" && !body.url) {
-    return c.json({ error: "url is required for http servers" }, 400);
-  }
-  const server = serverManager.addServer({
-    name: body.name,
-    connectionType: body.connectionType,
-    command: body.command,
-    args: body.args,
-    url: body.url,
-    env: body.env,
-    headers: body.headers,
-    workingDir: body.workingDir,
-    autoStart: body.autoStart,
-  });
-  const activeProfileId = serverManager.getActiveProfileId();
-  if (activeProfileId) {
-    run(
-      "INSERT OR IGNORE INTO profile_servers (profile_id, server_id, enabled, disabled_tools) VALUES (?, ?, 1, '[]')",
-      [activeProfileId, server.id],
-    );
-  }
+  const raw = await c.req.json();
+  const body = validate(createServerSchema, raw, c);
+  if (body instanceof Response) return body;
+  const server = serverManager.addServer(body);
+  profileService.assignToActiveProfile([server.id]);
   const row = queryOne("SELECT * FROM mcp_servers WHERE id = ?", [server.id]);
   return c.json(serializeServer({ ...row, ...server }), 201);
 });

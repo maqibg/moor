@@ -42,5 +42,5 @@ export interface ImportPreview {
   duplicates: ScannedServer[];
   unsupported: UnsupportedServer[];
   errors: string[];
-  diagnostics?: ImportDiagnostic[];
+  diagnostics: ImportDiagnostic[];
 }

@@ -2,8 +2,6 @@ import fs from "node:fs";
 import { parseCodexTomlConfig, parseJsonMcpConfig, type ParsedImport } from "./import-parser.js";
 import { ALL_CLIENTS, resolveConfigPaths } from "./clients.js";
 
-export type { ScannedServer, UnsupportedServer } from "./import-parser.js";
-
 const EMPTY: ParsedImport = { servers: [], unsupported: [], errors: [], diagnostics: [] };
 
 function readFileIfExists(configPath: string): string | null {

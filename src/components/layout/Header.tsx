@@ -19,9 +19,9 @@ export function Header() {
   }, []);
 
   return (
-    <header className="h-14 border-b border-[rgba(38,37,30,0.08)] bg-surface-200/80 backdrop-blur-md flex items-center justify-between px-6 sticky top-0 z-40">
+    <header className="h-14 border-b border-[var(--fg-08)] bg-surface-200/80 backdrop-blur-md flex items-center justify-between px-6 sticky top-0 z-40">
       <div className="flex items-center gap-2">
-        <span className="font-body text-sm text-[rgba(38,37,30,0.4)]">Active Profile</span>
+        <span className="font-body text-sm text-[var(--fg-40)]">Active Profile</span>
         <div className="relative" ref={ref}>
           <button
             onClick={() => setOpen(!open)}
@@ -39,13 +39,13 @@ export function Header() {
             {activeProfile?.name || "None"}
             <ChevronDown
               className={cn(
-                "h-3.5 w-3.5 text-[rgba(38,37,30,0.35)] transition-transform duration-200",
+                "h-3.5 w-3.5 text-[var(--fg-35)] transition-transform duration-200",
                 open && "rotate-180",
               )}
             />
           </button>
           {open && (
-            <div className="absolute top-full mt-1.5 left-0 z-50 w-52 rounded-xl border border-[rgba(38,37,30,0.1)] bg-surface-200 shadow-[rgba(0,0,0,0.14)_0px_28px_70px,rgba(0,0,0,0.1)_0px_14px_32px,oklab(0.263084_-0.00230259_0.0124794_/_0.1)_0px_0px_0px_1px] py-1.5 animate-scale-in origin-top-left">
+            <div className="absolute top-full mt-1.5 left-0 z-50 w-52 rounded-xl border border-[var(--fg-10)] bg-surface-200 shadow-[rgba(0,0,0,0.14)_0px_28px_70px,rgba(0,0,0,0.1)_0px_14px_32px,oklab(0.263084_-0.00230259_0.0124794_/_0.1)_0px_0px_0px_1px] py-1.5 animate-scale-in origin-top-left">
               {profiles.map((profile) => (
                 <button
                   key={profile.id}
@@ -57,7 +57,7 @@ export function Header() {
                     "w-full text-left px-3 py-2 text-sm font-headline transition-colors duration-150 flex items-center gap-2.5 rounded-lg mx-1",
                     profile.isActive
                       ? "text-cursor-dark font-medium bg-surface-300"
-                      : "text-[rgba(38,37,30,0.55)] hover:bg-surface-300/60 hover:text-cursor-dark",
+                      : "text-[var(--fg-55)] hover:bg-surface-300/60 hover:text-cursor-dark",
                   )}
                 >
                   {profile.isActive ? (

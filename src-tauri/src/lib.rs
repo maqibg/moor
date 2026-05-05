@@ -37,6 +37,94 @@ struct ReadyPayload {
     base_url: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SettingsFile {
+    #[serde(default)]
+    general: GeneralSettingsFile,
+    #[serde(default)]
+    advanced: AdvancedSettingsFile,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct GeneralSettingsFile {
+    #[serde(default)]
+    minimize_to_tray_on_close: Option<bool>,
+    #[serde(default)]
+    show_window_on_launch: Option<bool>,
+    #[serde(default)]
+    auto_start_on_login: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct AdvancedSettingsFile {
+    #[serde(default = "default_port")]
+    sidecar_port: Option<u16>,
+}
+
+fn default_port() -> Option<u16> {
+    Some(9223)
+}
+
+impl Default for SettingsFile {
+    fn default() -> Self {
+        Self {
+            general: GeneralSettingsFile::default(),
+            advanced: AdvancedSettingsFile::default(),
+        }
+    }
+}
+
+fn read_settings_file(data_dir: &PathBuf) -> SettingsFile {
+    let path = data_dir.join("settings.json");
+    if !path.exists() {
+        return SettingsFile::default();
+    }
+    match fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Err(_) => SettingsFile::default(),
+    }
+}
+
+fn should_show_main_window_on_launch(
+    minimize_to_tray_on_close: bool,
+    show_window_on_launch: bool,
+) -> bool {
+    !minimize_to_tray_on_close || show_window_on_launch
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{should_show_main_window_on_launch, SidecarState};
+    use std::path::PathBuf;
+
+    #[test]
+    fn shows_window_for_default_settings() {
+        assert!(should_show_main_window_on_launch(true, true));
+    }
+
+    #[test]
+    fn hides_window_when_tray_mode_disables_launch_window() {
+        assert!(!should_show_main_window_on_launch(true, false));
+    }
+
+    #[test]
+    fn shows_window_when_minimize_to_tray_is_disabled() {
+        assert!(should_show_main_window_on_launch(false, false));
+    }
+
+    #[test]
+    fn updates_minimize_to_tray_runtime_state() {
+        let state = SidecarState::new("token".to_string(), PathBuf::from("."), None, true);
+
+        state.set_minimize_to_tray(false);
+
+        assert!(!state.get_minimize_to_tray());
+    }
+}
+
 #[derive(Clone)]
 struct SidecarState {
     inner: Arc<SidecarInner>,
@@ -51,10 +139,16 @@ struct SidecarInner {
     restart_count: AtomicUsize,
     shutting_down: AtomicBool,
     terminated_child_pid: Mutex<Option<u32>>,
+    minimize_to_tray: AtomicBool,
 }
 
 impl SidecarState {
-    fn new(api_token: String, data_dir: PathBuf, legacy_data_dir: Option<PathBuf>) -> Self {
+    fn new(
+        api_token: String,
+        data_dir: PathBuf,
+        legacy_data_dir: Option<PathBuf>,
+        minimize_to_tray: bool,
+    ) -> Self {
         Self {
             inner: Arc::new(SidecarInner {
                 info: Mutex::new(None),
@@ -65,6 +159,7 @@ impl SidecarState {
                 restart_count: AtomicUsize::new(0),
                 shutting_down: AtomicBool::new(false),
                 terminated_child_pid: Mutex::new(None),
+                minimize_to_tray: AtomicBool::new(minimize_to_tray),
             }),
         }
     }
@@ -107,6 +202,14 @@ impl SidecarState {
             && self.inner.restart_count.fetch_add(1, Ordering::SeqCst) < 3
     }
 
+    fn get_minimize_to_tray(&self) -> bool {
+        self.inner.minimize_to_tray.load(Ordering::SeqCst)
+    }
+
+    fn set_minimize_to_tray(&self, value: bool) {
+        self.inner.minimize_to_tray.store(value, Ordering::SeqCst);
+    }
+
     fn stop(&self) {
         self.inner.shutting_down.store(true, Ordering::SeqCst);
         if let Ok(mut guard) = self.inner.child.lock() {
@@ -145,6 +248,45 @@ fn get_sidecar_info(state: State<'_, SidecarState>) -> Result<SidecarInfo, Strin
     Err("Moor sidecar is not ready".to_string())
 }
 
+fn apply_autostart_setting(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+
+    let autolaunch = app.autolaunch();
+    if enabled {
+        autolaunch.enable().map_err(|err| err.to_string())
+    } else {
+        autolaunch.disable().map_err(|err| err.to_string())
+    }
+}
+
+fn sync_runtime_settings_from_file(app: &AppHandle, state: &SidecarState) -> Result<(), String> {
+    let settings = read_settings_file(&state.inner.data_dir);
+    let minimize_to_tray = settings.general.minimize_to_tray_on_close.unwrap_or(true);
+    let auto_start = settings.general.auto_start_on_login.unwrap_or(false);
+
+    state.set_minimize_to_tray(minimize_to_tray);
+    apply_autostart_setting(app, auto_start)
+}
+
+#[tauri::command]
+fn sync_runtime_settings(app: AppHandle, state: State<'_, SidecarState>) -> Result<(), String> {
+    sync_runtime_settings_from_file(&app, &state)
+}
+
+#[tauri::command]
+fn restart_sidecar(app: AppHandle, state: State<'_, SidecarState>) -> Result<(), String> {
+    let state = (*state).clone();
+    state.stop();
+    state.inner.shutting_down.store(false, Ordering::SeqCst);
+    state.inner.restart_count.store(0, Ordering::SeqCst);
+    thread::sleep(Duration::from_millis(500));
+
+    // Re-read settings for potentially updated port
+    let settings = read_settings_file(&state.inner.data_dir);
+    let port = settings.advanced.sidecar_port.unwrap_or(9223);
+    spawn_sidecar_with_port(&app, state, port)
+}
+
 fn generate_api_token() -> String {
     let mut bytes = [0u8; 32];
     if File::open("/dev/urandom")
@@ -171,7 +313,7 @@ fn parse_ready_line(line: &str, api_token: &str) -> Option<SidecarInfo> {
     })
 }
 
-fn spawn_sidecar(app: &AppHandle, state: SidecarState) -> Result<(), String> {
+fn spawn_sidecar_with_port(app: &AppHandle, state: SidecarState, port: u16) -> Result<(), String> {
     fs::create_dir_all(&state.inner.data_dir).map_err(|err| err.to_string())?;
     state.set_info(None);
 
@@ -179,7 +321,7 @@ fn spawn_sidecar(app: &AppHandle, state: SidecarState) -> Result<(), String> {
         "--host".to_string(),
         "127.0.0.1".to_string(),
         "--port".to_string(),
-        "9223".to_string(),
+        port.to_string(),
         "--api-token".to_string(),
         state.inner.api_token.clone(),
         "--data-dir".to_string(),
@@ -228,7 +370,12 @@ fn spawn_sidecar(app: &AppHandle, state: SidecarState) -> Result<(), String> {
                         let state_for_restart = state_for_events.clone();
                         tauri::async_runtime::spawn(async move {
                             thread::sleep(Duration::from_secs(1));
-                            if let Err(error) = spawn_sidecar(&app_for_restart, state_for_restart) {
+                            // Re-read settings for potentially updated port
+                            let settings = read_settings_file(&state_for_restart.inner.data_dir);
+                            let port = settings.advanced.sidecar_port.unwrap_or(9223);
+                            if let Err(error) =
+                                spawn_sidecar_with_port(&app_for_restart, state_for_restart, port)
+                            {
                                 eprintln!("Failed to restart Moor sidecar: {error}");
                             }
                         });
@@ -247,7 +394,15 @@ fn spawn_sidecar(app: &AppHandle, state: SidecarState) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![get_sidecar_info])
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![]),
+        ))
+        .invoke_handler(tauri::generate_handler![
+            get_sidecar_info,
+            restart_sidecar,
+            sync_runtime_settings,
+        ])
         .setup(|app| {
             let data_dir = app
                 .path()
@@ -258,9 +413,27 @@ pub fn run() {
                 .data_dir()
                 .ok()
                 .map(|dir| dir.join(LEGACY_BUNDLE_IDENTIFIER));
-            let sidecar_state = SidecarState::new(generate_api_token(), data_dir, legacy_data_dir);
+
+            // Read settings before spawning sidecar
+            let settings = read_settings_file(&data_dir);
+            let port = settings.advanced.sidecar_port.unwrap_or(9223);
+            let minimize_to_tray = settings.general.minimize_to_tray_on_close.unwrap_or(true);
+            let show_window_on_launch = settings.general.show_window_on_launch.unwrap_or(true);
+            let should_show_window =
+                should_show_main_window_on_launch(minimize_to_tray, show_window_on_launch);
+            let auto_start = settings.general.auto_start_on_login.unwrap_or(false);
+
+            let sidecar_state = SidecarState::new(
+                generate_api_token(),
+                data_dir,
+                legacy_data_dir,
+                minimize_to_tray,
+            );
             app.manage(sidecar_state.clone());
-            spawn_sidecar(app.handle(), sidecar_state)
+
+            let _ = apply_autostart_setting(app.handle(), auto_start);
+
+            spawn_sidecar_with_port(app.handle(), sidecar_state, port)
                 .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
 
             let quit = MenuItem::with_id(app, "quit", "Quit Moor", true, None::<&str>)?;
@@ -287,6 +460,13 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            if should_show_window {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -297,10 +477,14 @@ pub fn run() {
             }
             RunEvent::WindowEvent { event, label, .. } if label == "main" => {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    api.prevent_close();
-                    if let Some(window) = app_handle.get_webview_window("main") {
-                        let _ = window.hide();
+                    let state = app_handle.state::<SidecarState>();
+                    if state.get_minimize_to_tray() {
+                        api.prevent_close();
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let _ = window.hide();
+                        }
                     }
+                    // If minimize_to_tray is false, the window closes normally (app exits)
                 }
             }
             _ => {}

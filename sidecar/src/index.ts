@@ -11,9 +11,11 @@ if (typeof APP_VERSION === "undefined") {
 }
 
 import { createApp } from "./server.js";
-import { initDb, runMigrations, seedDefaultProfile, closeDb } from "./db/index.js";
+import { initDb, runMigrations, closeDb } from "./db/index.js";
+import { profileService } from "./services/profiles.js";
 import { serverManager } from "./services/server-manager.js";
 import { initAuditLogger, getAuditLogger } from "./services/audit-logger.js";
+import { settingsService } from "./services/settings.js";
 
 const DEFAULT_PORT = 9223;
 
@@ -84,7 +86,10 @@ async function main() {
 
   await initDb({ dataDir: options.dataDir, legacyDataDir: options.legacyDataDir });
   runMigrations();
-  seedDefaultProfile();
+  profileService.seedDefault();
+
+  settingsService.init(options.dataDir);
+  settingsService.startLogCleanupInterval();
 
   const auditLogger = initAuditLogger();
   auditLogger.start();
@@ -102,7 +107,10 @@ async function main() {
     console.log(`MCP endpoint: ${baseUrl}/mcp`);
     console.log(`Health check: ${baseUrl}/api/health`);
 
-    void serverManager.startAutoStartServers();
+    const settings = settingsService.getSettings();
+    if (settings.general.autoStartServersOnLaunch) {
+      void serverManager.startAutoStartServers();
+    }
   });
 }
 

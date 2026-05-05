@@ -2,12 +2,12 @@ import { useCallback, useState, type Dispatch, type SetStateAction } from "react
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, apiPost, apiPut, apiDelete } from "@/lib/api";
 import { useSSEEvent } from "@/contexts/SSEContext";
+import type { Server } from "@moor/types";
 import {
   applyServerAction,
   getServerStatusEventPayload,
   mergeServerStatusEvent,
   type ServerAction,
-  type ServerStatus,
 } from "./useServersState";
 
 type ServerSetter = Dispatch<SetStateAction<Server[]>>;
@@ -206,21 +206,4 @@ export function useServers() {
     stopServer,
     removeServer: removeServer.mutateAsync,
   };
-}
-
-export interface Server {
-  id: string;
-  name: string;
-  connectionType: "stdio" | "http";
-  command?: string | null;
-  args?: string[] | null;
-  url?: string | null;
-  env?: Record<string, string> | null;
-  headers?: Record<string, string> | null;
-  workingDir?: string | null;
-  autoStart?: boolean;
-  status: ServerStatus;
-  errorMessage?: string | null;
-  createdAt: string;
-  updatedAt: string;
 }

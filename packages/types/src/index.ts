@@ -1,4 +1,4 @@
-export type { ConnectionType, ServerAction, ServerBase, ServerStatus } from "./server.js";
+export type { ConnectionType, Server, ServerAction, ServerStatus } from "./server.js";
 export type {
   ImportDiagnostic,
   ImportPreview,
@@ -6,7 +6,7 @@ export type {
   ScannedServer,
   UnsupportedServer,
 } from "./scanned.js";
-export type { ProfileBase } from "./profile.js";
+export type { Profile } from "./profile.js";
 export type { MCPTool, ToolCatalogEntry } from "./mcp.js";
 export type {
   MoorEvent,
@@ -14,4 +14,16 @@ export type {
   ProfileActivatedEvent,
   ServerStatusEvent,
   ServerToolsEvent,
+  SettingsChangedEvent,
 } from "./events.js";
+export type {
+  AdvancedSettings,
+  AppearanceSettings,
+  GeneralSettings,
+  Settings,
+  SettingsGroup,
+  SettingsUpdatePayload,
+  ThemeMode,
+} from "./settings.js";
+export type { SidecarInfo } from "./sidecar.js";
+export { createDefaultSettings } from "./settings.js";

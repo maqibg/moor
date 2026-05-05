@@ -136,6 +136,12 @@ export function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_audit_logs_server_id ON audit_logs(server_id);
     CREATE INDEX IF NOT EXISTS idx_tool_discoveries_server_id ON tool_discoveries(server_id);
     CREATE INDEX IF NOT EXISTS idx_tool_discoveries_exposed_name ON tool_discoveries(exposed_name);
+
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   ensureColumn("tool_discoveries", "exposed_name", "TEXT");
@@ -146,20 +152,6 @@ export function runMigrations() {
 function ensureColumn(table: string, column: string, definition: string) {
   const exists = queryAll(`PRAGMA table_info(${table})`).some((row) => row.name === column);
   if (!exists) run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-}
-
-export function seedDefaultProfile() {
-  const rows = queryAll("SELECT id FROM profiles WHERE name = 'Default'", []);
-  const now = new Date().toISOString();
-  run("UPDATE profiles SET is_active = 0", []);
-  if (rows.length === 0) {
-    run(
-      "INSERT INTO profiles (id, name, is_active, created_at, updated_at) VALUES (?, ?, 1, ?, ?)",
-      [crypto.randomUUID(), "Default", now, now],
-    );
-  } else {
-    run("UPDATE profiles SET is_active = 1, updated_at = ? WHERE id = ?", [now, rows[0].id]);
-  }
 }
 
 export function run(sql: string, params: unknown[] = []) {

@@ -147,7 +147,7 @@ export function ConverterPanel() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in-up">
       {/* Left: Input Panel */}
-      <Card className="border-[rgba(38,37,30,0.08)]">
+      <Card className="border-[var(--fg-08)]">
         <CardContent className="p-5 space-y-4">
           <h3 className="font-headline text-sm font-medium text-cursor-dark">Source</h3>
 
@@ -160,7 +160,7 @@ export function ConverterPanel() {
           {inputSource === "moor" && (
             <div className="space-y-2 max-h-80 overflow-y-auto">
               {servers.length === 0 ? (
-                <p className="text-xs text-[rgba(38,37,30,0.4)]">No servers available</p>
+                <p className="text-xs text-[var(--fg-40)]">No servers available</p>
               ) : (
                 servers.map((s) => (
                   <label
@@ -169,7 +169,7 @@ export function ConverterPanel() {
                       "flex items-center gap-2.5 px-3 py-2.5 rounded-xl border cursor-pointer transition-all duration-150 text-sm",
                       selectedIds.has(s.id)
                         ? "border-cursor-orange/30 bg-cursor-orange/[0.04] text-cursor-dark"
-                        : "border-[rgba(38,37,30,0.08)] text-[rgba(38,37,30,0.6)] hover:border-[rgba(38,37,30,0.15)] hover:bg-surface-300/30",
+                        : "border-[var(--fg-08)] text-[var(--fg-60)] hover:border-[var(--fg-15)] hover:bg-surface-300/30",
                     )}
                   >
                     <Checkbox
@@ -177,7 +177,7 @@ export function ConverterPanel() {
                       onCheckedChange={() => toggleServer(s.id)}
                     />
                     <span className="font-headline">{s.name}</span>
-                    <span className="text-[10px] text-[rgba(38,37,30,0.35)] ml-auto uppercase">
+                    <span className="text-[10px] text-[var(--fg-35)] ml-auto uppercase">
                       {s.connectionType}
                     </span>
                   </label>
@@ -188,7 +188,7 @@ export function ConverterPanel() {
 
           {inputSource === "scan" && (
             <div className="space-y-3">
-              <p className="text-xs text-[rgba(38,37,30,0.45)]">
+              <p className="text-xs text-[var(--fg-45)]">
                 Automatically scan local config file for the selected client
               </p>
               <Select value={scanClient} onValueChange={handleScanClientChange}>
@@ -227,7 +227,7 @@ export function ConverterPanel() {
                 value={pasteContent}
                 onChange={(e) => setPasteContent(e.target.value)}
                 placeholder="Paste MCP configuration here..."
-                className="h-48 bg-cursor-dark text-[rgba(242,241,237,0.85)] font-mono text-[11px] placeholder:text-[rgba(242,241,237,0.35)] border-[rgba(38,37,30,0.15)] focus:border-cursor-orange/30 focus:shadow-none rounded-xl"
+                className="h-48 bg-surface-inverted text-text-inverted font-mono text-[11px] placeholder:text-text-inverted-muted border-[var(--fg-15)] focus:border-cursor-orange/30 focus:shadow-none rounded-xl"
               />
             </div>
           )}
@@ -235,7 +235,7 @@ export function ConverterPanel() {
       </Card>
 
       {/* Right: Output Panel */}
-      <Card className="border-[rgba(38,37,30,0.08)]">
+      <Card className="border-[var(--fg-08)]">
         <CardContent className="p-5 space-y-4">
           <h3 className="font-headline text-sm font-medium text-cursor-dark">Target</h3>
 
@@ -275,9 +275,9 @@ export function ConverterPanel() {
             <div className="space-y-3">
               <CodeBlock code={result.content} />
 
-              <div className="flex items-start gap-2 text-xs text-[rgba(38,37,30,0.45)]">
+              <div className="flex items-start gap-2 text-xs text-[var(--fg-45)]">
                 <span>Target file:</span>
-                <code className="font-mono text-[11px] bg-surface-300 px-1.5 py-0.5 rounded text-[rgba(38,37,30,0.7)]">
+                <code className="font-mono text-[11px] bg-surface-300 px-1.5 py-0.5 rounded text-[var(--fg-70)]">
                   {clientPath(result.targetClient, result.targetPath)}
                 </code>
               </div>
@@ -287,7 +287,7 @@ export function ConverterPanel() {
                   {result.warnings.map((w, i) => (
                     <div
                       key={i}
-                      className="flex items-start gap-2 text-xs text-[rgba(38,37,30,0.55)] bg-cursor-orange/5 rounded-lg px-3 py-2"
+                      className="flex items-start gap-2 text-xs text-[var(--fg-55)] bg-cursor-orange/5 rounded-lg px-3 py-2"
                     >
                       <AlertTriangle className="h-3.5 w-3.5 text-cursor-orange shrink-0 mt-0.5" />
                       {w}

@@ -2,13 +2,15 @@ import { useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Server, FolderOpen } from "lucide-react";
+import { Server, FolderOpen } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useProfiles, type Profile } from "@/hooks/useProfiles";
-import type { Server as ServerType } from "@/hooks/useServers";
+import { useProfiles } from "@/hooks/useProfiles";
+import { DetailPageHeader } from "@/components/shared/DetailPageHeader";
+import { PageLoading } from "@/components/shared/PageLoading";
+import { EmptyState } from "@/components/shared/EmptyState";
+import type { Profile, Server as ServerType } from "@moor/types";
 import { cn } from "@/lib/utils";
 
 interface ProfileServerState {
@@ -38,21 +40,11 @@ export function ProfileDetail() {
   );
 
   if (loading) {
-    return (
-      <div className="py-16 text-center animate-fade-in">
-        <div className="h-8 w-8 mx-auto rounded-full border-2 border-[rgba(38,37,30,0.1)] border-t-cursor-orange animate-spin mb-4" />
-        <p className="font-body text-sm text-[rgba(38,37,30,0.4)]">Loading profile...</p>
-      </div>
-    );
+    return <PageLoading message="Loading profile..." />;
   }
 
   if (!profile || !id) {
-    return (
-      <div className="py-16 text-center">
-        <FolderOpen className="h-10 w-10 mx-auto text-[rgba(38,37,30,0.15)] mb-4" />
-        <p className="font-body text-sm text-[rgba(38,37,30,0.4)]">Profile not found</p>
-      </div>
-    );
+    return <EmptyState icon={FolderOpen} message="Profile not found" />;
   }
 
   const toggleServer = async (serverId: string, enabled: boolean) => {
@@ -64,52 +56,33 @@ export function ProfileDetail() {
 
   return (
     <div className="space-y-6 animate-fade-in-up">
-      {/* Header */}
-      <div className="flex items-start gap-3">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="mt-0.5"
-          onClick={() => navigate("/profiles")}
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div className="flex-1">
-          <div className="flex items-center gap-3">
-            <h1 className="font-headline text-[28px] tracking-tight text-cursor-dark leading-tight">
-              {profile.name}
-            </h1>
-            {profile.isActive ? (
-              <Badge variant="success">
-                <span className="relative flex h-1.5 w-1.5 mr-1.5">
-                  <span className="animate-ping-slow absolute inline-flex h-full w-full rounded-full bg-success-muted opacity-50" />
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-success-muted" />
-                </span>
-                Active
-              </Badge>
-            ) : null}
-          </div>
-          <p className="font-body text-sm text-[rgba(38,37,30,0.45)] mt-1">
-            {enabledCount} of {profile.servers.length} servers enabled
-          </p>
-        </div>
-      </div>
+      <DetailPageHeader
+        title={profile.name}
+        subtitle={`${enabledCount} of ${profile.servers.length} servers enabled`}
+        badge={
+          profile.isActive ? (
+            <Badge variant="success">
+              <span className="relative flex h-1.5 w-1.5 mr-1.5">
+                <span className="animate-ping-slow absolute inline-flex h-full w-full rounded-full bg-success-muted opacity-50" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-success-muted" />
+              </span>
+              Active
+            </Badge>
+          ) : undefined
+        }
+        onBack={() => navigate("/profiles")}
+      />
 
       {/* Server Selection */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
-            <Server className="h-4 w-4 text-[rgba(38,37,30,0.4)]" /> Server Selection
+            <Server className="h-4 w-4 text-[var(--fg-40)]" /> Server Selection
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-1">
           {profile.servers.length === 0 ? (
-            <div className="py-10 text-center">
-              <Server className="h-8 w-8 mx-auto text-[rgba(38,37,30,0.15)] mb-3" />
-              <p className="font-body text-sm text-[rgba(38,37,30,0.35)]">
-                No servers available. Add servers first.
-              </p>
-            </div>
+            <EmptyState icon={Server} message="No servers available. Add servers first." />
           ) : (
             profile.servers.map((server) => (
               <div
@@ -117,7 +90,7 @@ export function ProfileDetail() {
                 className={cn(
                   "flex items-center justify-between py-3 px-4 rounded-xl transition-all duration-200",
                   server.profileServer.enabled
-                    ? "bg-surface-100 border border-[rgba(38,37,30,0.08)]"
+                    ? "bg-surface-100 border border-[var(--fg-08)]"
                     : "hover:bg-surface-300/40",
                 )}
               >
@@ -131,7 +104,7 @@ export function ProfileDetail() {
                       "h-8 w-8 rounded-lg flex items-center justify-center border shrink-0",
                       server.status === "running"
                         ? "bg-success-muted/8 text-success-muted border-success-muted/15"
-                        : "bg-surface-300 text-[rgba(38,37,30,0.3)] border-[rgba(38,37,30,0.06)]",
+                        : "bg-surface-300 text-[var(--fg-30)] border-[var(--fg-06)]",
                     )}
                   >
                     <Server className="h-3.5 w-3.5" />
@@ -146,7 +119,7 @@ export function ProfileDetail() {
                 {server.profileServer.enabled && (
                   <div className="flex items-center gap-1.5">
                     <span className="h-1.5 w-1.5 rounded-full bg-success-muted" />
-                    <span className="font-body text-xs text-[rgba(38,37,30,0.4)]">Enabled</span>
+                    <span className="font-body text-xs text-[var(--fg-40)]">Enabled</span>
                   </div>
                 )}
               </div>

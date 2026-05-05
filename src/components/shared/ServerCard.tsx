@@ -12,7 +12,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import type { Server } from "@/hooks/useServers";
+import type { Server } from "@moor/types";
 import type { ServerAction } from "@/hooks/useServersState";
 import { cn } from "@/lib/utils";
 
@@ -39,7 +39,7 @@ function ServerAvatar({ isRunning, isError }: { isRunning: boolean; isError: boo
           ? "bg-success-muted/10 text-success-muted border border-success-muted/20"
           : isError
             ? "bg-error-warm/10 text-error-warm border border-error-warm/20"
-            : "bg-surface-300 text-[rgba(38,37,30,0.35)] border border-[rgba(38,37,30,0.08)]",
+            : "bg-surface-300 text-[var(--fg-35)] border border-[var(--fg-08)]",
       )}
     >
       <Terminal className="h-[18px] w-[18px]" />
@@ -70,7 +70,7 @@ function ServerIdentity({
         <StatusBadge status={displayStatus} />
       </div>
       {commandPreview && (
-        <p className="font-mono text-[11px] text-[rgba(38,37,30,0.4)] truncate">{commandPreview}</p>
+        <p className="font-mono text-[11px] text-[var(--fg-40)] truncate">{commandPreview}</p>
       )}
     </div>
   );
@@ -98,7 +98,7 @@ function LifecycleButton({
       <Button
         variant="ghost"
         size="icon"
-        className="text-[rgba(38,37,30,0.45)] hover:text-error-warm hover:bg-error-warm/10 active:bg-error-warm/20 transition-all duration-150"
+        className="text-[var(--fg-45)] hover:text-error-warm hover:bg-error-warm/10 active:bg-error-warm/20 transition-all duration-150"
         disabled={isBusy}
         onClick={() => void onStop(serverId)}
         title={isStopping ? "Stopping server" : "Stop server"}
@@ -112,7 +112,7 @@ function LifecycleButton({
     <Button
       variant="ghost"
       size="icon"
-      className="text-[rgba(38,37,30,0.45)] hover:text-success-muted hover:bg-success-muted/10 active:bg-success-muted/20 transition-all duration-150"
+      className="text-[var(--fg-45)] hover:text-success-muted hover:bg-success-muted/10 active:bg-success-muted/20 transition-all duration-150"
       disabled={isBusy}
       onClick={() => void onStart(serverId)}
       title={isStarting ? "Starting server" : "Start server"}
@@ -160,7 +160,7 @@ function ServerControls({
       <Button
         variant="ghost"
         size="icon"
-        className="text-[rgba(38,37,30,0.45)] hover:text-cursor-dark hover:bg-surface-400 active:bg-surface-500 transition-all duration-150"
+        className="text-[var(--fg-45)] hover:text-cursor-dark hover:bg-surface-400 active:bg-surface-500 transition-all duration-150"
         onClick={() => navigate(`/servers/${server.id}`)}
         title="Server details"
       >
@@ -169,7 +169,7 @@ function ServerControls({
       <Button
         variant="ghost"
         size="icon"
-        className="text-[rgba(38,37,30,0.45)] hover:text-error-warm hover:bg-error-warm/10 active:bg-error-warm/20 transition-all duration-150"
+        className="text-[var(--fg-45)] hover:text-error-warm hover:bg-error-warm/10 active:bg-error-warm/20 transition-all duration-150"
         onClick={confirmRemove}
         title="Remove server"
       >

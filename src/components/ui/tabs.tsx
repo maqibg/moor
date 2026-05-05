@@ -17,8 +17,8 @@ export function Tabs({ value, onValueChange, tabs, className }: TabsProps) {
           className={cn(
             "font-headline text-sm px-4 py-2 rounded-lg transition-all",
             value === tab.value
-              ? "bg-white text-cursor-dark shadow-[0_1px_3px_rgba(0,0,0,0.06)]"
-              : "text-[rgba(38,37,30,0.45)] hover:text-[rgba(38,37,30,0.7)]",
+              ? "bg-surface-100 text-cursor-dark shadow-[0_1px_3px_rgba(0,0,0,0.06)]"
+              : "text-[var(--fg-45)] hover:text-[var(--fg-70)]",
           )}
         >
           {tab.label}

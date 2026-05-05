@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,8 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { PageLoading } from "@/components/shared/PageLoading";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { KeyValueTable } from "@/components/shared/KeyValueTable";
+import { CopyButton } from "@/components/shared/CopyButton";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Play, Square, RefreshCw, Copy, Check, Terminal } from "lucide-react";
+import { ArrowLeft, Play, Square, RefreshCw, Terminal } from "lucide-react";
 import { useProfiles } from "@/hooks/useProfiles";
 import { useServers } from "@/hooks/useServers";
 import { cn } from "@/lib/utils";
@@ -68,15 +72,8 @@ export function ServerDetail() {
     [queryClient, id],
   );
 
-  const [copied, setCopied] = useState(false);
-
   if (loading || !server?.id) {
-    return (
-      <div className="py-16 text-center animate-fade-in">
-        <div className="h-8 w-8 mx-auto rounded-full border-2 border-[rgba(38,37,30,0.1)] border-t-cursor-orange animate-spin mb-4" />
-        <p className="font-body text-sm text-[rgba(38,37,30,0.4)]">Loading server details...</p>
-      </div>
-    );
+    return <PageLoading message="Loading server details..." />;
   }
 
   const handleDiscoverTools = async () => {
@@ -118,12 +115,6 @@ export function ServerDetail() {
       ? `${server.command || ""} ${server.args?.join(" ") || ""}`.trim()
       : server.url || "";
 
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(commandText);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
   const envEntries = server.env ? Object.entries(server.env) : [];
   const headerEntries = server.headers ? Object.entries(server.headers) : [];
 
@@ -143,7 +134,7 @@ export function ServerDetail() {
                   ? "bg-success-muted/10 text-success-muted border-success-muted/20"
                   : server.status === "error"
                     ? "bg-error-warm/10 text-error-warm border-error-warm/20"
-                    : "bg-surface-300 text-[rgba(38,37,30,0.35)] border-[rgba(38,37,30,0.08)]",
+                    : "bg-surface-300 text-[var(--fg-35)] border-[var(--fg-08)]",
               )}
             >
               <Terminal className="h-[18px] w-[18px]" />
@@ -155,7 +146,7 @@ export function ServerDetail() {
                 </h1>
                 <StatusBadge status={server.status} />
               </div>
-              <p className="font-mono text-[11px] text-[rgba(38,37,30,0.4)] mt-0.5 truncate">
+              <p className="font-mono text-[11px] text-[var(--fg-40)] mt-0.5 truncate">
                 {commandText || "No command configured"}
               </p>
             </div>
@@ -194,32 +185,24 @@ export function ServerDetail() {
           {/* Command Preview */}
           {commandText && (
             <div>
-              <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-2 block uppercase tracking-wider">
+              <label className="font-headline text-xs text-[var(--fg-50)] mb-2 block uppercase tracking-wider">
                 {server.connectionType === "stdio" ? "Command" : "URL"}
               </label>
-              <div className="bg-cursor-dark rounded-xl border border-[rgba(38,37,30,0.15)] p-4 relative group">
-                <pre className="font-mono text-xs text-[rgba(242,241,237,0.85)] overflow-x-auto whitespace-pre-wrap pr-10">
+              <div className="bg-surface-inverted rounded-xl border border-[var(--fg-15)] p-4 relative group">
+                <pre className="font-mono text-xs text-text-inverted overflow-x-auto whitespace-pre-wrap pr-10">
                   {commandText}
                 </pre>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
+                <CopyButton
+                  text={commandText}
                   className="absolute top-2.5 right-2.5 text-[rgba(242,241,237,0.4)] hover:text-[rgba(242,241,237,0.8)] hover:bg-white/10"
-                  onClick={handleCopy}
-                >
-                  {copied ? (
-                    <Check className="h-3.5 w-3.5 text-success-muted" />
-                  ) : (
-                    <Copy className="h-3.5 w-3.5" />
-                  )}
-                </Button>
+                />
               </div>
             </div>
           )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
+              <label className="font-headline text-xs text-[var(--fg-50)] mb-1.5 block">
                 Connection Type
               </label>
               <Badge variant="outline" className="capitalize">
@@ -228,10 +211,10 @@ export function ServerDetail() {
             </div>
             <div className="flex items-center justify-between">
               <div>
-                <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
+                <label className="font-headline text-xs text-[var(--fg-50)] mb-1.5 block">
                   Auto Start
                 </label>
-                <p className="text-[11px] text-[rgba(38,37,30,0.4)]">
+                <p className="text-[11px] text-[var(--fg-40)]">
                   Start automatically when Moor launches
                 </p>
               </div>
@@ -239,10 +222,10 @@ export function ServerDetail() {
             </div>
             {server.workingDir && (
               <div className="col-span-2">
-                <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-1.5 block">
+                <label className="font-headline text-xs text-[var(--fg-50)] mb-1.5 block">
                   Working Directory
                 </label>
-                <p className="font-mono text-xs text-[rgba(38,37,30,0.55)] bg-surface-300 rounded-lg px-3 py-2">
+                <p className="font-mono text-xs text-[var(--fg-55)] bg-surface-300 rounded-lg px-3 py-2">
                   {server.workingDir}
                 </p>
               </div>
@@ -251,59 +234,19 @@ export function ServerDetail() {
 
           {envEntries.length > 0 && (
             <div>
-              <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-2 block">
+              <label className="font-headline text-xs text-[var(--fg-50)] mb-2 block">
                 Environment Variables
               </label>
-              <div className="rounded-xl border border-[rgba(38,37,30,0.08)] overflow-hidden">
-                <div className="flex items-center px-4 py-2 border-b border-[rgba(38,37,30,0.06)] bg-surface-300/50">
-                  <span className="font-mono text-[10px] text-[rgba(38,37,30,0.4)] w-1/3 uppercase tracking-wider">
-                    Key
-                  </span>
-                  <span className="font-mono text-[10px] text-[rgba(38,37,30,0.4)] w-2/3 uppercase tracking-wider">
-                    Value
-                  </span>
-                </div>
-                {envEntries.map(([key, value]) => (
-                  <div
-                    key={key}
-                    className="flex items-center px-4 py-2.5 border-b border-[rgba(38,37,30,0.04)] last:border-0 hover:bg-surface-300/30 transition-colors"
-                  >
-                    <span className="font-mono text-xs text-cursor-dark w-1/3 truncate">{key}</span>
-                    <span className="font-mono text-xs text-[rgba(38,37,30,0.5)] w-2/3 truncate">
-                      {value}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <KeyValueTable entries={envEntries} />
             </div>
           )}
 
           {headerEntries.length > 0 && (
             <div>
-              <label className="font-headline text-xs text-[rgba(38,37,30,0.5)] mb-2 block">
+              <label className="font-headline text-xs text-[var(--fg-50)] mb-2 block">
                 HTTP Headers
               </label>
-              <div className="rounded-xl border border-[rgba(38,37,30,0.08)] overflow-hidden">
-                <div className="flex items-center px-4 py-2 border-b border-[rgba(38,37,30,0.06)] bg-surface-300/50">
-                  <span className="font-mono text-[10px] text-[rgba(38,37,30,0.4)] w-1/3 uppercase tracking-wider">
-                    Header
-                  </span>
-                  <span className="font-mono text-[10px] text-[rgba(38,37,30,0.4)] w-2/3 uppercase tracking-wider">
-                    Value
-                  </span>
-                </div>
-                {headerEntries.map(([key, value]) => (
-                  <div
-                    key={key}
-                    className="flex items-center px-4 py-2.5 border-b border-[rgba(38,37,30,0.04)] last:border-0 hover:bg-surface-300/30 transition-colors"
-                  >
-                    <span className="font-mono text-xs text-cursor-dark w-1/3 truncate">{key}</span>
-                    <span className="font-mono text-xs text-[rgba(38,37,30,0.5)] w-2/3 truncate">
-                      {value}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <KeyValueTable entries={headerEntries} keyLabel="Header" />
             </div>
           )}
 
@@ -331,12 +274,10 @@ export function ServerDetail() {
         </CardHeader>
         <CardContent>
           {tools.length === 0 ? (
-            <div className="py-10 text-center">
-              <Terminal className="h-8 w-8 mx-auto text-[rgba(38,37,30,0.15)] mb-3" />
-              <p className="font-body text-sm text-[rgba(38,37,30,0.35)]">
-                No tools discovered. Start the server to discover tools.
-              </p>
-            </div>
+            <EmptyState
+              icon={Terminal}
+              message="No tools discovered. Start the server to discover tools."
+            />
           ) : (
             <div className="space-y-2">
               {tools.map((tool) => (
@@ -345,8 +286,8 @@ export function ServerDetail() {
                   className={cn(
                     "flex items-center justify-between p-4 rounded-xl border transition-all duration-200",
                     tool.disabled
-                      ? "bg-surface-300/40 border-[rgba(38,37,30,0.06)] opacity-60"
-                      : "bg-surface-100 border-[rgba(38,37,30,0.08)] hover:border-[rgba(38,37,30,0.15)]",
+                      ? "bg-surface-300/40 border-[var(--fg-06)] opacity-60"
+                      : "bg-surface-100 border-[var(--fg-08)] hover:border-[var(--fg-15)]",
                   )}
                 >
                   <div className="min-w-0 flex-1 mr-4">
@@ -357,7 +298,7 @@ export function ServerDetail() {
                       <ToolCategoryBadge name={tool.exposedName} />
                     </div>
                     {tool.description && (
-                      <p className="font-body text-xs text-[rgba(38,37,30,0.5)] truncate">
+                      <p className="font-body text-xs text-[var(--fg-50)] truncate">
                         {tool.description}
                       </p>
                     )}

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { useProfiles } from "@/hooks/useProfiles";
 import { Plus, Trash2, Check, Code, FlaskConical, User, Home } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -30,22 +31,17 @@ export function Profiles() {
 
   return (
     <div className="space-y-8 animate-fade-in-up">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-        <div>
-          <h1 className="font-headline text-[28px] tracking-tight text-cursor-dark leading-tight">
-            Profiles
-          </h1>
-          <p className="font-body text-sm text-[rgba(38,37,30,0.5)] mt-1.5">
-            Manage server groupings and tool visibility
-          </p>
-        </div>
-        {!creating && (
-          <Button onClick={() => setCreating(true)}>
-            <Plus className="h-4 w-4 mr-2" /> New Profile
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        title="Profiles"
+        subtitle="Manage server groupings and tool visibility"
+        action={
+          !creating && (
+            <Button onClick={() => setCreating(true)}>
+              <Plus className="h-4 w-4 mr-2" /> New Profile
+            </Button>
+          )
+        }
+      />
 
       {/* Create Form */}
       {creating && (
@@ -85,7 +81,7 @@ export function Profiles() {
                 "group cursor-pointer transition-all duration-200 hover:shadow-[0_12px_40px_-12px_rgba(0,0,0,0.06)]",
                 profile.isActive
                   ? "ring-2 ring-cursor-orange/20 border-cursor-orange/30"
-                  : "hover:border-[rgba(38,37,30,0.15)]",
+                  : "hover:border-[var(--fg-15)]",
               )}
               onClick={() => navigate(`/profiles/${profile.id}`)}
             >
@@ -104,17 +100,17 @@ export function Profiles() {
                   <Icon className="h-[18px] w-[18px]" />
                 </div>
                 <h3 className="font-headline text-base text-cursor-dark mb-1">{profile.name}</h3>
-                <p className="font-body text-xs text-[rgba(38,37,30,0.45)] mb-5">
+                <p className="font-body text-xs text-[var(--fg-45)] mb-5">
                   {profile.isActive ? "Currently active" : "Click to manage"}
                 </p>
-                <div className="flex items-center gap-2 pt-4 border-t border-[rgba(38,37,30,0.06)]">
+                <div className="flex items-center gap-2 pt-4 border-t border-[var(--fg-06)]">
                   <span
                     className={cn(
                       "h-2 w-2 rounded-full",
-                      profile.isActive ? "bg-success-muted" : "bg-[rgba(38,37,30,0.2)]",
+                      profile.isActive ? "bg-success-muted" : "bg-[var(--fg-20)]",
                     )}
                   />
-                  <span className="font-body text-xs text-[rgba(38,37,30,0.4)]">
+                  <span className="font-body text-xs text-[var(--fg-40)]">
                     {profile.serverCount ?? 0} servers
                   </span>
                 </div>
@@ -140,7 +136,7 @@ export function Profiles() {
                       <Button
                         variant="ghost"
                         size="icon-sm"
-                        className="text-[rgba(38,37,30,0.35)] hover:text-error-warm"
+                        className="text-[var(--fg-35)] hover:text-error-warm"
                         onClick={(e) => {
                           e.stopPropagation();
                           deleteProfile(profile.id);
@@ -160,9 +156,9 @@ export function Profiles() {
         <button
           onClick={() => setCreating(true)}
           className={cn(
-            "rounded-xl border-2 border-dashed border-[rgba(38,37,30,0.12)]",
+            "rounded-xl border-2 border-dashed border-[var(--fg-12)]",
             "flex flex-col items-center justify-center text-center min-h-[180px] p-5",
-            "text-[rgba(38,37,30,0.35)] hover:text-cursor-orange hover:border-cursor-orange/30 hover:bg-cursor-orange/[0.02]",
+            "text-[var(--fg-35)] hover:text-cursor-orange hover:border-cursor-orange/30 hover:bg-cursor-orange/[0.02]",
             "transition-all duration-200 cursor-pointer group",
           )}
         >
@@ -172,9 +168,7 @@ export function Profiles() {
           <h3 className="font-headline text-sm font-medium text-cursor-dark group-hover:text-cursor-orange transition-colors">
             New Profile
           </h3>
-          <p className="font-body text-xs text-[rgba(38,37,30,0.4)] mt-1">
-            Create a server grouping
-          </p>
+          <p className="font-body text-xs text-[var(--fg-40)] mt-1">Create a server grouping</p>
         </button>
       </div>
     </div>

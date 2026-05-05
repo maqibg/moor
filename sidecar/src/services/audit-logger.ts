@@ -1,5 +1,6 @@
 import { run } from "../db/index.js";
 import { redactForAudit } from "./audit-redaction.js";
+import { settingsService } from "./settings.js";
 
 interface LogEntry {
   id: string;
@@ -26,6 +27,12 @@ export class AuditLogger {
   }
 
   log(entry: Omit<LogEntry, "id" | "timestamp">) {
+    try {
+      const settings = settingsService.getSettings();
+      if (!settings.advanced.enableAuditLogging) return;
+    } catch {
+      // settingsService not initialized yet, allow logging
+    }
     this.buffer.push({
       ...entry,
       id: crypto.randomUUID(),

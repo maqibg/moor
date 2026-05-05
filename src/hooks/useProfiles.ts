@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, apiPost, apiPut, apiDelete } from "@/lib/api";
+import type { Profile } from "@moor/types";
 
 export function useProfiles() {
   const queryClient = useQueryClient();
@@ -71,13 +72,4 @@ export function useProfiles() {
     updateProfile,
     updateProfileServer,
   };
-}
-
-export interface Profile {
-  id: string;
-  name: string;
-  isActive: boolean;
-  serverCount?: number;
-  createdAt: string;
-  updatedAt: string;
 }

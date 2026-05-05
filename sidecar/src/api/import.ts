@@ -1,17 +1,20 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { scanAllConfigs } from "../config/scanner.js";
-import {
-  parseJsonMcpConfig,
-  type ImportDiagnostic,
-  type ParsedImport,
-} from "../config/import-parser.js";
+import { parseJsonMcpConfig } from "../config/import-parser.js";
 import { generateSnippets } from "../config/snippets.js";
 import { getClientById } from "../config/clients.js";
 import { convertConfig, type ConvertInput } from "../config/converter.js";
 import { serverManager } from "../services/server-manager.js";
-import { queryAll, queryOne, run } from "../db/index.js";
-import type { ScannedServer, UnsupportedServer } from "../config/scanner.js";
+import { profileService } from "../services/profiles.js";
+import { queryAll, queryOne } from "../db/index.js";
+import type {
+  ScannedServer,
+  UnsupportedServer,
+  ImportDiagnostic,
+  ImportPreview,
+  ParsedImport,
+} from "@moor/types";
 
 const importApi = new Hono();
 
@@ -31,16 +34,6 @@ const convertInputSchema = z
     targetClient: clientIdSchema,
   })
   .strict();
-
-interface ImportPreview {
-  scanned: number;
-  newServers: number;
-  servers: ScannedServer[];
-  duplicates: ScannedServer[];
-  unsupported: UnsupportedServer[];
-  errors: string[];
-  diagnostics: ImportDiagnostic[];
-}
 
 export function selectImportCandidates(
   servers: ScannedServer[],
@@ -143,17 +136,14 @@ importApi.post("/execute", async (c) => {
     imported.push(serverConfig.name);
   }
 
-  const activeProfile = queryOne("SELECT id FROM profiles WHERE is_active = 1", []);
-  if (activeProfile) {
-    for (const name of imported) {
-      const server = queryOne("SELECT id FROM mcp_servers WHERE name = ?", [name]);
-      if (server) {
-        run(
-          "INSERT OR IGNORE INTO profile_servers (profile_id, server_id, enabled, disabled_tools) VALUES (?, ?, 1, '[]')",
-          [activeProfile.id, server.id],
-        );
-      }
-    }
+  if (imported.length > 0) {
+    const serverIds = imported
+      .map(
+        (name) =>
+          queryOne("SELECT id FROM mcp_servers WHERE name = ?", [name])?.id as string | undefined,
+      )
+      .filter(Boolean) as string[];
+    profileService.assignToActiveProfile(serverIds);
   }
 
   return c.json({ imported, skipped });

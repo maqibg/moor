@@ -1,4 +1,5 @@
 import type { ServerStatus } from "./server.js";
+import type { Settings } from "./settings.js";
 
 export interface ServerStatusEvent {
   type: "server:status";
@@ -24,6 +25,15 @@ export interface ProfileActivatedEvent {
   };
 }
 
-export type MoorEvent = ServerStatusEvent | ServerToolsEvent | ProfileActivatedEvent;
+export interface SettingsChangedEvent {
+  type: "settings:changed";
+  data: Settings;
+}
+
+export type MoorEvent =
+  | ServerStatusEvent
+  | ServerToolsEvent
+  | ProfileActivatedEvent
+  | SettingsChangedEvent;
 
 export type MoorEventType = MoorEvent["type"];

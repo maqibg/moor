@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs } from "@/components/ui/tabs";
 import { CodeBlock } from "@/components/shared/CodeBlock";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ConverterPanel } from "@/components/converter/ConverterPanel";
@@ -58,14 +59,10 @@ export function ClientConfig() {
 
   return (
     <div className="space-y-6 animate-fade-in-up">
-      <div>
-        <h1 className="font-headline text-[28px] tracking-tight text-cursor-dark leading-tight">
-          Client Configuration
-        </h1>
-        <p className="font-body text-sm text-[rgba(38,37,30,0.5)] mt-1.5">
-          Configure your AI agents to connect to Moor
-        </p>
-      </div>
+      <PageHeader
+        title="Client Configuration"
+        subtitle="Configure your AI agents to connect to Moor"
+      />
 
       <Tabs
         value={activeTab}
@@ -89,12 +86,12 @@ export function ClientConfig() {
               >
                 <CardHeader className="pb-3">
                   <div className="flex items-center gap-3">
-                    <div className="h-9 w-9 rounded-xl bg-surface-300 border border-[rgba(38,37,30,0.08)] flex items-center justify-center">
-                      <Terminal className="h-4 w-4 text-[rgba(38,37,30,0.5)]" />
+                    <div className="h-9 w-9 rounded-xl bg-surface-300 border border-[var(--fg-08)] flex items-center justify-center">
+                      <Terminal className="h-4 w-4 text-[var(--fg-50)]" />
                     </div>
                     <div>
                       <CardTitle className="text-base">{s.client}</CardTitle>
-                      <p className="font-body text-xs text-[rgba(38,37,30,0.45)] mt-0.5">
+                      <p className="font-body text-xs text-[var(--fg-45)] mt-0.5">
                         {s.description}
                       </p>
                     </div>

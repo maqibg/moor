@@ -1,21 +1,9 @@
 import { useCallback, useMemo, useState } from "react";
 import { apiPost } from "@/lib/api";
-import {
-  formatJsonImport,
-  getJsonImportDiagnostics,
-  type ImportDiagnostic,
-} from "@/lib/json-import-editor";
-import type { ScannedServer, UnsupportedServer } from "@moor/types";
+import { formatJsonImport, getJsonImportDiagnostics } from "@/lib/json-import-editor";
+import type { ScannedServer, ImportPreview as ImportPreviewType } from "@moor/types";
 
-export interface ImportPreview {
-  scanned: number;
-  newServers: number;
-  servers: ScannedServer[];
-  duplicates: ScannedServer[];
-  unsupported: UnsupportedServer[];
-  errors: string[];
-  diagnostics?: ImportDiagnostic[];
-}
+type ImportPreview = ImportPreviewType;
 
 export function useConfigImport() {
   const [scanCandidates, setScanCandidates] = useState<ScannedServer[]>([]);

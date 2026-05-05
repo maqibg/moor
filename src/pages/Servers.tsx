@@ -1,6 +1,8 @@
 import { useCallback, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ServerCard } from "@/components/shared/ServerCard";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { PageLoading } from "@/components/shared/PageLoading";
 import { useServers } from "@/hooks/useServers";
 import { useConfigImport } from "@/hooks/useConfigImport";
 import { FileJson, Plus, RefreshCw, ScanSearch } from "lucide-react";
@@ -37,31 +39,26 @@ export function Servers() {
 
   return (
     <div className="space-y-6 animate-fade-in-up">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-        <div>
-          <h1 className="font-headline text-[28px] tracking-tight text-cursor-dark leading-tight">
-            Servers
-          </h1>
-          <p className="font-body text-sm text-[rgba(38,37,30,0.5)] mt-1.5">
-            Manage and configure your MCP servers
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => void refresh()} disabled={loading}>
-            <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} /> Refresh
-          </Button>
-          <Button variant="outline" onClick={() => setShowJsonImport(true)}>
-            <FileJson className="h-4 w-4 mr-2" /> Import JSON
-          </Button>
-          <Button variant="outline" onClick={handleScan}>
-            <ScanSearch className="h-4 w-4 mr-2" /> Scan Configs
-          </Button>
-          <Button onClick={() => setShowAdd(true)}>
-            <Plus className="h-4 w-4 mr-2" /> Add Server
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Servers"
+        subtitle="Manage and configure your MCP servers"
+        action={
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => void refresh()} disabled={loading}>
+              <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} /> Refresh
+            </Button>
+            <Button variant="outline" onClick={() => setShowJsonImport(true)}>
+              <FileJson className="h-4 w-4 mr-2" /> Import JSON
+            </Button>
+            <Button variant="outline" onClick={handleScan}>
+              <ScanSearch className="h-4 w-4 mr-2" /> Scan Configs
+            </Button>
+            <Button onClick={() => setShowAdd(true)}>
+              <Plus className="h-4 w-4 mr-2" /> Add Server
+            </Button>
+          </div>
+        }
+      />
 
       {/* Import Panels */}
       <ConfigImportPanel
@@ -77,16 +74,13 @@ export function Servers() {
       {/* Server List */}
       <div className="space-y-2">
         {loading ? (
-          <div className="py-16 text-center">
-            <div className="h-8 w-8 mx-auto rounded-full border-2 border-[rgba(38,37,30,0.1)] border-t-cursor-orange animate-spin mb-4" />
-            <p className="font-body text-sm text-[rgba(38,37,30,0.4)]">Loading servers...</p>
-          </div>
+          <PageLoading message="Loading servers..." />
         ) : servers.length === 0 ? (
           <button
             onClick={() => setShowAdd(true)}
             className={cn(
-              "w-full py-10 rounded-xl border-2 border-dashed border-[rgba(38,37,30,0.12)]",
-              "text-[rgba(38,37,30,0.4)] hover:text-cursor-orange hover:border-cursor-orange/30 hover:bg-cursor-orange/[0.02]",
+              "w-full py-10 rounded-xl border-2 border-dashed border-[var(--fg-12)]",
+              "text-[var(--fg-40)] hover:text-cursor-orange hover:border-cursor-orange/30 hover:bg-cursor-orange/[0.02]",
               "transition-all duration-200 flex flex-col items-center justify-center gap-3 cursor-pointer",
             )}
           >
@@ -95,7 +89,7 @@ export function Servers() {
             </div>
             <div className="text-center">
               <p className="font-headline text-sm font-medium">Add Your First Server</p>
-              <p className="font-body text-xs text-[rgba(38,37,30,0.4)] mt-1">
+              <p className="font-body text-xs text-[var(--fg-40)] mt-1">
                 Or scan existing configs to import
               </p>
             </div>

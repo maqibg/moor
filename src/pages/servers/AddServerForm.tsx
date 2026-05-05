@@ -99,7 +99,7 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
           <Button
             variant="ghost"
             size="icon"
-            className="text-[rgba(38,37,30,0.65)] hover:text-cursor-dark hover:bg-[rgba(38,37,30,0.08)]"
+            className="text-[var(--fg-65)] hover:text-cursor-dark hover:bg-[var(--fg-08)]"
             onClick={onClose}
           >
             <X className="h-5 w-5" />
@@ -179,7 +179,7 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
         <div className="flex items-center justify-between py-2">
           <div className="space-y-0.5">
             <Label>Auto Start</Label>
-            <p className="text-[11px] text-[rgba(38,37,30,0.4)]">
+            <p className="text-[11px] text-[var(--fg-40)]">
               Automatically start this server when Moor launches
             </p>
           </div>

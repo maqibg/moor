@@ -3,15 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
-import {
-  closeDb,
-  initDb,
-  queryAll,
-  queryOne,
-  run,
-  runMigrations,
-  seedDefaultProfile,
-} from "../db/index.js";
+import { closeDb, initDb, queryAll, queryOne, run, runMigrations } from "../db/index.js";
+import { profileService } from "./profiles.js";
 import {
   assertStdioCommandAvailable,
   buildStdioEnvironment,
@@ -83,7 +76,7 @@ describe("ServerManager MCP lifecycle", () => {
     dataDir = mkdtempSync(path.join(tmpdir(), "moor-test-"));
     await initDb({ dataDir });
     runMigrations();
-    seedDefaultProfile();
+    profileService.seedDefault();
     serverManager.resetForTest();
     serverManager.loadFromDb();
   });

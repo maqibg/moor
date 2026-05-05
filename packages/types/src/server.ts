@@ -2,10 +2,12 @@ export type ConnectionType = "stdio" | "http";
 export type ServerStatus = "stopped" | "starting" | "running" | "error";
 export type ServerAction = "starting" | "stopping";
 
-export interface ServerBase {
+export interface Server {
   id: string;
   name: string;
   connectionType: ConnectionType;
+  status: ServerStatus;
+  autoStart: boolean;
   command?: string | null;
   args?: string[] | null;
   url?: string | null;

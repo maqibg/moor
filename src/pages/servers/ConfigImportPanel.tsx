@@ -59,14 +59,14 @@ export function ConfigImportPanel({
     <>
       {/* JSON Import Form */}
       {showJsonImport && (
-        <Card className="animate-scale-in border-[rgba(38,37,30,0.08)]">
+        <Card className="animate-scale-in border-[var(--fg-08)]">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">Import MCP JSON</CardTitle>
               <Button
                 variant="ghost"
                 size="icon"
-                className="text-[rgba(38,37,30,0.65)] hover:text-cursor-dark hover:bg-[rgba(38,37,30,0.08)]"
+                className="text-[var(--fg-65)] hover:text-cursor-dark hover:bg-[var(--fg-08)]"
                 onClick={onCloseJsonImport}
               >
                 <X className="h-5 w-5" />
@@ -76,8 +76,8 @@ export function ConfigImportPanel({
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <FileJson className="h-4 w-4 text-[rgba(38,37,30,0.5)]" />
-                <span className="font-mono text-[11px] text-[rgba(38,37,30,0.48)]">JSONC</span>
+                <FileJson className="h-4 w-4 text-[var(--fg-50)]" />
+                <span className="font-mono text-[11px] text-[var(--fg-48)]">JSONC</span>
               </div>
               <Button
                 variant="outline"
@@ -91,7 +91,7 @@ export function ConfigImportPanel({
             </div>
             <Suspense
               fallback={
-                <div className="h-[300px] rounded-xl border border-[rgba(38,37,30,0.1)] bg-surface-200/40" />
+                <div className="h-[300px] rounded-xl border border-[var(--fg-10)] bg-surface-200/40" />
               }
             >
               <JsonImportEditor
@@ -107,7 +107,7 @@ export function ConfigImportPanel({
                   "flex items-center gap-2 rounded-lg border px-3 py-2",
                   jsonImportStatusIsError
                     ? "border-error-warm/20 bg-error-warm/8"
-                    : "border-[rgba(38,37,30,0.08)] bg-surface-300/40",
+                    : "border-[var(--fg-08)] bg-surface-300/40",
                 )}
               >
                 {jsonImportStatusIsError ? (
@@ -115,7 +115,7 @@ export function ConfigImportPanel({
                 ) : (
                   <Check className="h-4 w-4 text-success-muted" />
                 )}
-                <p className="font-body text-xs text-[rgba(38,37,30,0.55)]">{jsonImportStatus}</p>
+                <p className="font-body text-xs text-[var(--fg-55)]">{jsonImportStatus}</p>
               </div>
             )}
             {jsonImportErrors.length > 0 && (
@@ -151,7 +151,7 @@ export function ConfigImportPanel({
               <Button
                 variant="ghost"
                 size="icon"
-                className="text-[rgba(38,37,30,0.65)] hover:text-cursor-dark hover:bg-[rgba(38,37,30,0.08)]"
+                className="text-[var(--fg-65)] hover:text-cursor-dark hover:bg-[var(--fg-08)]"
                 onClick={clearScan}
               >
                 <X className="h-5 w-5" />
@@ -162,13 +162,13 @@ export function ConfigImportPanel({
             {scanStatus && (
               <div className="flex items-center gap-2 py-2">
                 <Check className="h-4 w-4 text-success-muted" />
-                <p className="font-body text-sm text-[rgba(38,37,30,0.55)]">{scanStatus}</p>
+                <p className="font-body text-sm text-[var(--fg-55)]">{scanStatus}</p>
               </div>
             )}
             {hasStaticAuthorizationHeader && (
               <div className="flex items-start gap-2 rounded-lg border border-gold/20 bg-gold/8 px-3 py-2">
                 <AlertTriangle className="h-4 w-4 text-gold shrink-0 mt-0.5" />
-                <p className="font-body text-xs leading-relaxed text-[rgba(38,37,30,0.55)]">
+                <p className="font-body text-xs leading-relaxed text-[var(--fg-55)]">
                   Static Authorization headers are stored in Moor's local SQLite database. Prefer{" "}
                   <code className="font-mono">{"{env:VAR_NAME}"}</code> when possible.
                 </p>
@@ -184,17 +184,17 @@ export function ConfigImportPanel({
               </div>
             )}
             {importPreview && importPreview.unsupported.length > 0 && (
-              <div className="rounded-lg border border-[rgba(38,37,30,0.08)] bg-surface-300/40 px-3 py-2">
-                <p className="font-headline text-xs text-[rgba(38,37,30,0.55)] mb-1.5">
+              <div className="rounded-lg border border-[var(--fg-08)] bg-surface-300/40 px-3 py-2">
+                <p className="font-headline text-xs text-[var(--fg-55)] mb-1.5">
                   Unsupported ({importPreview.unsupported.length})
                 </p>
                 <div className="space-y-1">
                   {importPreview.unsupported.map((server) => (
                     <p
                       key={`${server.source}:${server.name}:${server.reason}`}
-                      className="font-body text-xs text-[rgba(38,37,30,0.48)]"
+                      className="font-body text-xs text-[var(--fg-48)]"
                     >
-                      <span className="font-mono text-[rgba(38,37,30,0.62)]">{server.name}</span>:{" "}
+                      <span className="font-mono text-[var(--fg-62)]">{server.name}</span>:{" "}
                       {server.reason}
                     </p>
                   ))}
@@ -202,8 +202,8 @@ export function ConfigImportPanel({
               </div>
             )}
             {importPreview && importPreview.duplicates.length > 0 && (
-              <div className="rounded-lg border border-[rgba(38,37,30,0.08)] bg-surface-300/30 px-3 py-2">
-                <p className="font-body text-xs text-[rgba(38,37,30,0.48)]">
+              <div className="rounded-lg border border-[var(--fg-08)] bg-surface-300/30 px-3 py-2">
+                <p className="font-body text-xs text-[var(--fg-48)]">
                   Skipping {importPreview.duplicates.length} duplicate server
                   {importPreview.duplicates.length > 1 ? "s" : ""} by name.
                 </p>
@@ -212,11 +212,11 @@ export function ConfigImportPanel({
             {scanCandidates.map((server) => (
               <label
                 key={`${server.source}:${server.name}`}
-                className="flex items-center justify-between py-2.5 px-3 rounded-xl hover:bg-surface-300/50 transition-colors cursor-pointer border border-transparent hover:border-[rgba(38,37,30,0.06)]"
+                className="flex items-center justify-between py-2.5 px-3 rounded-xl hover:bg-surface-300/50 transition-colors cursor-pointer border border-transparent hover:border-[var(--fg-06)]"
               >
                 <div className="min-w-0">
                   <p className="font-headline text-sm text-cursor-dark">{server.name}</p>
-                  <p className="font-mono text-[11px] text-[rgba(38,37,30,0.45)] truncate">
+                  <p className="font-mono text-[11px] text-[var(--fg-45)] truncate">
                     {server.connectionType === "stdio"
                       ? [server.command, ...(server.args ?? [])].filter(Boolean).join(" ")
                       : server.url}

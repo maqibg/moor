@@ -1,8 +1,13 @@
 import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
+import { useSettings } from "@/hooks/useSettings";
+import { useTheme } from "@/hooks/useTheme";
 
 export function AppShell() {
+  const { settings } = useSettings();
+  useTheme(settings.appearance.theme);
+
   return (
     <div className="flex h-screen bg-cursor-cream overflow-hidden">
       <Sidebar />

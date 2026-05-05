@@ -1,4 +1,4 @@
-export interface ProfileBase {
+export interface Profile {
   id: string;
   name: string;
   isActive: boolean;

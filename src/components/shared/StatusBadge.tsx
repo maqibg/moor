@@ -2,7 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 const statusConfig = {
-  stopped: { label: "Stopped", variant: "subtle" as const, dot: "bg-[rgba(38,37,30,0.25)]" },
+  stopped: { label: "Stopped", variant: "subtle" as const, dot: "bg-[var(--fg-25)]" },
   starting: { label: "Starting", variant: "warning" as const, dot: "bg-gold animate-pulse-dot" },
   stopping: { label: "Stopping", variant: "warning" as const, dot: "bg-gold animate-pulse-dot" },
   running: { label: "Running", variant: "success" as const, dot: "bg-success-muted" },

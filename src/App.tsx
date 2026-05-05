@@ -7,6 +7,7 @@ import { Profiles } from "@/pages/Profiles";
 import { ProfileDetail } from "@/pages/ProfileDetail";
 import { ClientConfig } from "@/pages/ClientConfig";
 import { AuditLogs } from "@/pages/AuditLogs";
+import { SettingsPage } from "@/pages/Settings";
 
 function App() {
   return (
@@ -20,6 +21,7 @@ function App() {
           <Route path="/profiles/:id" element={<ProfileDetail />} />
           <Route path="/logs" element={<AuditLogs />} />
           <Route path="/config" element={<ClientConfig />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

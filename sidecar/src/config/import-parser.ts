@@ -1,40 +1,8 @@
 import { parse as parseJsonc, printParseErrorCode, type ParseError } from "jsonc-parser";
 import { parse as parseToml } from "smol-toml";
+import type { ScannedServer, UnsupportedServer, ImportDiagnostic, ParsedImport } from "@moor/types";
 
-export interface ScannedServer {
-  name: string;
-  connectionType: "stdio" | "http";
-  command?: string;
-  args?: string[];
-  url?: string;
-  env?: Record<string, string>;
-  headers?: Record<string, string>;
-  workingDir?: string;
-  source: string;
-}
-
-export interface UnsupportedServer {
-  name: string;
-  source: string;
-  reason: string;
-}
-
-export interface ImportDiagnostic {
-  source: string;
-  message: string;
-  code?: string;
-  line?: number;
-  column?: number;
-  offset?: number;
-  length?: number;
-}
-
-export interface ParsedImport {
-  servers: ScannedServer[];
-  unsupported: UnsupportedServer[];
-  errors: string[];
-  diagnostics: ImportDiagnostic[];
-}
+export type { ScannedServer, UnsupportedServer, ImportDiagnostic, ParsedImport };
 
 const HTTP_TYPES = new Set(["http", "sse", "streamable-http", "streamable_http", "remote"]);
 

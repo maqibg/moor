@@ -1,7 +1,9 @@
-import type { Context } from "hono";
+import { Hono } from "hono";
 import { eventBus } from "../services/event-bus.js";
 
-export function setupSSE(c: Context) {
+const events = new Hono();
+
+events.get("/", (c) => {
   const stream = new ReadableStream({
     start(controller) {
       const encoder = new TextEncoder();
@@ -13,6 +15,7 @@ export function setupSSE(c: Context) {
       const unsubStatus = eventBus.on("server:status", send);
       const unsubTools = eventBus.on("server:tools", send);
       const unsubProfile = eventBus.on("profile:activated", send);
+      const unsubSettings = eventBus.on("settings:changed", send);
 
       send("connected", { timestamp: new Date().toISOString() });
 
@@ -24,6 +27,7 @@ export function setupSSE(c: Context) {
         unsubStatus();
         unsubTools();
         unsubProfile();
+        unsubSettings();
         clearInterval(heartbeat);
       };
 
@@ -41,4 +45,6 @@ export function setupSSE(c: Context) {
       Connection: "keep-alive",
     },
   });
-}
+});
+
+export { events };

@@ -8,14 +8,14 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-surface-300 text-cursor-dark hover:text-error-warm rounded-xl px-4 py-2.5 border border-[rgba(38,37,30,0.08)] hover:border-[rgba(207,45,86,0.2)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.04)]",
+          "bg-surface-300 text-cursor-dark hover:text-error-warm rounded-xl px-4 py-2.5 border border-[var(--fg-08)] hover:border-[rgba(207,45,86,0.2)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.04)]",
         destructive: "bg-error-warm text-surface-200 hover:bg-error-warm/90 rounded-xl px-4 py-2.5",
         outline:
-          "border border-[rgba(38,37,30,0.1)] bg-transparent hover:bg-surface-300 rounded-xl px-4 py-2.5 hover:border-[rgba(38,37,30,0.15)]",
+          "border border-[var(--fg-10)] bg-transparent hover:bg-surface-300 rounded-xl px-4 py-2.5 hover:border-[var(--fg-15)]",
         secondary:
-          "bg-surface-400 text-[rgba(38,37,30,0.6)] hover:text-error-warm rounded-full px-3 py-1 text-xs",
+          "bg-surface-400 text-[var(--fg-60)] hover:text-error-warm rounded-full px-3 py-1 text-xs",
         ghost:
-          "text-[rgba(38,37,30,0.55)] hover:bg-[rgba(38,37,30,0.06)] hover:text-cursor-dark rounded-xl px-3 py-1.5",
+          "text-[var(--fg-55)] hover:bg-[var(--fg-06)] hover:text-cursor-dark rounded-xl px-3 py-1.5",
         link: "text-cursor-orange underline-offset-4 hover:underline",
       },
       size: {

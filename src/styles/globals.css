@@ -19,6 +19,10 @@
   --color-surface-400: #e6e5e0;
   --color-surface-500: #e1e0db;
 
+  --color-surface-inverted: #26251e;
+  --color-text-inverted: rgba(242, 241, 237, 0.85);
+  --color-text-inverted-muted: rgba(242, 241, 237, 0.35);
+
   --color-thinking: #dfa88f;
   --color-grep: #9fc9a2;
   --color-read: #9fbbe0;
@@ -63,6 +67,94 @@
   --sidebar-accent-foreground: #26251e;
   --sidebar-border: rgba(38, 37, 30, 0.1);
   --sidebar-ring: rgba(38, 37, 30, 0.2);
+
+  /* Semantic opacity tokens */
+  --fg-base: rgba(38, 37, 30, 1);
+  --fg-70: rgba(38, 37, 30, 0.7);
+  --fg-65: rgba(38, 37, 30, 0.65);
+  --fg-62: rgba(38, 37, 30, 0.62);
+  --fg-60: rgba(38, 37, 30, 0.6);
+  --fg-55: rgba(38, 37, 30, 0.55);
+  --fg-50: rgba(38, 37, 30, 0.5);
+  --fg-48: rgba(38, 37, 30, 0.48);
+  --fg-45: rgba(38, 37, 30, 0.45);
+  --fg-40: rgba(38, 37, 30, 0.4);
+  --fg-35: rgba(38, 37, 30, 0.35);
+  --fg-30: rgba(38, 37, 30, 0.3);
+  --fg-25: rgba(38, 37, 30, 0.25);
+  --fg-20: rgba(38, 37, 30, 0.2);
+  --fg-15: rgba(38, 37, 30, 0.15);
+  --fg-12: rgba(38, 37, 30, 0.12);
+  --fg-10: rgba(38, 37, 30, 0.1);
+  --fg-08: rgba(38, 37, 30, 0.08);
+  --fg-06: rgba(38, 37, 30, 0.06);
+  --fg-04: rgba(38, 37, 30, 0.04);
+}
+
+/* Dark theme overrides */
+[data-theme="dark"] {
+  --background: #1a1a1a;
+  --foreground: #e8e6e3;
+  --card: #242424;
+  --card-foreground: #e8e6e3;
+  --popover: #242424;
+  --popover-foreground: #e8e6e3;
+  --primary: #e8e6e3;
+  --primary-foreground: #1a1a1a;
+  --secondary: #2a2a2a;
+  --secondary-foreground: #e8e6e3;
+  --muted: #2a2a2a;
+  --muted-foreground: rgba(232, 230, 227, 0.55);
+  --accent: #2a2a2a;
+  --accent-foreground: #e8e6e3;
+  --destructive: #e55a7a;
+  --destructive-foreground: #e8e6e3;
+  --border: rgba(232, 230, 227, 0.1);
+  --input: rgba(232, 230, 227, 0.1);
+  --ring: rgba(232, 230, 227, 0.2);
+
+  --sidebar-background: #1e1e1e;
+  --sidebar-foreground: #e8e6e3;
+  --sidebar-primary: #e8e6e3;
+  --sidebar-primary-foreground: #1a1a1a;
+  --sidebar-accent: #242424;
+  --sidebar-accent-foreground: #e8e6e3;
+  --sidebar-border: rgba(232, 230, 227, 0.08);
+  --sidebar-ring: rgba(232, 230, 227, 0.2);
+
+  /* Semantic opacity tokens for dark */
+  --fg-base: rgba(232, 230, 227, 1);
+  --fg-70: rgba(232, 230, 227, 0.7);
+  --fg-65: rgba(232, 230, 227, 0.65);
+  --fg-62: rgba(232, 230, 227, 0.62);
+  --fg-60: rgba(232, 230, 227, 0.6);
+  --fg-55: rgba(232, 230, 227, 0.55);
+  --fg-50: rgba(232, 230, 227, 0.5);
+  --fg-48: rgba(232, 230, 227, 0.48);
+  --fg-45: rgba(232, 230, 227, 0.45);
+  --fg-40: rgba(232, 230, 227, 0.4);
+  --fg-35: rgba(232, 230, 227, 0.35);
+  --fg-30: rgba(232, 230, 227, 0.3);
+  --fg-25: rgba(232, 230, 227, 0.25);
+  --fg-20: rgba(232, 230, 227, 0.2);
+  --fg-15: rgba(232, 230, 227, 0.15);
+  --fg-12: rgba(232, 230, 227, 0.12);
+  --fg-10: rgba(232, 230, 227, 0.1);
+  --fg-08: rgba(232, 230, 227, 0.08);
+  --fg-06: rgba(232, 230, 227, 0.06);
+  --fg-04: rgba(232, 230, 227, 0.04);
+}
+
+/* Dark @theme variable overrides (auto-adapts bg-cursor-*, text-cursor-*, bg-surface-*) */
+[data-theme="dark"] {
+  --color-cursor-dark: #e8e6e3;
+  --color-cursor-cream: #1a1a1a;
+  --color-cursor-light: #242424;
+  --color-surface-100: #1a1a1a;
+  --color-surface-200: #1e1e1e;
+  --color-surface-300: #242424;
+  --color-surface-400: #2a2a2a;
+  --color-surface-500: #333333;
 }
 
 body {
@@ -96,4 +188,17 @@ body {
 * {
   scrollbar-width: thin;
   scrollbar-color: rgba(38, 37, 30, 0.15) transparent;
+}
+
+/* Dark scrollbar */
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: rgba(232, 230, 227, 0.15);
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(232, 230, 227, 0.25);
+}
+
+[data-theme="dark"] * {
+  scrollbar-color: rgba(232, 230, 227, 0.15) transparent;
 }
