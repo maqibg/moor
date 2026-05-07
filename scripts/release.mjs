@@ -86,7 +86,7 @@ if (existingTags.includes(tagName)) {
 
 run(`git add -A`);
 run(`git commit -m "chore(release): ${tagName}"`);
-run(`git tag ${tagName}`);
+run(`git tag -a ${tagName} -m "${tagName}"`);
 
 console.log(`\nRelease ${tagName} committed and tagged.`);
-console.log(`Push to publish: git push --follow-tags origin main`);
+console.log(`Push to publish: git push origin main refs/tags/${tagName}:refs/tags/${tagName}`);
