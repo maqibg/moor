@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { SidecarInfo } from "@moor/types";
+import { isRecord, createErrorWithCause } from "@/lib/utils";
 
 const defaultRuntime = (): SidecarInfo => ({
   port: 9223,
@@ -30,21 +31,55 @@ const getRuntimeInfo = async (): Promise<SidecarInfo> => {
 };
 
 let runtimeInfo: SidecarInfo | null = null;
+let runtimeInfoPromise: Promise<SidecarInfo> | null = null;
 
 export function resetRuntime(): void {
   runtimeInfo = null;
+  runtimeInfoPromise = null;
 }
 
 export async function getApiRuntime(): Promise<SidecarInfo> {
-  if (!runtimeInfo) {
-    runtimeInfo = await getRuntimeInfo();
+  if (runtimeInfo) {
+    return runtimeInfo;
   }
-  return runtimeInfo;
+  if (!runtimeInfoPromise) {
+    runtimeInfoPromise = getRuntimeInfo()
+      .then((info) => {
+        runtimeInfo = info;
+        return info;
+      })
+      .finally(() => {
+        runtimeInfoPromise = null;
+      });
+  }
+  return runtimeInfoPromise;
+}
+
+async function refreshApiRuntime(): Promise<SidecarInfo> {
+  resetRuntime();
+  return getApiRuntime();
+}
+
+function getApiUrlForRuntime(runtime: SidecarInfo, path: string): string {
+  return `${runtime.baseUrl}${path}`;
+}
+
+function getApiHeadersForRuntime(runtime: SidecarInfo, extra?: HeadersInit): HeadersInit {
+  const extraHeaders = new Headers(extra);
+  const headers: Record<string, string> = {};
+  if (!extraHeaders.has("Content-Type")) {
+    headers["Content-Type"] = "application/json";
+  }
+  extraHeaders.forEach((value, key) => {
+    headers[key] = value;
+  });
+  headers["X-Moor-Token"] = runtime.apiToken;
+  return headers;
 }
 
 export async function getApiUrl(path: string): Promise<string> {
   const runtime = await getApiRuntime();
-  return `${runtime.baseUrl}${path}`;
+  return getApiUrlForRuntime(runtime, path);
 }
 
 export async function getMcpEndpoint(): Promise<string> {
@@ -54,24 +89,105 @@ export async function getMcpEndpoint(): Promise<string> {
 
 export async function getApiHeaders(extra?: HeadersInit): Promise<HeadersInit> {
   const runtime = await getApiRuntime();
+  return getApiHeadersForRuntime(runtime, extra);
+}
+
+export async function getApiRequest(
+  path: string,
+  extraHeaders?: HeadersInit,
+): Promise<{ url: string; headers: HeadersInit; runtime: SidecarInfo }> {
+  const runtime = await getApiRuntime();
   return {
-    "Content-Type": "application/json",
-    "X-Moor-Token": runtime.apiToken,
-    ...extra,
+    url: getApiUrlForRuntime(runtime, path),
+    headers: getApiHeadersForRuntime(runtime, extraHeaders),
+    runtime,
   };
 }
 
-export async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  const url = await getApiUrl(path);
-  const resp = await fetch(url, {
-    ...options,
-    headers: await getApiHeaders(options?.headers),
-  });
-  if (!resp.ok) {
-    const error = await resp.json().catch(() => ({ error: resp.statusText }));
-    throw new Error(error.error || `API error: ${resp.status}`);
+export function formatApiNetworkError(path: string, err: unknown, runtime?: SidecarInfo): string {
+  const detail = err instanceof Error ? err.message : String(err);
+  const target = runtime ? ` at ${runtime.baseUrl}` : "";
+  return `Unable to connect to the Moor sidecar while requesting ${path}${target}. Check that Moor is running and the Sidecar API port/token are current. Original error: ${detail}`;
+}
+
+function formatApiRetryError(
+  path: string,
+  runtime: SidecarInfo,
+  original: unknown,
+  retryFailure: unknown,
+): string {
+  const originalDetail = original instanceof Error ? original.message : String(original);
+  const retryDetail = retryFailure instanceof Error ? retryFailure.message : String(retryFailure);
+  return `Unable to connect to the Moor sidecar while requesting ${path} at ${runtime.baseUrl} after refreshing runtime. Original error: ${originalDetail}. Retry error: ${retryDetail}`;
+}
+
+async function readApiError(resp: Response): Promise<string> {
+  const parsed = (await resp.json().catch(() => null)) as unknown;
+  if (isRecord(parsed) && typeof parsed.error === "string") {
+    return parsed.error;
   }
-  return resp.json();
+  return resp.statusText || `API error: ${resp.status}`;
+}
+
+async function parseApiResponse<T>(resp: Response): Promise<T> {
+  if (!resp.ok) {
+    throw new Error(await readApiError(resp));
+  }
+  return resp.json() as Promise<T>;
+}
+
+async function fetchWithRuntime(
+  path: string,
+  options: RequestInit | undefined,
+  runtime: SidecarInfo,
+): Promise<Response> {
+  return fetch(getApiUrlForRuntime(runtime, path), {
+    ...options,
+    headers: getApiHeadersForRuntime(runtime, options?.headers),
+  });
+}
+
+async function retryWithFreshRuntime<T>(
+  path: string,
+  options: RequestInit | undefined,
+  originalError: unknown,
+): Promise<T> {
+  const runtime = await refreshApiRuntime();
+  try {
+    const retryResp = await fetchWithRuntime(path, options, runtime);
+    if (!retryResp.ok) {
+      throw new Error(await readApiError(retryResp));
+    }
+    return retryResp.json() as Promise<T>;
+  } catch (retryErr) {
+    throw createErrorWithCause(
+      formatApiRetryError(path, runtime, originalError, retryErr),
+      originalError,
+    );
+  }
+}
+
+function shouldRetryNetworkError(options?: RequestInit): boolean {
+  const method = options?.method?.toUpperCase() ?? "GET";
+  return method === "GET" || method === "HEAD";
+}
+
+export async function api<T>(path: string, options?: RequestInit): Promise<T> {
+  const runtime = await getApiRuntime();
+  let resp: Response;
+  try {
+    resp = await fetchWithRuntime(path, options, runtime);
+  } catch (err) {
+    const networkError = createErrorWithCause(formatApiNetworkError(path, err, runtime), err);
+    if (!shouldRetryNetworkError(options)) {
+      throw networkError;
+    }
+    return retryWithFreshRuntime<T>(path, options, networkError);
+  }
+  if (resp.status === 401) {
+    return retryWithFreshRuntime<T>(path, options, new Error(await readApiError(resp)));
+  }
+  return parseApiResponse<T>(resp);
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {

@@ -7,9 +7,7 @@ import { createDefaultSettings, type Settings, type SettingsUpdatePayload } from
 const SETTINGS_FILE = "settings.json";
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+import { isRecord } from "../utils.js";
 
 function isThemeMode(value: unknown): value is Settings["appearance"]["theme"] {
   return value === "light" || value === "dark" || value === "system";

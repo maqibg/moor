@@ -29,7 +29,7 @@
 
 <!-- README-I18N:START -->
 
-[English](./README.md) | **汉语**
+[English](./README.md) | **汉语** | [日本語](./README.ja.md) | [Español](./README.es.md)
 
 <!-- README-I18N:END -->
 
@@ -71,7 +71,7 @@ vp install
 
 Moor 可以自动检测你已为 Claude Code、Codex、OpenCode 和 Cursor 配置的 MCP Server：
 
-1. 进入 **Servers** → **Scan Configs**
+1. 进入 **Servers** → **Import**
 2. 点击 **Scan** — Moor 会读取 `~/.claude/settings.json`、`~/.codex/config.toml`、`~/.config/opencode/opencode.json` / `.jsonc` 以及 `~/.cursor/mcp.json`
 3. 选择要导入的 Server
 

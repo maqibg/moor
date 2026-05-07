@@ -16,6 +16,11 @@ import { profileService } from "./services/profiles.js";
 import { serverManager } from "./services/server-manager.js";
 import { initAuditLogger, getAuditLogger } from "./services/audit-logger.js";
 import { settingsService } from "./services/settings.js";
+import {
+  createGracefulShutdown,
+  parseParentPid,
+  startParentWatchdog,
+} from "./runtime-lifecycle.js";
 
 const DEFAULT_PORT = 9223;
 
@@ -25,6 +30,7 @@ interface CliOptions {
   apiToken: string;
   dataDir: string;
   legacyDataDir?: string;
+  parentPid?: number;
 }
 
 function readArg(name: string): string | undefined {
@@ -41,6 +47,7 @@ function parseCliOptions(): CliOptions {
     apiToken: readArg("--api-token") ?? process.env.MOOR_API_TOKEN ?? crypto.randomUUID(),
     dataDir,
     legacyDataDir: readArg("--legacy-data-dir") ?? process.env.MOOR_LEGACY_DATA_DIR,
+    parentPid: parseParentPid(readArg("--parent-pid") ?? process.env.MOOR_PARENT_PID),
   };
 }
 
@@ -61,28 +68,25 @@ function findAvailablePort(host: string, start: number, max: number): Promise<nu
   });
 }
 
-function setupGracefulShutdown(portFile: string) {
-  const shutdown = async (signal: string) => {
-    console.log(`\nReceived ${signal}, shutting down gracefully...`);
-    await serverManager.stopAll();
-    await getAuditLogger().drain();
-    closeDb();
-    try {
-      fs.unlinkSync(portFile);
-    } catch {
-      console.warn(`Port file already removed: ${portFile}`);
-    }
-    process.exit(0);
-  };
+function setupGracefulShutdown(runtimeFiles: string[]) {
+  const shutdown = createGracefulShutdown({
+    runtimeFiles,
+    stopAll: () => serverManager.stopAll(),
+    drainAudit: () => getAuditLogger().drain(),
+    stopLogCleanupInterval: () => settingsService.stopLogCleanupInterval(),
+    closeDb,
+  });
 
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
   process.on("SIGINT", () => void shutdown("SIGINT"));
+  return shutdown;
 }
 
 async function main() {
   const options = parseCliOptions();
   const port = await findAvailablePort(options.host, options.port, options.port + 10);
   const portFile = path.join(options.dataDir, "port");
+  const pidFile = path.join(options.dataDir, "pid");
 
   await initDb({ dataDir: options.dataDir, legacyDataDir: options.legacyDataDir });
   runMigrations();
@@ -97,8 +101,13 @@ async function main() {
 
   fs.mkdirSync(options.dataDir, { recursive: true });
   fs.writeFileSync(portFile, String(port));
+  fs.writeFileSync(pidFile, String(process.pid));
 
-  setupGracefulShutdown(portFile);
+  const shutdown = setupGracefulShutdown([portFile, pidFile]);
+  startParentWatchdog({
+    parentPid: options.parentPid,
+    onParentGone: () => shutdown("PARENT_EXITED"),
+  });
 
   const app = createApp({ apiToken: options.apiToken, host: options.host, port });
   serve({ fetch: app.fetch, hostname: options.host, port }, (info) => {

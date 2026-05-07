@@ -5,8 +5,8 @@ import { useSettings } from "@/hooks/useSettings";
 import { useTheme } from "@/hooks/useTheme";
 
 export function AppShell() {
-  const { settings } = useSettings();
-  useTheme(settings.appearance.theme);
+  const { settings, isError, isFetched } = useSettings();
+  useTheme(isFetched && !isError ? settings.appearance.theme : null);
 
   return (
     <div className="flex h-screen bg-cursor-cream overflow-hidden">

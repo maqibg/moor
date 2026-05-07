@@ -1,10 +1,26 @@
 import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, apiPost, apiPut, apiDelete } from "@/lib/api";
-import type { Profile } from "@moor/types";
+import { useSSEEvent } from "@/contexts/SSEContext";
+import type { Profile, Server } from "@moor/types";
+
+interface ProfileServerState {
+  enabled: boolean;
+  disabledTools: string[];
+}
+
+export interface ProfileDetailData extends Profile {
+  servers: Array<Server & { profileServer: ProfileServerState }>;
+}
 
 export function useProfiles() {
   const queryClient = useQueryClient();
+
+  useSSEEvent("profile:activated", () => {
+    void queryClient.invalidateQueries({ queryKey: ["profiles"] });
+    void queryClient.invalidateQueries({ queryKey: ["servers"] });
+    void queryClient.invalidateQueries({ queryKey: ["logs"] });
+  });
 
   const {
     data: profiles = [],
@@ -72,4 +88,24 @@ export function useProfiles() {
     updateProfile,
     updateProfileServer,
   };
+}
+
+export function useProfile(id: string | undefined) {
+  const queryClient = useQueryClient();
+
+  const {
+    data: profile,
+    isLoading,
+    error,
+  } = useQuery<ProfileDetailData | null>({
+    queryKey: ["profiles", id],
+    queryFn: () => api<ProfileDetailData | null>(`/api/profiles/${id ?? ""}`),
+    enabled: !!id,
+  });
+
+  const refresh = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["profiles", id] });
+  }, [queryClient, id]);
+
+  return { profile, isLoading, error, refresh };
 }

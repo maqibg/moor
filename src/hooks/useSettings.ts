@@ -8,7 +8,13 @@ const QUERY_KEY = ["settings"] as const;
 export function useSettings() {
   const queryClient = useQueryClient();
 
-  const { data: settings, isLoading } = useQuery<Settings>({
+  const {
+    data: settings,
+    isLoading,
+    isError,
+    error,
+    isFetched,
+  } = useQuery<Settings>({
     queryKey: QUERY_KEY,
     queryFn: () => api<Settings>("/api/settings"),
   });
@@ -38,6 +44,9 @@ export function useSettings() {
   return {
     settings: settings ?? createDefaultSettings(),
     isLoading,
+    isError,
+    error,
+    isFetched,
     updateSettings: updateSettings.mutateAsync,
     resetSettings: resetSettings.mutateAsync,
   };

@@ -29,7 +29,7 @@
 
 <!-- README-I18N:START -->
 
-**English** | [汉语](./README.zh.md)
+**English** | [汉语](./README.zh.md) | [日本語](./README.ja.md) | [Español](./README.es.md)
 
 <!-- README-I18N:END -->
 

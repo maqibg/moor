@@ -207,3 +207,68 @@ export function useServers() {
     removeServer: removeServer.mutateAsync,
   };
 }
+
+export interface ServerDetailData {
+  id: string;
+  name: string;
+  connectionType: "stdio" | "http";
+  command: string | null;
+  args: string[] | null;
+  url: string | null;
+  env: Record<string, string> | null;
+  headers: Record<string, string> | null;
+  workingDir: string | null;
+  autoStart: boolean;
+  status: string;
+  errorMessage: string | null;
+}
+
+export interface ToolDetail {
+  toolName: string;
+  exposedName: string;
+  description: string | null;
+  inputSchema: unknown;
+  disabled: boolean;
+}
+
+export function useServer(id: string | undefined) {
+  const queryClient = useQueryClient();
+
+  const {
+    data: server,
+    isLoading,
+    error,
+  } = useQuery<ServerDetailData>({
+    queryKey: ["servers", id],
+    queryFn: () => api<ServerDetailData>(`/api/servers/${id}`),
+    enabled: !!id,
+  });
+
+  useSSEEvent("server:status", (eventData) => {
+    const payload = getServerStatusEventPayload(eventData);
+    if (payload && payload.serverId === id) {
+      void queryClient.invalidateQueries({ queryKey: ["servers", id] });
+    }
+  });
+
+  return { server, isLoading, error };
+}
+
+export function useServerTools(serverId: string | undefined, profileId?: string) {
+  const queryClient = useQueryClient();
+
+  const { data: tools = [] } = useQuery<ToolDetail[]>({
+    queryKey: ["servers", serverId, "tools", profileId],
+    queryFn: () =>
+      api<ToolDetail[]>(
+        `/api/servers/${serverId}/tools${profileId ? `?profile_id=${profileId}` : ""}`,
+      ),
+    enabled: !!serverId,
+  });
+
+  const refresh = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["servers", serverId, "tools"] });
+  }, [queryClient, serverId]);
+
+  return { tools, refresh };
+}

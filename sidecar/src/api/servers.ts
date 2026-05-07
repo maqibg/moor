@@ -1,24 +1,16 @@
 import { Hono } from "hono";
 import { serverManager } from "../services/server-manager.js";
 import { profileService } from "../services/profiles.js";
-import { queryAll, queryOne, run } from "../db/index.js";
-import { serializeServer, serializeToolDiscovery } from "../db/serializers.js";
+import { queryOne } from "../db/index.js";
+import * as serverRepo from "../db/server-repository.js";
+import { serializeServer } from "../db/serializers.js";
 import { createServerSchema } from "./schemas.js";
 import { validate } from "./validate.js";
 
 const servers = new Hono();
 
 servers.get("/", (c) => {
-  const rows = queryAll(
-    `
-    SELECT s.*, GROUP_CONCAT(td.tool_name) as tools
-    FROM mcp_servers s
-    LEFT JOIN tool_discoveries td ON s.id = td.server_id
-    GROUP BY s.id
-    ORDER BY s.created_at DESC
-  `,
-    [],
-  );
+  const rows = serverRepo.findAll();
   return c.json(rows.map(serializeServer));
 });
 
@@ -68,40 +60,9 @@ servers.post("/:id/stop", async (c) => {
 });
 
 servers.get("/:id/tools", (c) => {
+  const serverId = c.req.param("id");
   const profileId = c.req.query("profile_id") ?? serverManager.getActiveProfileId() ?? undefined;
-  const catalog = profileId
-    ? serverManager.getToolCatalog(profileId)
-    : serverManager.getToolCatalog();
-  const disabledRows = profileId
-    ? queryAll(
-        "SELECT disabled_tools FROM profile_servers WHERE profile_id = ? AND server_id = ?",
-        [profileId, c.req.param("id")],
-      )
-    : queryAll("SELECT disabled_tools FROM profile_servers WHERE server_id = ?", [
-        c.req.param("id"),
-      ]);
-  const disabledForServer = new Set(
-    disabledRows.flatMap((row) => {
-      try {
-        return JSON.parse(row.disabled_tools as string) as string[];
-      } catch {
-        return [];
-      }
-    }),
-  );
-  const tools = serverManager.getDiscoveredTools(c.req.param("id")).map((row) => {
-    const serialized = serializeToolDiscovery(row);
-    const rawToolName = serialized.toolName as string;
-    const catalogEntry = catalog.find(
-      (tool) => tool.serverId === c.req.param("id") && tool.toolName === rawToolName,
-    );
-    return {
-      ...serialized,
-      exposedName: catalogEntry?.exposedName ?? rawToolName,
-      disabled: disabledForServer.has(rawToolName),
-    };
-  });
-  return c.json(tools);
+  return c.json(serverManager.getToolDetails(serverId, profileId));
 });
 
 export { servers };

@@ -1,6 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useCallback, type ReactNode } from "react";
-import { getApiHeaders, getApiUrl } from "@/lib/api";
-import { queryClient } from "@/lib/query-client";
+import { getApiRequest, resetRuntime } from "@/lib/api";
 import type { MoorEvent, MoorEventType } from "@moor/types";
 
 interface SSEContextValue {
@@ -22,9 +21,11 @@ export function SSEProvider({ children }: { children: ReactNode }) {
 
     async function connect() {
       try {
-        const url = await getApiUrl("/api/events");
+        const { url, headers } = await getApiRequest("/api/events", {
+          Accept: "text/event-stream",
+        });
         const response = await fetch(url, {
-          headers: await getApiHeaders({ Accept: "text/event-stream" }),
+          headers,
           signal: controller.signal,
         });
         if (!response.ok || !response.body) throw new Error(`SSE failed: ${response.status}`);
@@ -57,20 +58,12 @@ export function SSEProvider({ children }: { children: ReactNode }) {
                 handler(typedEvent.data);
               }
             }
-
-            if (typedEvent.type === "server:status" || typedEvent.type === "server:tools") {
-              queryClient.invalidateQueries({ queryKey: ["servers"] });
-            }
-            if (typedEvent.type === "profile:activated") {
-              queryClient.invalidateQueries({ queryKey: ["profiles"] });
-              queryClient.invalidateQueries({ queryKey: ["servers"] });
-              queryClient.invalidateQueries({ queryKey: ["logs"] });
-            }
           }
         }
         if (!controller.signal.aborted) scheduleReconnect();
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
+        resetRuntime();
         scheduleReconnect();
       }
     }

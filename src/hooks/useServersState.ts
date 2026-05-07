@@ -1,5 +1,6 @@
-export type ServerAction = "starting" | "stopping";
-export type ServerStatus = "stopped" | "starting" | "running" | "error";
+import type { ServerAction, ServerStatus } from "@moor/types";
+
+export { ServerAction, ServerStatus };
 
 export interface ServerStateItem {
   id: string;
@@ -15,9 +16,7 @@ export interface ServerStatusEventPayload {
 
 const serverStatuses = ["stopped", "starting", "running", "error"] satisfies ServerStatus[];
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+import { isRecord } from "@/lib/utils";
 
 function isServerStatus(value: unknown): value is ServerStatus {
   return typeof value === "string" && serverStatuses.includes(value as ServerStatus);

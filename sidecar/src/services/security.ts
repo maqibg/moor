@@ -54,7 +54,7 @@ export function createSecurityMiddleware(options: SecurityOptions): MiddlewareHa
         "Access-Control-Allow-Headers",
         "Content-Type, X-Moor-Token, Mcp-Session-Id, Mcp-Protocol-Version, Mcp-Method, Mcp-Name",
       );
-      c.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+      c.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
       return c.body(null, 204);
     }
 

@@ -8,10 +8,19 @@ export interface InitDbOptions {
   legacyDataDir?: string;
 }
 
+export interface Database {
+  run(sql: string, params?: unknown[]): void;
+  exec(sql: string): void;
+  queryAll(sql: string, params?: unknown[]): Record<string, unknown>[];
+  queryOne(sql: string, params?: unknown[]): Record<string, unknown> | null;
+  transaction<T>(callback: () => T): T;
+}
+
 const DEFAULT_DATA_DIR = path.join(os.homedir(), ".moor");
 const SQLITE_DATA_FILES = ["moor.db", "moor.db-wal", "moor.db-shm"] as const;
 
 let sqlDb: DatabaseSync | null = null;
+let db: Database | null = null;
 let dbPath = path.join(DEFAULT_DATA_DIR, "moor.db");
 
 export interface LegacyDataDirMigrationOptions {
@@ -44,7 +53,43 @@ export async function initDb(options: InitDbOptions = {}) {
   sqlDb.exec("PRAGMA foreign_keys = ON");
   sqlDb.exec("PRAGMA journal_mode = WAL");
   sqlDb.exec("PRAGMA busy_timeout = 5000");
-  return sqlDb;
+
+  db = createDatabaseAdapter(sqlDb);
+  return db;
+}
+
+function createDatabaseAdapter(sqlite: DatabaseSync): Database {
+  return {
+    run(sql: string, params: unknown[] = []) {
+      sqlite.prepare(sql).run(...normalizeParams(params));
+    },
+    exec(sql: string) {
+      sqlite.exec(sql);
+    },
+    queryAll(sql: string, params: unknown[] = []) {
+      return sqlite.prepare(sql).all(...normalizeParams(params)) as Record<string, unknown>[];
+    },
+    queryOne(sql: string, params: unknown[] = []) {
+      const row = sqlite.prepare(sql).get(...normalizeParams(params));
+      return row ? (row as Record<string, unknown>) : null;
+    },
+    transaction<T>(callback: () => T): T {
+      sqlite.exec("BEGIN IMMEDIATE");
+      try {
+        const result = callback();
+        sqlite.exec("COMMIT");
+        return result;
+      } catch (err) {
+        sqlite.exec("ROLLBACK");
+        throw err;
+      }
+    },
+  };
+}
+
+export function getDatabase(): Database {
+  if (!db) throw new Error("Database not initialized");
+  return db;
 }
 
 export function migrateLegacyDataDir(options: LegacyDataDirMigrationOptions) {
@@ -193,6 +238,7 @@ export function closeDb() {
   if (sqlDb) {
     sqlDb.close();
     sqlDb = null;
+    db = null;
   }
 }
 

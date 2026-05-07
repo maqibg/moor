@@ -1,43 +1,19 @@
-import { useCallback } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Server, FolderOpen } from "lucide-react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useProfiles } from "@/hooks/useProfiles";
+import { useProfiles, useProfile } from "@/hooks/useProfiles";
 import { DetailPageHeader } from "@/components/shared/DetailPageHeader";
 import { PageLoading } from "@/components/shared/PageLoading";
 import { EmptyState } from "@/components/shared/EmptyState";
-import type { Profile, Server as ServerType } from "@moor/types";
 import { cn } from "@/lib/utils";
-
-interface ProfileServerState {
-  enabled: boolean;
-  disabledTools: string[];
-}
-
-interface ProfileDetailData extends Profile {
-  servers: Array<ServerType & { profileServer: ProfileServerState }>;
-}
 
 export function ProfileDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const { updateProfileServer } = useProfiles();
-
-  const { data: profile, isLoading: loading } = useQuery<ProfileDetailData | null>({
-    queryKey: ["profiles", id],
-    queryFn: () => api<ProfileDetailData | null>(`/api/profiles/${id ?? ""}`),
-    enabled: !!id,
-  });
-
-  const refresh = useCallback(
-    () => queryClient.invalidateQueries({ queryKey: ["profiles", id] }),
-    [queryClient, id],
-  );
+  const { profile, isLoading: loading, refresh } = useProfile(id);
 
   if (loading) {
     return <PageLoading message="Loading profile..." />;

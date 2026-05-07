@@ -12,6 +12,12 @@ import { Tabs } from "@/components/ui/tabs";
 import { Cog, Palette, Wrench, AlertTriangle, Eye, EyeOff, ExternalLink } from "lucide-react";
 import type { GeneralSettings, SettingsGroup, SidecarInfo } from "@moor/types";
 import { CopyButton } from "@/components/shared/CopyButton";
+import {
+  getAdvancedPortStatus,
+  getGeneralSettingRuntimeAction,
+  getPortBannerState,
+  getSettingsPageLoadState,
+} from "./settings-state";
 
 declare const __APP_VERSION__: string;
 
@@ -23,6 +29,13 @@ async function syncRuntimeSettings(): Promise<void> {
   if (!isTauriRuntime()) return;
   await invoke("sync_runtime_settings");
 }
+
+async function applyLoginAutostartSetting(enabled: boolean): Promise<void> {
+  if (!isTauriRuntime()) return;
+  await invoke("apply_login_autostart_setting", { enabled });
+}
+
+import { createErrorWithCause } from "@/lib/utils";
 
 function getErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
@@ -118,8 +131,29 @@ function GeneralSection({ onError }: { onError: (message: string | null) => void
       const general: Partial<GeneralSettings> = { [key]: value };
       try {
         onError(null);
+        const action = getGeneralSettingRuntimeAction(key);
+        if (action === "loginAutostart") {
+          await applyLoginAutostartSetting(value);
+          try {
+            await updateSettings({ general });
+          } catch (err) {
+            try {
+              await applyLoginAutostartSetting(!value);
+            } catch (rollbackErr) {
+              throw createErrorWithCause(
+                `${getErrorMessage(err, "Failed to save login auto-start setting")}. Rollback failed: ${getErrorMessage(rollbackErr, "unknown error")}`,
+                rollbackErr,
+              );
+            }
+            throw err;
+          }
+          return;
+        }
+
         await updateSettings({ general });
-        await syncRuntimeSettings();
+        if (action === "windowRuntime") {
+          await syncRuntimeSettings();
+        }
       } catch (err) {
         onError(getErrorMessage(err, "Failed to update runtime settings"));
       }
@@ -177,8 +211,20 @@ function GeneralSection({ onError }: { onError: (message: string | null) => void
   );
 }
 
-function AppearanceSection() {
+function AppearanceSection({ onError }: { onError: (message: string | null) => void }) {
   const { settings, updateSettings } = useSettings();
+
+  const handleThemeChange = useCallback(
+    async (value: string) => {
+      try {
+        onError(null);
+        await updateSettings({ appearance: { theme: value as "light" | "dark" | "system" } });
+      } catch (err) {
+        onError(getErrorMessage(err, "Failed to update theme"));
+      }
+    },
+    [onError, updateSettings],
+  );
 
   return (
     <Card>
@@ -192,9 +238,7 @@ function AppearanceSection() {
           </div>
           <Tabs
             value={settings.appearance.theme}
-            onValueChange={(v) =>
-              void updateSettings({ appearance: { theme: v as "light" | "dark" | "system" } })
-            }
+            onValueChange={(v) => void handleThemeChange(v)}
             tabs={[
               { value: "light", label: "Light" },
               { value: "dark", label: "Dark" },
@@ -210,14 +254,20 @@ function AppearanceSection() {
 function AdvancedSection({
   runtimeInfo,
   onError,
+  onPortApplied,
 }: {
   runtimeInfo: SidecarInfo | null;
   onError: (message: string | null) => void;
+  onPortApplied: (port: number) => void;
 }) {
   const { settings, updateSettings } = useSettings();
   const [localRetention, setLocalRetention] = useState(String(settings.advanced.logRetentionDays));
   const [localPort, setLocalPort] = useState(String(settings.advanced.sidecarPort));
   const [tokenVisible, setTokenVisible] = useState(false);
+  const portStatus = getAdvancedPortStatus({
+    runtimeInfo,
+    configuredPort: settings.advanced.sidecarPort,
+  });
 
   useEffect(() => {
     setLocalRetention(String(settings.advanced.logRetentionDays));
@@ -236,7 +286,9 @@ function AdvancedSection({
   const applyPort = async () => {
     try {
       onError(null);
-      await updateSettings({ advanced: { sidecarPort: Number(localPort) } });
+      const nextPort = Number(localPort);
+      await updateSettings({ advanced: { sidecarPort: nextPort } });
+      onPortApplied(nextPort);
     } catch (err) {
       onError(getErrorMessage(err, "Failed to update sidecar port"));
     }
@@ -275,24 +327,33 @@ function AdvancedSection({
 
       <Card>
         <CardContent className="p-2 divide-y divide-[var(--fg-06)]">
-          <SettingRow
-            label="Sidecar Port"
-            description="Port for the Moor API server (requires restart)"
-          >
-            <div className="flex items-center gap-2">
-              <Input
-                type="number"
-                min={1024}
-                max={65535}
-                value={localPort}
-                onChange={(e) => setLocalPort(e.target.value)}
-                className="w-24 h-8 text-center text-xs"
-              />
-              <Button variant="secondary" size="sm" onClick={() => void applyPort()}>
-                Apply
-              </Button>
-            </div>
-          </SettingRow>
+          <div>
+            <SettingRow
+              label="Sidecar Port"
+              description="Port for the Moor API server (requires restart)"
+            >
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={1024}
+                  max={65535}
+                  value={localPort}
+                  onChange={(e) => setLocalPort(e.target.value)}
+                  className="w-24 h-8 text-center text-xs"
+                />
+                <Button variant="secondary" size="sm" onClick={() => void applyPort()}>
+                  Apply
+                </Button>
+              </div>
+            </SettingRow>
+            {portStatus?.kind === "mismatch" && (
+              <p className="px-4 pb-3 -mt-1 font-body text-xs text-[var(--fg-45)]">
+                Currently running on port {portStatus.currentPort}; configured for port{" "}
+                {portStatus.configuredPort}. The configured port may already be used by another Moor
+                instance.
+              </p>
+            )}
+          </div>
           <div className="py-3.5 px-4">
             <div className="flex items-center justify-between mb-2">
               <div className="flex-1 min-w-0 mr-4">
@@ -357,8 +418,16 @@ export function SettingsPage() {
   const [activeGroup, setActiveGroup] = useState<SettingsGroup>("general");
   const [runtimeInfo, setRuntimeInfo] = useState<SidecarInfo | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const { settings, isLoading, resetSettings } = useSettings();
-  const pendingRestart = runtimeInfo !== null && runtimeInfo.port !== settings.advanced.sidecarPort;
+  const [portChangeApplied, setPortChangeApplied] = useState(false);
+  const { settings, isLoading, isError, error, resetSettings } = useSettings();
+  const loadState = getSettingsPageLoadState({ isLoading, isError, error });
+  const portBannerState = loadState.canRenderControls
+    ? getPortBannerState({
+        runtimeInfo,
+        configuredPort: settings.advanced.sidecarPort,
+        portChangeApplied,
+      })
+    : null;
 
   const refreshRuntimeInfo = useCallback(async () => {
     setRuntimeInfo(await getApiRuntime());
@@ -374,6 +443,7 @@ export function SettingsPage() {
       await invoke("restart_sidecar");
       resetRuntime();
       await refreshRuntimeInfo();
+      setPortChangeApplied(false);
     } catch (err) {
       console.error("Failed to restart sidecar:", err);
       setErrorMessage(getErrorMessage(err, "Failed to restart sidecar"));
@@ -384,16 +454,24 @@ export function SettingsPage() {
     if (!window.confirm("Reset all settings to their default values?")) return;
     try {
       setErrorMessage(null);
-      await resetSettings();
+      const previousAutoStartOnLogin = settings.general.autoStartOnLogin;
+      await applyLoginAutostartSetting(false);
+      try {
+        await resetSettings();
+      } catch (err) {
+        await applyLoginAutostartSetting(previousAutoStartOnLogin);
+        throw err;
+      }
       await syncRuntimeSettings();
       resetRuntime();
       await refreshRuntimeInfo();
+      setPortChangeApplied(false);
     } catch (err) {
       setErrorMessage(getErrorMessage(err, "Failed to reset settings"));
     }
   };
 
-  if (isLoading) {
+  if (loadState.kind === "loading") {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="h-8 w-8 rounded-full border-2 border-surface-300 border-t-cursor-orange animate-spin" />
@@ -407,36 +485,47 @@ export function SettingsPage() {
         title="Settings"
         subtitle="Configure Moor to your preferences"
         action={
-          <Button variant="outline" size="sm" onClick={handleReset}>
-            Reset to Defaults
-          </Button>
+          loadState.canRenderControls ? (
+            <Button variant="outline" size="sm" onClick={handleReset}>
+              Reset to Defaults
+            </Button>
+          ) : undefined
         }
       />
 
-      {pendingRestart && <RestartBanner onRestart={handleRestart} />}
+      {loadState.kind === "error" && <ErrorBanner message={loadState.message} />}
+      {portBannerState?.kind === "restart" && <RestartBanner onRestart={handleRestart} />}
       {errorMessage && <ErrorBanner message={errorMessage} />}
 
-      <div className="flex gap-6">
-        <nav className="w-44 shrink-0 space-y-0.5">
-          {groups.map(({ key, label, icon }) => (
-            <GroupNavItem
-              key={key}
-              icon={icon}
-              label={label}
-              active={activeGroup === key}
-              onClick={() => setActiveGroup(key)}
-            />
-          ))}
-        </nav>
+      {loadState.canRenderControls && (
+        <div className="flex gap-6">
+          <nav className="w-44 shrink-0 space-y-0.5">
+            {groups.map(({ key, label, icon }) => (
+              <GroupNavItem
+                key={key}
+                icon={icon}
+                label={label}
+                active={activeGroup === key}
+                onClick={() => setActiveGroup(key)}
+              />
+            ))}
+          </nav>
 
-        <div className="flex-1 min-w-0">
-          {activeGroup === "general" && <GeneralSection onError={setErrorMessage} />}
-          {activeGroup === "appearance" && <AppearanceSection />}
-          {activeGroup === "advanced" && (
-            <AdvancedSection runtimeInfo={runtimeInfo} onError={setErrorMessage} />
-          )}
+          <div className="flex-1 min-w-0">
+            {activeGroup === "general" && <GeneralSection onError={setErrorMessage} />}
+            {activeGroup === "appearance" && <AppearanceSection onError={setErrorMessage} />}
+            {activeGroup === "advanced" && (
+              <AdvancedSection
+                runtimeInfo={runtimeInfo}
+                onError={setErrorMessage}
+                onPortApplied={(nextPort) =>
+                  setPortChangeApplied(runtimeInfo !== null && runtimeInfo.port !== nextPort)
+                }
+              />
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

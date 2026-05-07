@@ -7,14 +7,16 @@ import { getClientById } from "../config/clients.js";
 import { convertConfig, type ConvertInput } from "../config/converter.js";
 import { serverManager } from "../services/server-manager.js";
 import { profileService } from "../services/profiles.js";
-import { queryAll, queryOne } from "../db/index.js";
-import type {
-  ScannedServer,
-  UnsupportedServer,
-  ImportDiagnostic,
-  ImportPreview,
-  ParsedImport,
-} from "@moor/types";
+import {
+  getExistingNames,
+  selectImportCandidates,
+  buildImportPreview,
+  findServerIdByName,
+} from "../services/import-service.js";
+import { isRecord } from "../utils.js";
+import type { ScannedServer } from "@moor/types";
+
+export { selectImportCandidates };
 
 const importApi = new Hono();
 
@@ -34,52 +36,6 @@ const convertInputSchema = z
     targetClient: clientIdSchema,
   })
   .strict();
-
-export function selectImportCandidates(
-  servers: ScannedServer[],
-  existingNames: Set<string>,
-): ScannedServer[] {
-  const seenNames = new Set(existingNames);
-  return servers.filter((server) => {
-    if (seenNames.has(server.name)) return false;
-    seenNames.add(server.name);
-    return true;
-  });
-}
-
-function getExistingNames(): Set<string> {
-  const existingServers = queryAll("SELECT name FROM mcp_servers", []);
-  return new Set(existingServers.map((server) => server.name as string));
-}
-
-function buildImportPreview(parsed: ParsedImport, existingNames: Set<string>): ImportPreview {
-  const seenNames = new Set(existingNames);
-  const servers: ScannedServer[] = [];
-  const duplicates: ScannedServer[] = [];
-
-  for (const server of parsed.servers) {
-    if (seenNames.has(server.name)) {
-      duplicates.push(server);
-      continue;
-    }
-    seenNames.add(server.name);
-    servers.push(server);
-  }
-
-  return {
-    scanned: parsed.servers.length + parsed.unsupported.length,
-    newServers: servers.length,
-    servers,
-    duplicates,
-    unsupported: parsed.unsupported,
-    errors: parsed.errors,
-    diagnostics: parsed.diagnostics,
-  };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function formatValidationError(error: z.ZodError): string {
   const issue = error.issues[0];
@@ -117,8 +73,7 @@ importApi.post("/execute", async (c) => {
   const skipped: string[] = [];
 
   for (const serverConfig of servers) {
-    const existing = queryOne("SELECT id FROM mcp_servers WHERE name = ?", [serverConfig.name]);
-    if (existing) {
+    if (findServerIdByName(serverConfig.name)) {
       skipped.push(serverConfig.name);
       continue;
     }
@@ -137,12 +92,7 @@ importApi.post("/execute", async (c) => {
   }
 
   if (imported.length > 0) {
-    const serverIds = imported
-      .map(
-        (name) =>
-          queryOne("SELECT id FROM mcp_servers WHERE name = ?", [name])?.id as string | undefined,
-      )
-      .filter(Boolean) as string[];
+    const serverIds = imported.map((name) => findServerIdByName(name)).filter(Boolean) as string[];
     profileService.assignToActiveProfile(serverIds);
   }
 

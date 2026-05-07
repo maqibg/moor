@@ -97,8 +97,19 @@ fn should_show_main_window_on_launch(
 
 #[cfg(test)]
 mod tests {
-    use super::{should_show_main_window_on_launch, SidecarState};
-    use std::path::PathBuf;
+    use super::{
+        build_sidecar_args, should_show_main_window_on_launch, sync_runtime_settings_from_file,
+        SidecarState,
+    };
+    use std::{fs, path::PathBuf, time::SystemTime};
+
+    fn temp_data_dir(test_name: &str) -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("system time is before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("moor-{test_name}-{timestamp}"))
+    }
 
     #[test]
     fn shows_window_for_default_settings() {
@@ -122,6 +133,41 @@ mod tests {
         state.set_minimize_to_tray(false);
 
         assert!(!state.get_minimize_to_tray());
+    }
+
+    #[test]
+    fn sync_runtime_settings_only_updates_window_runtime_state() {
+        let data_dir = temp_data_dir("runtime-settings");
+        fs::create_dir_all(&data_dir).expect("failed to create temp settings dir");
+        fs::write(
+            data_dir.join("settings.json"),
+            r#"{
+              "general": {
+                "autoStartOnLogin": true,
+                "minimizeToTrayOnClose": false
+              }
+            }"#,
+        )
+        .expect("failed to write temp settings file");
+        let state = SidecarState::new("token".to_string(), data_dir.clone(), None, true);
+
+        sync_runtime_settings_from_file(&state).expect("runtime settings sync failed");
+
+        assert!(!state.get_minimize_to_tray());
+        fs::remove_dir_all(data_dir).expect("failed to remove temp settings dir");
+    }
+
+    #[test]
+    fn sidecar_args_include_parent_pid() {
+        let args = build_sidecar_args(
+            "token".to_string(),
+            PathBuf::from("/tmp/moor-data"),
+            Some(PathBuf::from("/tmp/moor-legacy")),
+            9224,
+            12345,
+        );
+
+        assert!(args.windows(2).any(|pair| pair == ["--parent-pid", "12345"]));
     }
 }
 
@@ -259,18 +305,22 @@ fn apply_autostart_setting(app: &AppHandle, enabled: bool) -> Result<(), String>
     }
 }
 
-fn sync_runtime_settings_from_file(app: &AppHandle, state: &SidecarState) -> Result<(), String> {
+fn sync_runtime_settings_from_file(state: &SidecarState) -> Result<(), String> {
     let settings = read_settings_file(&state.inner.data_dir);
     let minimize_to_tray = settings.general.minimize_to_tray_on_close.unwrap_or(true);
-    let auto_start = settings.general.auto_start_on_login.unwrap_or(false);
 
     state.set_minimize_to_tray(minimize_to_tray);
-    apply_autostart_setting(app, auto_start)
+    Ok(())
 }
 
 #[tauri::command]
-fn sync_runtime_settings(app: AppHandle, state: State<'_, SidecarState>) -> Result<(), String> {
-    sync_runtime_settings_from_file(&app, &state)
+fn sync_runtime_settings(state: State<'_, SidecarState>) -> Result<(), String> {
+    sync_runtime_settings_from_file(&state)
+}
+
+#[tauri::command]
+fn apply_login_autostart_setting(app: AppHandle, enabled: bool) -> Result<(), String> {
+    apply_autostart_setting(&app, enabled)
 }
 
 #[tauri::command]
@@ -313,24 +363,43 @@ fn parse_ready_line(line: &str, api_token: &str) -> Option<SidecarInfo> {
     })
 }
 
-fn spawn_sidecar_with_port(app: &AppHandle, state: SidecarState, port: u16) -> Result<(), String> {
-    fs::create_dir_all(&state.inner.data_dir).map_err(|err| err.to_string())?;
-    state.set_info(None);
-
+fn build_sidecar_args(
+    api_token: String,
+    data_dir: PathBuf,
+    legacy_data_dir: Option<PathBuf>,
+    port: u16,
+    parent_pid: u32,
+) -> Vec<String> {
     let mut args = vec![
         "--host".to_string(),
         "127.0.0.1".to_string(),
         "--port".to_string(),
         port.to_string(),
         "--api-token".to_string(),
-        state.inner.api_token.clone(),
+        api_token,
         "--data-dir".to_string(),
-        state.inner.data_dir.to_string_lossy().to_string(),
+        data_dir.to_string_lossy().to_string(),
+        "--parent-pid".to_string(),
+        parent_pid.to_string(),
     ];
-    if let Some(legacy_data_dir) = &state.inner.legacy_data_dir {
+    if let Some(legacy_data_dir) = legacy_data_dir {
         args.push("--legacy-data-dir".to_string());
         args.push(legacy_data_dir.to_string_lossy().to_string());
     }
+    args
+}
+
+fn spawn_sidecar_with_port(app: &AppHandle, state: SidecarState, port: u16) -> Result<(), String> {
+    fs::create_dir_all(&state.inner.data_dir).map_err(|err| err.to_string())?;
+    state.set_info(None);
+
+    let args = build_sidecar_args(
+        state.inner.api_token.clone(),
+        state.inner.data_dir.clone(),
+        state.inner.legacy_data_dir.clone(),
+        port,
+        std::process::id(),
+    );
 
     let (mut rx, child) = app
         .shell()
@@ -402,6 +471,7 @@ pub fn run() {
             get_sidecar_info,
             restart_sidecar,
             sync_runtime_settings,
+            apply_login_autostart_setting,
         ])
         .setup(|app| {
             let data_dir = app

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { buildToolCatalogFromRows } from "./tool-catalog.js";
+import { buildToolCatalogFromRows } from "../db/tool-catalog.js";
 
 describe("buildToolCatalogFromRows", () => {
   it("filters disabled tools and exposes duplicate names deterministically", () => {

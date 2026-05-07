@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { parseCodexTomlConfig, parseJsonMcpConfig, type ParsedImport } from "./import-parser.js";
 import { ALL_CLIENTS, resolveConfigPaths } from "./clients.js";
+import { mergeParsed } from "../utils.js";
 
 const EMPTY: ParsedImport = { servers: [], unsupported: [], errors: [], diagnostics: [] };
 
@@ -36,15 +37,6 @@ function ignoreMissingMcpSections(result: ParsedImport, source: string): ParsedI
     result.errors.every((error) => missingSectionErrors.has(error));
 
   return onlyMissingSections ? EMPTY : result;
-}
-
-function mergeParsed(...results: ParsedImport[]): ParsedImport {
-  return {
-    servers: results.flatMap((r) => r.servers),
-    unsupported: results.flatMap((r) => r.unsupported),
-    errors: results.flatMap((r) => r.errors),
-    diagnostics: results.flatMap((r) => r.diagnostics),
-  };
 }
 
 function scanClient(client: (typeof ALL_CLIENTS)[number]): ParsedImport {

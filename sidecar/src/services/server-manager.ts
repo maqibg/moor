@@ -1,8 +1,8 @@
-import { transaction } from "../db/index.js";
-import { parseJsonValue } from "../db/serializers.js";
+import { run, queryAll, transaction } from "../db/index.js";
+import { parseJsonValue, serializeToolDiscovery } from "../db/serializers.js";
+import { buildToolCatalogFromRows, type ToolCatalogRow } from "../db/tool-catalog.js";
 import { profileService } from "./profiles.js";
 import * as serverRepo from "../db/server-repository.js";
-import { toolCatalogService } from "./tool-catalog.js";
 import { SessionManager } from "./session-manager.js";
 import type { StoredServerConfig, ServerSession, SessionFactory } from "./session-manager.js";
 import type { ToolCatalogEntry } from "@moor/types";
@@ -173,7 +173,7 @@ export class ServerManager {
       const session = await this.sessionManager.createSession(id, config);
 
       const toolsResult = await session.client.listTools();
-      toolCatalogService.cacheTools(
+      this.cacheTools(
         id,
         toolsResult.tools.map((tool) => ({
           name: tool.name,
@@ -225,11 +225,44 @@ export class ServerManager {
   }
 
   findToolOwner(exposedName: string): ToolCatalogEntry | null {
-    return toolCatalogService.findToolOwner(exposedName);
+    return this.getToolCatalog().find((tool) => tool.exposedName === exposedName) ?? null;
   }
 
   getToolCatalog(profileId?: string | null): ToolCatalogEntry[] {
-    return toolCatalogService.getToolCatalog(profileId ?? this.getActiveProfileId());
+    const activeProfileId = profileId ?? this.getActiveProfileId();
+    if (!activeProfileId) return [];
+
+    const rows = queryAll(
+      `
+      SELECT
+        ps.server_id AS serverId,
+        ms.name AS serverName,
+        ps.disabled_tools AS disabledTools,
+        td.tool_name AS toolName,
+        td.description AS description,
+        td.input_schema AS inputSchema
+      FROM profile_servers ps
+      JOIN mcp_servers ms ON ps.server_id = ms.id
+      JOIN tool_discoveries td ON td.server_id = ms.id
+      WHERE ps.profile_id = ? AND ps.enabled = 1
+      ORDER BY ms.name ASC, td.tool_name ASC
+    `,
+      [activeProfileId],
+    );
+
+    return buildToolCatalogFromRows(
+      rows.map(
+        (row) =>
+          ({
+            serverId: row.serverId as string,
+            serverName: row.serverName as string,
+            disabledTools: parseJsonValue(row.disabledTools, []) as string[],
+            toolName: row.toolName as string,
+            description: row.description as string | null,
+            inputSchema: parseJsonValue(row.inputSchema, undefined),
+          }) satisfies ToolCatalogRow,
+      ),
+    );
   }
 
   getActiveProfileServers() {
@@ -250,11 +283,61 @@ export class ServerManager {
     serverId: string,
     tools: Array<{ name: string; description?: string; inputSchema?: unknown }>,
   ) {
-    toolCatalogService.cacheTools(serverId, tools);
+    transaction(() => {
+      run("DELETE FROM tool_discoveries WHERE server_id = ?", [serverId]);
+      const now = new Date().toISOString();
+      for (const tool of tools) {
+        run(
+          "INSERT INTO tool_discoveries (server_id, tool_name, exposed_name, description, input_schema, discovered_at) VALUES (?, ?, ?, ?, ?, ?)",
+          [
+            serverId,
+            tool.name,
+            tool.name,
+            tool.description ?? null,
+            tool.inputSchema ? JSON.stringify(tool.inputSchema) : null,
+            now,
+          ],
+        );
+      }
+    });
+    eventBus.emit("server:tools", { type: "server:tools", data: { serverId, tools } });
   }
 
   getDiscoveredTools(serverId: string) {
-    return toolCatalogService.getDiscoveredTools(serverId);
+    return queryAll("SELECT * FROM tool_discoveries WHERE server_id = ?", [serverId]).map(
+      serializeToolDiscovery,
+    );
+  }
+
+  getToolDetails(serverId: string, profileId?: string) {
+    const catalog = this.getToolCatalog(profileId);
+    const disabledRows = profileId
+      ? queryAll(
+          "SELECT disabled_tools FROM profile_servers WHERE profile_id = ? AND server_id = ?",
+          [profileId, serverId],
+        )
+      : queryAll("SELECT disabled_tools FROM profile_servers WHERE server_id = ?", [serverId]);
+    const disabledForServer = new Set(
+      disabledRows.flatMap((row) => {
+        try {
+          return JSON.parse(row.disabled_tools as string) as string[];
+        } catch {
+          return [];
+        }
+      }),
+    );
+    return this.getDiscoveredTools(serverId).map((row) => {
+      const serialized = serializeToolDiscovery(row);
+      const rawToolName = serialized.toolName as string;
+      const catalogEntry = catalog.find(
+        (tool) => tool.serverId === serverId && tool.toolName === rawToolName,
+      );
+      return {
+        ...serialized,
+        exposedName: catalogEntry?.exposedName ?? rawToolName,
+        disabled: disabledForServer.has(rawToolName),
+      };
+    });
   }
 
   private setServerStatus(id: string, status: ManagedServer["status"], errorMessage?: string) {

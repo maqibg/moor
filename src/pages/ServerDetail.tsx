@@ -1,6 +1,3 @@
-import { useCallback } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,64 +10,18 @@ import { CopyButton } from "@/components/shared/CopyButton";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Play, Square, RefreshCw, Terminal } from "lucide-react";
 import { useProfiles } from "@/hooks/useProfiles";
-import { useServers } from "@/hooks/useServers";
+import { useServers, useServer, useServerTools } from "@/hooks/useServers";
 import { cn } from "@/lib/utils";
-
-interface ServerDetailData {
-  id: string;
-  name: string;
-  connectionType: "stdio" | "http";
-  command: string | null;
-  args: string[] | null;
-  url: string | null;
-  env: Record<string, string> | null;
-  headers: Record<string, string> | null;
-  workingDir: string | null;
-  autoStart: boolean;
-  status: string;
-  errorMessage: string | null;
-}
-
-interface ToolDetail {
-  toolName: string;
-  exposedName: string;
-  description: string | null;
-  inputSchema: unknown;
-  disabled: boolean;
-}
 
 export function ServerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const { startServer, stopServer, updateServer } = useServers();
   const { profiles, updateProfileServer } = useProfiles();
   const activeProfile = profiles.find((profile) => profile.isActive);
 
-  const { data: server, isLoading: loading } = useQuery<ServerDetailData>({
-    queryKey: ["servers", id],
-    queryFn: () => api<ServerDetailData>(`/api/servers/${id}`),
-    enabled: !!id,
-  });
-
-  const { data: tools = [] } = useQuery<ToolDetail[]>({
-    queryKey: ["servers", id, "tools", activeProfile?.id],
-    queryFn: () =>
-      api<ToolDetail[]>(
-        `/api/servers/${id}/tools${activeProfile ? `?profile_id=${activeProfile.id}` : ""}`,
-      ),
-    enabled: !!id,
-  });
-
-  const refresh = useCallback(
-    () => queryClient.invalidateQueries({ queryKey: ["servers", id] }),
-    [queryClient, id],
-  );
-
-  const refreshTools = useCallback(
-    () => queryClient.invalidateQueries({ queryKey: ["servers", id, "tools"] }),
-    [queryClient, id],
-  );
+  const { server, isLoading: loading } = useServer(id);
+  const { tools, refresh: refreshTools } = useServerTools(id, activeProfile?.id);
 
   if (loading || !server?.id) {
     return <PageLoading message="Loading server details..." />;
@@ -83,8 +34,6 @@ export function ServerDetail() {
     } else {
       await startServer(id!);
     }
-    refreshTools();
-    refresh();
   };
 
   const toggleTool = async (toolName: string, enabled: boolean) => {
@@ -106,7 +55,7 @@ export function ServerDetail() {
     try {
       await updateServer({ id, updates: { autoStart: value } });
     } catch {
-      // 请求失败时 refresh 会还原 Switch 状态
+      // 请求失败时 SSE 会还原 Switch 状态
     }
   };
 
@@ -158,7 +107,6 @@ export function ServerDetail() {
               variant="outline"
               onClick={() => {
                 stopServer(id!);
-                refresh();
               }}
             >
               <Square className="h-4 w-4 mr-2" /> Stop
@@ -167,7 +115,6 @@ export function ServerDetail() {
             <Button
               onClick={() => {
                 startServer(id!);
-                refresh();
               }}
             >
               <Play className="h-4 w-4 mr-2" /> Start

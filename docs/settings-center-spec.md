@@ -2,7 +2,7 @@
 
 ## 概述
 
-Moor 设置中心提供 9 个可配置项，分为 3 个分组：General、Appearance、Advanced。支持浅色/深色主题切换，设置数据持久化到 `~/.moor/settings.json`。
+Moor 设置中心提供 9 个可配置项，分为 3 个分组：General、Appearance、Advanced。支持浅色/深色主题切换。Tauri 桌面运行时设置数据持久化到 `~/Library/Application Support/com.snowautumn.moor/settings.json`；`~/.moor/settings.json` 仅作为独立 sidecar/dev fallback。
 
 ## 配置项
 
@@ -34,9 +34,10 @@ Moor 设置中心提供 9 个可配置项，分为 3 个分组：General、Appea
 ## 存储架构
 
 ```
-~/.moor/settings.json    ← 真相源（Tauri 启动时直接读取）
-~/.moor/moor.db          ← settings 表（运行时缓存，Sidecar 负责读写）
-localStorage             ← 前端主题缓存（防止刷新闪烁）
+~/Library/Application Support/com.snowautumn.moor/settings.json  ← Tauri 桌面真相源（启动时直接读取）
+~/Library/Application Support/com.snowautumn.moor/moor.db        ← settings 表（运行时缓存，Sidecar 负责读写）
+~/.moor/settings.json                                            ← 独立 sidecar/dev fallback
+localStorage                                                     ← 前端主题缓存（防止刷新闪烁）
 ```
 
 ### settings.json Schema

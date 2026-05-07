@@ -6,15 +6,9 @@ import {
   type ParseError,
 } from "jsonc-parser";
 
-export interface ImportDiagnostic {
-  source: string;
-  message: string;
-  code?: string;
-  line?: number;
-  column?: number;
-  offset?: number;
-  length?: number;
-}
+import type { ImportDiagnostic } from "@moor/types";
+
+export type { ImportDiagnostic };
 
 export interface JsonImportFormatResult {
   value: string;

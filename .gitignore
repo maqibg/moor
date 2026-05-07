@@ -43,6 +43,8 @@ coverage/
 .serena
 .zread
 .kiro
+.opencode
+.trellis
 .superpowers
 CLAUDE.md
 CLAUDE.local.md
@@ -50,9 +52,10 @@ AGENTS.md
 .mcp.json
 
 .tmp/
-.omx/
 docs/specs/*
-# Added by code-review-graph
+
+.gitnexus
+
 .code-review-graph/
 
 ############################

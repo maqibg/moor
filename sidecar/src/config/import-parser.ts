@@ -1,14 +1,11 @@
 import { parse as parseJsonc, printParseErrorCode, type ParseError } from "jsonc-parser";
 import { parse as parseToml } from "smol-toml";
 import type { ScannedServer, UnsupportedServer, ImportDiagnostic, ParsedImport } from "@moor/types";
+import { isRecord, mergeParsed } from "../utils.js";
 
 export type { ScannedServer, UnsupportedServer, ImportDiagnostic, ParsedImport };
 
 const HTTP_TYPES = new Set(["http", "sse", "streamable-http", "streamable_http", "remote"]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
@@ -148,15 +145,6 @@ function parseServerMap(value: unknown, source: string): ParsedImport {
   }
 
   return { servers, unsupported, errors: [], diagnostics: [] };
-}
-
-function mergeParsed(...results: ParsedImport[]): ParsedImport {
-  return {
-    servers: results.flatMap((result) => result.servers),
-    unsupported: results.flatMap((result) => result.unsupported),
-    errors: results.flatMap((result) => result.errors),
-    diagnostics: results.flatMap((result) => result.diagnostics),
-  };
 }
 
 function lineColumnAtOffset(content: string, offset: number): { line: number; column: number } {
