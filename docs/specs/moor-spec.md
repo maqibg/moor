@@ -22,106 +22,106 @@
 
 ## Goal
 
-构建一个运行在 macOS 本地的 MCP 控制台 + 网关应用。Moor 作为 **Smart Aggregator**，聚合多个 MCP server（stdio + HTTP/SSE），按 Profile 过滤 tools，通过单一 HTTP endpoint (`http://127.0.0.1:<port>/mcp`) 暴露给 Claude Code、Codex、Cursor、OpenCode 等 AI Agent。所有操作可观测、可审计、可热切换。
+Build a local MCP console + gateway application running on macOS. Moor acts as a **Smart Aggregator**, aggregating multiple MCP servers (stdio + HTTP/SSE), filtering tools by Profile, and exposing them to AI Agents such as Claude Code, Codex, Cursor, and OpenCode through a single HTTP endpoint (`http://127.0.0.1:<port>/mcp`). All operations are observable, auditable, and hot-swappable.
 
 ## Core Architecture Decisions (from Interview)
 
 ### AD-1: Gateway Role — Smart Aggregator
 
-- **Decision**: Moor 是智能聚合器，不是透明代理
-- **Why**: 需要按 Profile 过滤 tools、内置日志、安全审计能力
-- **Consequences**: Moor 需要完整实现 MCP server 端 + MCP client 端
-  - Server 端：暴露 `tools/list`、`tools/call`、`resources/list` 等给 Agent
-  - Client 端：连接后端各 MCP server，聚合并过滤响应
+- **Decision**: Moor is a Smart Aggregator, not a transparent proxy.
+- **Why**: Needs to filter tools by Profile, with built-in logging and security audit capabilities.
+- **Consequences**: Moor needs to fully implement both MCP server and MCP client sides.
+  - Server side: Exposes `tools/list`, `tools/call`, `resources/list`, etc. to the Agent.
+  - Client side: Connects to backend MCP servers, aggregates and filters responses.
 
 ### AD-2: Protocol Support — stdio + HTTP/SSE Complete
 
-- **Decision**: MVP 同时支持 stdio 和 HTTP/SSE 两种 MCP server 连接方式
-- **Why**: 覆盖最广的 server 类型，用户无需区分
-- **Consequences**: Sidecar 需要管理两类连接生命周期：
-  - stdio: spawn 子进程，管理 stdin/stdout pipe
-  - HTTP/SSE: 维护长连接，处理重连
+- **Decision**: MVP supports both stdio and HTTP/SSE MCP server connection methods simultaneously.
+- **Why**: Covers the broadest range of server types; users don't need to distinguish.
+- **Consequences**: Sidecar needs to manage the lifecycle of two types of connections:
+  - stdio: Spawn child processes, manage stdin/stdout pipes.
+  - HTTP/SSE: Maintain long-lived connections, handle reconnections.
 
 ### AD-3: Data Model — Profile Only (No Workspace for MVP)
 
-- **Decision**: MVP 只有 Profile 概念，Workspace 延后
-- **Why**: 简化数据模型，Profile 已足够覆盖"不同场景使用不同 server 组合"的需求
-- **Profile 定义**: 一组 MCP server 配置 + 每个 server 的启用状态 + 每个 tool 的开关状态
-- **Consequences**: 数据模型简化为 Profile → Server → Tool 三层
+- **Decision**: MVP only has the Profile concept; Workspace is deferred.
+- **Why**: Simplifies the data model. Profile is sufficient to cover the need for "different server combinations in different scenarios."
+- **Profile Definition**: A set of MCP server configurations + each server's enabled status + each tool's toggle status.
+- **Consequences**: Data model is simplified to Profile → Server → Tool three layers.
 
 ### AD-4: App Lifecycle — Tray + Background Daemon
 
-- **Decision**: 关闭窗口退到 macOS tray，网关继续运行
-- **Why**: Agent 可能在任何时候调用 tool，网关需要常驻
+- **Decision**: Closing the window minimizes to the macOS tray; the gateway continues to run.
+- **Why**: The Agent may call tools at any time; the gateway needs to be resident.
 - **Consequences**:
-  - 需要实现 tray icon + 右键菜单（状态、打开、退出）
-  - Node sidecar 进程由 Tauri Rust 层管理生命周期
-  - 需要处理 sidecar 崩溃重启逻辑
+  - Need to implement tray icon + right-click menu (status, open, quit).
+  - Node sidecar process lifecycle is managed by the Tauri Rust layer.
+  - Need to handle sidecar crash restart logic.
 
 ### AD-5: Safety Model — Audit Log Only for MVP
 
-- **Decision**: MVP 不做实时拦截，只做审计日志
-- **Why**: 实时拦截涉及异步暂停 MCP 请求 + 弹窗交互，复杂度高
+- **Decision**: MVP does not do real-time interception; only audit logging.
+- **Why**: Real-time interception involves asynchronously pausing MCP requests + popup interaction, which is highly complex.
 - **Consequences**:
-  - MVP 功能 #6（请求日志）和 #7（安全确认）合并为"请求审计日志"
-  - 日志记录：谁调用、哪个 tool、参数、耗时、结果/错误
-  - 后续迭代可增加"标记 destructive tool" + "实时确认弹窗"
+  - MVP feature #6 (request logs) and #7 (security confirmation) are merged into "request audit log."
+  - Log records: who called, which tool, parameters, duration, result/error.
+  - Subsequent iterations can add "mark destructive tool" + "real-time confirmation popup."
 
 ### AD-6: IPC Architecture — Hybrid
 
-- **Decision**: 系统操作走 Tauri IPC → Rust，业务操作走 WebView → HTTP → Sidecar
-- **Why**: Rust 负责系统级能力（Keychain、托盘、文件权限），Sidecar 负责 MCP 协议和业务逻辑
+- **Decision**: System operations go through Tauri IPC → Rust; business operations go through WebView → HTTP → Sidecar.
+- **Why**: Rust handles system-level capabilities (Keychain, tray, file permissions), while Sidecar handles MCP protocol and business logic.
 - **Consequences**:
-  - Rust 层：macOS Keychain、tray icon、window management、sidecar 进程管理
-  - Node sidecar：MCP gateway、server 管理、profile 管理、日志、SQLite 读写
-  - Sidecar 暴露本地 HTTP API（如 `http://127.0.0.1:<port>/api/`）
-  - WebView 通过 `fetch()` 直接调用 sidecar API
+  - Rust layer: macOS Keychain, tray icon, window management, sidecar process management.
+  - Node sidecar: MCP gateway, server management, profile management, logging, SQLite read/write.
+  - Sidecar exposes local HTTP API (e.g., `http://127.0.0.1:<port>/api/`).
+  - WebView calls sidecar API directly via `fetch()`.
 
 ### AD-7: Config Import — Progressive Scan
 
-- **Decision**: 自动扫描 Claude Code、Codex、OpenCode 和 Cursor 配置，手动添加其他
-- **Why**: 这四个最常见且有固定配置路径，其他客户端通过手动添加覆盖
+- **Decision**: Automatically scan Claude Code, Codex, OpenCode, and Cursor configurations; manually add others.
+- **Why**: These four are the most common and have fixed configuration paths; other clients are covered via manual addition.
 - **Scan Paths**:
-  - Claude Code: `~/.claude/settings.json` → `mcpServers` 字段
-  - Codex: `~/.codex/config.toml` → `mcp_servers` 字段
-  - OpenCode: `~/.config/opencode/opencode.json` / `.jsonc` → `mcp` 字段
-  - Cursor: `~/.cursor/mcp.json` → `mcpServers` 字段
-  - Manual: 用户输入 command + args + env
-- **Consequences**: 需要解析 JSON 和 TOML 格式
+  - Claude Code: `~/.claude/settings.json` → `mcpServers` field
+  - Codex: `~/.codex/config.toml` → `mcp_servers` field
+  - OpenCode: `~/.config/opencode/opencode.json` / `.jsonc` → `mcp` field
+  - Cursor: `~/.cursor/mcp.json` → `mcpServers` field
+  - Manual: User inputs command + args + env
+- **Consequences**: Need to parse JSON and TOML formats.
 
 ### AD-8: Profile Routing — Global Active Profile
 
-- **Decision**: 同一时刻只有一个 Active Profile，所有 Agent 共享
-- **Why**: 最简单的路由模型，单一 endpoint 即可
-- **Endpoint**: `http://127.0.0.1:<port>/mcp`（无 URL 路由）
-- **Consequences**: Agent 端配置统一为同一个 URL
+- **Decision**: Only one Active Profile at any given time, shared by all Agents.
+- **Why**: The simplest routing model; a single endpoint is sufficient.
+- **Endpoint**: `http://127.0.0.1:<port>/mcp` (no URL routing)
+- **Consequences**: Agent-side configurations are unified to the same URL.
 
 ### AD-9: Tool Toggle — Server-Level First, Tool-Level Secondary
 
-- **Decision**: 主开关在 server 级别，tool 级别在 server 详情页的二级面板
-- **Why**: 大多数用户只需要开关整个 server，tool 级别是高级需求
-- **Implementation**: Moor 在返回 `tools/list` 给 Agent 时，过滤掉被禁用的 tools
-- **Consequences**: Server 详情页需要一个可展开的 tool 列表面板
+- **Decision**: Main switch is at the server level; tool-level is in a secondary panel on the server details page.
+- **Why**: Most users only need to toggle the entire server; tool-level is an advanced need.
+- **Implementation**: Moor filters out disabled tools when returning `tools/list` to the Agent.
+- **Consequences**: Server details page needs an expandable tool list panel.
 
 ### AD-10: Config Write-Back — Show Instructions + One-Click Copy
 
-- **Decision**: Moor 不直接修改客户端配置文件，而是生成配置指令和代码片段
-- **Why**: 零侵入，无文件权限风险，无格式兼容问题
-- **Implementation**: 每个客户端一个卡片，显示 CLI 命令 + JSON 片段 + 复制按钮
-- **Consequences**: 更安全但需要用户手动操作一步
+- **Decision**: Moor does not directly modify client configuration files; instead, it generates configuration instructions and code snippets.
+- **Why**: Zero intrusion, no file permission risks, no format compatibility issues.
+- **Implementation**: One card per client, displaying CLI command + JSON snippet + copy button.
+- **Consequences**: Safer, but requires one manual step from the user.
 
 ### AD-11: Profile Switching — Hot-Swap (No Disconnect)
 
-- **Decision**: 切换 Profile 不断开 Agent 连接，下次 `tools/list` 自动反映变化
-- **Why**: 最平滑的 UX，不中断 Agent 工作流
-- **Consequences**: 如果 Agent 正在使用被移除的 tool，下次 `tools/call` 返回错误
+- **Decision**: Switching Profiles does not disconnect the Agent connection; changes are automatically reflected on the next `tools/list`.
+- **Why**: The smoothest UX, does not interrupt the Agent workflow.
+- **Consequences**: If the Agent is currently using a removed tool, the next `tools/call` returns an error.
 
 ### AD-12: Sidecar Packaging — Bundle as Standalone Binary (pkg/SEA)
 
-- **Decision**: Node sidecar 编译为独立二进制，打包进 Moor.app
-- **Why**: 用户无需预装 Node.js，开箱即用
-- **Implementation**: 使用 `pkg` 或 Node.js SEA (Single Executable Application) 编译
-- **Consequences**: App 体积增加约 50-80MB，但安装体验最优
+- **Decision**: Node sidecar is compiled as a standalone binary and packaged into Moor.app.
+- **Why**: Users do not need to pre-install Node.js; it works out of the box.
+- **Implementation**: Compile using `pkg` or Node.js SEA (Single Executable Application).
+- **Consequences**: App size increases by approximately 50-80MB, but provides the best installation experience.
 
 ## Tech Stack (Confirmed)
 
@@ -287,28 +287,28 @@ Based on Stitch project screens + interview decisions:
 
 ## Acceptance Criteria
 
-- [ ] Moor.app 可在 macOS 上安装并启动，无需预装 Node.js
-- [ ] 关闭窗口后网关继续运行（tray icon），Agent 可正常调用 tools
-- [ ] 可自动扫描并导入 Claude Code 和 Cursor 的 MCP 配置
-- [ ] 可手动添加 MCP server（stdio 和 HTTP/SSE 两种类型）
-- [ ] 每个 server 可独立启停，状态实时显示
-- [ ] Profile 可创建、编辑、删除，全局切换为 Hot-Swap
-- [ ] 工具级开关在 server 详情页可操作，禁用后 Agent 立即不可见
-- [ ] 所有 tool 调用记录在审计日志中，可按 server/tool/时间筛选
-- [ ] 单一 endpoint (`http://127.0.0.1:<port>/mcp`) 正常响应 MCP 协议
-- [ ] 客户端配置页面可生成各 Agent 的配置指令并一键复制
-- [ ] UI 遵循 DESIGN.md 的 Cursor 风格设计系统
+- [ ] Moor.app can be installed and launched on macOS without pre-installing Node.js.
+- [ ] Gateway continues to run after closing the window (tray icon), and Agent can call tools normally.
+- [ ] Can automatically scan and import MCP configurations from Claude Code and Cursor.
+- [ ] Can manually add MCP servers (both stdio and HTTP/SSE types).
+- [ ] Each server can be independently started/stopped, with real-time status display.
+- [ ] Profiles can be created, edited, and deleted; global switching is Hot-Swap.
+- [ ] Tool-level toggles are operable on the server details page; disabled tools are immediately invisible to the Agent.
+- [ ] All tool calls are recorded in the audit log, filterable by server/tool/time.
+- [ ] Single endpoint (`http://127.0.0.1:<port>/mcp`) responds normally to MCP protocol.
+- [ ] Client configuration page can generate configuration instructions for each Agent and copy with one click.
+- [ ] UI follows the Cursor-style design system in DESIGN.md.
 
 ## Assumptions Exposed & Resolved
 
-| Assumption                      | Challenge                             | Resolution                          |
-| ------------------------------- | ------------------------------------- | ----------------------------------- |
-| 需要实时安全确认弹窗            | 实现复杂度极高，需要异步暂停 MCP 请求 | MVP 只做审计日志，实时确认延后      |
-| Profile 和 Workspace 是两个概念 | 数据模型复杂度增加                    | MVP 只做 Profile，Workspace 延后    |
-| 需要支持所有客户端配置导入      | 各客户端格式差异大                    | MVP 只自动扫描 Claude Code + Cursor |
-| 需要直接修改客户端配置文件      | 文件权限和格式兼容风险                | 改为显示指令 + 一键复制             |
-| Agent 需要各自独立的 Profile    | 路由复杂度高                          | MVP 用全局 Active Profile           |
-| 用户有 Node.js 环境             | 增加安装门槛                          | Sidecar 编译为独立二进制打包        |
+| Assumption                                      | Challenge                                                                              | Resolution                                                |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| Real-time safety confirmation popup needed      | Extremely high implementation complexity; requires asynchronously pausing MCP requests | MVP only does audit logs; real-time confirmation deferred |
+| Profile and Workspace are two distinct concepts | Increased data model complexity                                                        | MVP only does Profile; Workspace deferred                 |
+| Need to support config import from all clients  | Large format differences between clients                                               | MVP only auto-scans Claude Code + Cursor                  |
+| Need to directly modify client config files     | File permission and format compatibility risks                                         | Changed to showing instructions + one-click copy          |
+| Agents need independent Profiles                | High routing complexity                                                                | MVP uses global Active Profile                            |
+| Users have a Node.js environment                | Increases installation barrier                                                         | Sidecar compiled as standalone binary                     |
 
 ## Ontology (Key Entities)
 
@@ -342,11 +342,11 @@ Based on Stitch project screens + interview decisions:
 
 ## Potential Risks & Mitigations
 
-1. **Node SEA/pkg 兼容性**: Node SEA 仍较新，可能有 native module 兼容问题 → 使用 `@modelcontextprotocol/sdk` 纯 JS 实现避免 native deps
-2. **MCP 协议版本变化**: MCP 规范仍在快速迭代 → 抽象 Protocol Layer，版本适配集中处理
-3. **stdio 进程管理复杂度**: 子进程崩溃、僵尸进程、端口占用 → Tauri Rust 层统一管理 sidecar + MCP server 进程
-4. **SQLite 并发写入**: 多个 server 同时写日志 → WAL mode + 单 writer（sidecar 主进程）
-5. **macOS 权限**: 网络监听、文件访问可能触发系统权限弹窗 → Info.plist 预声明 + Rust 层请求权限
+1. **Node SEA/pkg compatibility**: Node SEA is still relatively new and may have native module compatibility issues → Use `@modelcontextprotocol/sdk` pure JS implementation to avoid native deps.
+2. **MCP protocol version changes**: MCP specification is still rapidly iterating → Abstract Protocol Layer, centralize version adaptation.
+3. **stdio process management complexity**: Child process crashes, zombie processes, port conflicts → Tauri Rust layer统一管理 sidecar + MCP server processes.
+4. **SQLite concurrent writes**: Multiple servers writing logs simultaneously → WAL mode + single writer (sidecar main process).
+5. **macOS permissions**: Network listening, file access may trigger system permission popups → Pre-declare in Info.plist + Rust layer requests permissions.
 
 ## Interview Transcript
 
@@ -355,74 +355,74 @@ Based on Stitch project screens + interview decisions:
 
 ### Round 1
 
-**Q:** Moor 网关在 MCP 协议中扮演什么角色？
-**A:** B: Smart Aggregator — 路由逻辑 + Profile/Workspace 过滤 + 分组 endpoint + 内置日志和安全拦截
+**Q:** What role does the Moor gateway play in the MCP protocol?
+**A:** B: Smart Aggregator — routing logic + Profile/Workspace filtering + grouped endpoint + built-in logging and security interception
 **Ambiguity:** 55% (Goal: 0.60, Constraints: 0.40, Criteria: 0.30)
 
 ### Round 2
 
-**Q:** Moor 需要支持哪些 MCP server 连接方式？
-**A:** B: stdio + HTTP/SSE (Complete) — 同时支持两种连接方式
+**Q:** Which MCP server connection methods does Moor need to support?
+**A:** B: stdio + HTTP/SSE (Complete) — support both connection methods simultaneously
 **Ambiguity:** 50% (Goal: 0.65, Constraints: 0.50, Criteria: 0.30)
 
 ### Round 3
 
-**Q:** Profile 和 Workspace 在数据模型中是什么关系？
-**A:** D: Profile Only for MVP — MVP 只做 Profile，Workspace 延后
+**Q:** What is the relationship between Profile and Workspace in the data model?
+**A:** D: Profile Only for MVP — MVP only does Profile; Workspace deferred
 **Ambiguity:** 48% (Goal: 0.70, Constraints: 0.50, Criteria: 0.30)
 
 ### Round 4
 
-**Q:** Moor 窗口关闭后，网关应该继续运行吗？
-**A:** B: Tray + Background Daemon — 关闭窗口退到 tray，网关继续运行
+**Q:** Should the gateway continue running after the Moor window is closed?
+**A:** B: Tray + Background Daemon — minimize to tray on close, gateway continues running
 **Ambiguity:** 45% (Goal: 0.70, Constraints: 0.60, Criteria: 0.30)
 
 ### Round 5
 
-**Q:** Moor 如何判断哪些 tool 需要"安全确认"？
-**A:** C: Audit Log Only (MVP) — 不做实时拦截，只做审计日志
+**Q:** How should Moor determine which tools need "safety confirmation"?
+**A:** C: Audit Log Only (MVP) — no real-time interception, only audit logs
 **Ambiguity:** 41.2% (Goal: 0.72, Constraints: 0.60, Criteria: 0.40)
 
 ### Round 6
 
-**Q:** Tauri WebView 和 Node sidecar 之间如何通信？
-**A:** C: Hybrid — 系统操作走 Rust，业务操作走 HTTP 直连 Sidecar
+**Q:** How should the Tauri WebView and Node sidecar communicate?
+**A:** C: Hybrid — system operations go through Rust, business operations go through HTTP directly to Sidecar
 **Ambiguity:** 36.4% (Goal: 0.75, Constraints: 0.72, Criteria: 0.40)
 
 ### Round 7
 
-**Q:** "导入现有配置"应该做到什么程度？
-**A:** D: Scan Top 2 + Manual (Progressive) — 自动扫描 Claude Code + Cursor，手动添加其他
+**Q:** To what extent should "import existing configuration" be implemented?
+**A:** D: Scan Top 2 + Manual (Progressive) — auto-scan Claude Code + Cursor, manually add others
 **Ambiguity:** 32.8% (Goal: 0.78, Constraints: 0.72, Criteria: 0.48)
 
 ### Round 8
 
-**Q:** Agent 如何确定使用哪个 Profile？
-**A:** A: Global Active Profile — 所有 Agent 共享当前激活的 Profile
+**Q:** How does the Agent determine which Profile to use?
+**A:** A: Global Active Profile — all Agents share the currently active Profile
 **Ambiguity:** 29.9% (Goal: 0.80, Constraints: 0.75, Criteria: 0.52)
 
 ### Round 9
 
-**Q:** 工具级开关的 UX 应该怎么设计？
-**A:** B: Server-Level First, Tool-Level Secondary — 主开关在 server 级别，tool 级别在二级面板
+**Q:** How should the UX for tool-level toggles be designed?
+**A:** B: Server-Level First, Tool-Level Secondary — main switch at server level, tool level in secondary panel
 **Ambiguity:** 27.3% (Goal: 0.82, Constraints: 0.75, Criteria: 0.58)
 
 ### Round 10
 
-**Q:** "一键写入客户端配置"应该怎么做？
-**A:** D: Show Instructions + One-Click Copy — 生成配置指令和代码片段，一键复制
+**Q:** How should "one-click write client configuration" be implemented?
+**A:** D: Show Instructions + One-Click Copy — generate configuration instructions and code snippets, one-click copy
 **Ambiguity:** 23.1% (Goal: 0.85, Constraints: 0.78, Criteria: 0.65)
 
 ### Round 11
 
-**Q:** 用户切换 Profile 时，已连接的 Agent 会发生什么？
-**A:** A: Hot-Swap (No Disconnect) — 不断开连接，下次 tools/list 自动反映变化
+**Q:** What happens to connected Agents when the user switches Profiles?
+**A:** A: Hot-Swap (No Disconnect) — do not disconnect; next tools/list automatically reflects changes
 **Ambiguity:** 20.2% (Goal: 0.87, Constraints: 0.82, Criteria: 0.68)
 
 ### Round 12
 
-**Q:** Node/TS sidecar 如何解决运行时依赖问题？
-**A:** B: Bundle as Standalone Binary (pkg/SEA) — 编译为独立二进制打包进 app
+**Q:** How does the Node/TS sidecar solve runtime dependency issues?
+**A:** B: Bundle as Standalone Binary (pkg/SEA) — compile as standalone binary packaged into app
 **Ambiguity:** 17.4% (Goal: 0.88, Constraints: 0.88, Criteria: 0.70)
 
 </details>
