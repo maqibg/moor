@@ -84,6 +84,7 @@ export class ServerManager {
       headers: config.headers ? JSON.stringify(config.headers) : null,
       workingDir: config.workingDir ?? null,
       autoStart: config.autoStart ? 1 : 0,
+      sortOrder: serverRepo.nextTopSortOrder(),
       createdAt: now,
       updatedAt: now,
     });
@@ -148,6 +149,16 @@ export class ServerManager {
     serverRepo.remove(id);
     this.servers.delete(id);
     return true;
+  }
+
+  reorderServers(ids: string[]): Record<string, unknown>[] | null {
+    if (new Set(ids).size !== ids.length) return null;
+    const existingIds = serverRepo.findIds();
+    const existing = new Set(existingIds);
+    if (ids.length !== existingIds.length || ids.some((id) => !existing.has(id))) return null;
+
+    serverRepo.reorder(ids);
+    return serverRepo.findAll();
   }
 
   async startServer(id: string): Promise<void> {

@@ -22,6 +22,7 @@ interface TestManager {
   addServer: typeof serverManager.addServer;
   getServer: typeof serverManager.getServer;
   loadFromDb: typeof serverManager.loadFromDb;
+  removeServer: typeof serverManager.removeServer;
   startAutoStartServers: typeof serverManager.startAutoStartServers;
   startServer: typeof serverManager.startServer;
   stopAll: typeof serverManager.stopAll;
@@ -30,11 +31,13 @@ interface TestManager {
 type TestSessionFactory = NonNullable<ConstructorParameters<typeof ServerManager>[0]>;
 type TestServerSession = Awaited<ReturnType<TestSessionFactory>>;
 
-function createFakeSession(): TestServerSession {
+function createFakeSession(onClose: () => void = () => undefined): TestServerSession {
   return {
     client: {
       listTools: async () => ({ tools: [] }),
-      close: async () => undefined,
+      close: async () => {
+        onClose();
+      },
     },
     transport: {},
   } as unknown as TestServerSession;
@@ -179,6 +182,21 @@ describe("ServerManager MCP lifecycle", () => {
     expect(startCalls).toHaveLength(2);
     expect(manager.getServer(broken.id)?.status).toBe("error");
     expect(manager.getServer(healthy.id)?.status).toBe("running");
+  });
+
+  it("stops a running server before removing it", async () => {
+    let closeCalls = 0;
+    const manager = createTestManager(async () => createFakeSession(() => closeCalls++));
+    const managed = addAutoStartServer(manager, "Running Fixture");
+
+    await manager.startServer(managed.id);
+    expect(manager.getServer(managed.id)?.status).toBe("running");
+
+    await manager.removeServer(managed.id);
+
+    expect(closeCalls).toBe(1);
+    expect(manager.getServer(managed.id)).toBeUndefined();
+    expect(queryOne("SELECT id FROM mcp_servers WHERE id = ?", [managed.id])).toBeNull();
   });
 
   it("resolves env placeholders for HTTP transport headers", () => {

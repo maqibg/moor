@@ -189,6 +189,25 @@ export function useServers() {
     },
   });
 
+  const reorderServers = useCallback(
+    async (nextServers: Server[]) => {
+      const previous = queryClient.getQueryData<Server[]>(["servers"]) ?? servers;
+      queryClient.setQueryData<Server[]>(["servers"], nextServers);
+      try {
+        const ordered = await apiPut<Server[]>("/api/servers/order", {
+          serverIds: nextServers.map((server) => server.id),
+        });
+        queryClient.setQueryData<Server[]>(["servers"], ordered);
+        return ordered;
+      } catch (err) {
+        queryClient.setQueryData<Server[]>(["servers"], previous);
+        await refreshSilently();
+        throw err;
+      }
+    },
+    [queryClient, refreshSilently, servers],
+  );
+
   useSSEEvent("server:status", (data) => mergeStatusEvent(data));
   useSSEEvent("server:tools", () => void refreshSilently());
 
@@ -205,6 +224,7 @@ export function useServers() {
     startServer,
     stopServer,
     removeServer: removeServer.mutateAsync,
+    reorderServers,
   };
 }
 

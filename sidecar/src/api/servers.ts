@@ -4,7 +4,7 @@ import { profileService } from "../services/profiles.js";
 import { queryOne } from "../db/index.js";
 import * as serverRepo from "../db/server-repository.js";
 import { serializeServer } from "../db/serializers.js";
-import { createServerSchema } from "./schemas.js";
+import { createServerSchema, serverOrderSchema } from "./schemas.js";
 import { validate } from "./validate.js";
 
 const servers = new Hono();
@@ -22,6 +22,17 @@ servers.post("/", async (c) => {
   profileService.assignToActiveProfile([server.id]);
   const row = queryOne("SELECT * FROM mcp_servers WHERE id = ?", [server.id]);
   return c.json(serializeServer({ ...row, ...server }), 201);
+});
+
+servers.put("/order", async (c) => {
+  const raw = await c.req.json();
+  const body = validate(serverOrderSchema, raw, c);
+  if (body instanceof Response) return body;
+  const rows = serverManager.reorderServers(body.serverIds);
+  if (!rows) {
+    return c.json({ error: "Server order must include every existing server exactly once." }, 400);
+  }
+  return c.json(rows.map(serializeServer));
 });
 
 servers.get("/:id", (c) => {
