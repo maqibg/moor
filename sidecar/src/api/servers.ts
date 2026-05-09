@@ -1,10 +1,9 @@
 import { Hono } from "hono";
-import { serverManager } from "../services/server-manager.js";
+import { getPublicServerStartErrorMessage, serverManager } from "../services/server-manager.js";
 import { profileService } from "../services/profiles.js";
 import { getServerRepository } from "../db/server-repository.js";
 import { createServerSchema, serverOrderSchema } from "./schemas.js";
-import { validate } from "./validate.js";
-import type { ApiErrorCode } from "@moor/types";
+import { apiError, validate } from "./validate.js";
 
 const servers = new Hono();
 
@@ -30,12 +29,7 @@ servers.put("/order", async (c) => {
   const rows = serverManager.reorderServers(body.serverIds);
   if (!rows) {
     return c.json(
-      {
-        error: {
-          code: "ORDER_INVALID" as ApiErrorCode,
-          message: "Server order must include every existing server exactly once.",
-        },
-      },
+      apiError("ORDER_INVALID", "Server order must include every existing server exactly once."),
       400,
     );
   }
@@ -45,10 +39,7 @@ servers.put("/order", async (c) => {
 servers.get("/:id", (c) => {
   const server = serverManager.getServer(c.req.param("id"));
   if (!server) {
-    return c.json(
-      { error: { code: "NOT_FOUND" as ApiErrorCode, message: "Server not found" } },
-      404,
-    );
+    return c.json(apiError("NOT_FOUND", "Server not found"), 404);
   }
   const row = getServerRepository().findById(c.req.param("id"));
   return c.json({ ...row, runtime: server });
@@ -58,10 +49,7 @@ servers.put("/:id", async (c) => {
   const body = await c.req.json<Record<string, unknown>>();
   const server = serverManager.updateServer(c.req.param("id"), body);
   if (!server) {
-    return c.json(
-      { error: { code: "NOT_FOUND" as ApiErrorCode, message: "Server not found" } },
-      404,
-    );
+    return c.json(apiError("NOT_FOUND", "Server not found"), 404);
   }
   const row = getServerRepository().findById(server.id);
   return c.json({ ...row, runtime: server });
@@ -70,10 +58,7 @@ servers.put("/:id", async (c) => {
 servers.delete("/:id", async (c) => {
   const removed = await serverManager.removeServer(c.req.param("id"));
   if (!removed) {
-    return c.json(
-      { error: { code: "NOT_FOUND" as ApiErrorCode, message: "Server not found" } },
-      404,
-    );
+    return c.json(apiError("NOT_FOUND", "Server not found"), 404);
   }
   return c.json({ success: true });
 });
@@ -83,10 +68,7 @@ servers.post("/:id/start", async (c) => {
     await serverManager.startServer(c.req.param("id"));
     return c.json({ status: "started" });
   } catch (err) {
-    return c.json(
-      { error: { code: "INTERNAL_ERROR" as ApiErrorCode, message: (err as Error).message } },
-      500,
-    );
+    return c.json(apiError("INTERNAL_ERROR", getPublicServerStartErrorMessage(err)), 500);
   }
 });
 

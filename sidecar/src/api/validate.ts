@@ -1,6 +1,10 @@
 import type { Context } from "hono";
 import type { ZodSchema, ZodError } from "zod";
-import type { ApiErrorCode } from "@moor/types";
+import type { ApiError, ApiErrorCode } from "@moor/types";
+
+export function apiError(code: ApiErrorCode, message: string): { error: ApiError } {
+  return { error: { code, message } };
+}
 
 export function formatZodError(error: ZodError): string {
   const issue = error.issues[0];
@@ -12,12 +16,7 @@ export function formatZodError(error: ZodError): string {
 export function validate<T>(schema: ZodSchema<T>, data: unknown, c: Context): T | Response {
   const result = schema.safeParse(data);
   if (!result.success) {
-    return c.json(
-      {
-        error: { code: "VALIDATION_ERROR" as ApiErrorCode, message: formatZodError(result.error) },
-      },
-      400,
-    );
+    return c.json(apiError("VALIDATION_ERROR", formatZodError(result.error)), 400);
   }
   return result.data;
 }

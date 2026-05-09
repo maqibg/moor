@@ -37,8 +37,10 @@ export function useProfiles() {
   const activateProfile = useCallback(
     async (id: string) => {
       await apiPut(routes.profiles.activate(id), {});
-      await queryClient.invalidateQueries({ queryKey: ["profiles"] });
-      await queryClient.invalidateQueries({ queryKey: ["servers"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["profiles"] }),
+        queryClient.invalidateQueries({ queryKey: ["servers"] }),
+      ]);
     },
     [queryClient],
   );

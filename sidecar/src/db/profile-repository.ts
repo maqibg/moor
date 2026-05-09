@@ -23,6 +23,11 @@ function parseDisabledTools(value: unknown): string[] {
   return parseJsonValue(value, []) as string[];
 }
 
+function requireRow(row: Record<string, unknown> | null, message: string): Record<string, unknown> {
+  if (!row) throw new Error(message);
+  return row;
+}
+
 function serializeProfileServerState(row: Record<string, unknown>): ProfileServerRow {
   const camel = keysToCamelCase({
     ...row,
@@ -104,7 +109,7 @@ export class ProfileRepository {
       [id, name, now, now],
     );
     const row = this.db.queryOne("SELECT * FROM profiles WHERE id = ?", [id]);
-    return serializeProfile(row ?? {});
+    return serializeProfile(requireRow(row, "Created profile could not be reloaded"));
   }
 
   update(id: string, data: { name?: string }): Profile | null {
@@ -118,7 +123,7 @@ export class ProfileRepository {
       ]);
     }
     const row = this.db.queryOne("SELECT * FROM profiles WHERE id = ?", [id]);
-    return serializeProfile(row ?? {});
+    return serializeProfile(requireRow(row, "Updated profile could not be reloaded"));
   }
 
   activate(id: string): Profile | null {
@@ -132,7 +137,7 @@ export class ProfileRepository {
       ]);
     });
     const row = this.db.queryOne("SELECT * FROM profiles WHERE id = ?", [id]);
-    return serializeProfile(row ?? {});
+    return serializeProfile(requireRow(row, "Activated profile could not be reloaded"));
   }
 
   remove(id: string): { success: true } | { error: "not_found" | "active" } {
@@ -193,7 +198,9 @@ export class ProfileRepository {
       "SELECT * FROM profile_servers WHERE profile_id = ? AND server_id = ?",
       [profileId, serverId],
     );
-    return serializeProfileServerState(row ?? {});
+    return serializeProfileServerState(
+      requireRow(row, "Profile server state could not be reloaded"),
+    );
   }
 
   findActiveProfileServerIds(): string[] {

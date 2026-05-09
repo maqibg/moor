@@ -109,7 +109,7 @@ export class AuditLogRepository {
   topServers(): Array<{ serverId: string; count: number }> {
     return this.db
       .queryAll(
-        "SELECT server_id, COUNT(*) as count FROM audit_logs GROUP BY server_id ORDER BY count DESC LIMIT 10",
+        "SELECT server_id, COUNT(*) as count FROM audit_logs WHERE server_id IS NOT NULL GROUP BY server_id ORDER BY count DESC LIMIT 10",
         [],
       )
       .map(keysToCamelCase) as Array<{ serverId: string; count: number }>;
@@ -136,7 +136,7 @@ export class AuditLogRepository {
         entry.profileId,
         entry.serverId,
         entry.toolName,
-        JSON.stringify(entry.arguments),
+        entry.arguments !== null ? JSON.stringify(entry.arguments) : null,
         entry.result !== null ? JSON.stringify(entry.result) : null,
         entry.error,
         entry.durationMs,
@@ -150,13 +150,21 @@ export class AuditLogRepository {
   }
 
   getStats(): LogStats {
-    const totalCalls = this.countAll();
-    const errorCalls = this.countErrors();
+    const summary = this.db.queryOne(
+      `SELECT
+        COUNT(*) as total_calls,
+        SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) as error_calls,
+        AVG(duration_ms) as avg_duration_ms
+       FROM audit_logs`,
+      [],
+    );
+    const totalCalls = Number(summary?.total_calls ?? 0);
+    const errorCalls = Number(summary?.error_calls ?? 0);
     return {
       totalCalls,
       errorCalls,
       errorRate: totalCalls > 0 ? errorCalls / totalCalls : 0,
-      avgDurationMs: this.avgDuration(),
+      avgDurationMs: (summary?.avg_duration_ms as number | null) ?? null,
       topTools: this.topTools(),
       topServers: this.topServers(),
     };

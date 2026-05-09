@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { closeDb, initDb, queryAll, run, runMigrations } from "../db/index.js";
+import { eventBus } from "../services/event-bus.js";
 import { profileService } from "../services/profiles.js";
 import { serverManager } from "../services/server-manager.js";
 import { servers } from "./servers.js";
@@ -36,6 +37,7 @@ describe("servers API ordering", () => {
   afterEach(async () => {
     await serverManager.stopAll();
     serverManager.resetForTest();
+    eventBus.removeAll();
     closeDb();
     rmSync(dataDir, { recursive: true, force: true });
   });
@@ -129,5 +131,40 @@ describe("servers API ordering", () => {
     expect(queryAll("SELECT id, server_id FROM audit_logs")).toEqual([
       { id: "audit-1", server_id: null },
     ]);
+  });
+
+  it("returns, stores, and emits public start errors without leaking searched PATH", async () => {
+    const publicMessage =
+      'Command "definitely-missing-moor-command" was not found. Configure an absolute command path or update this server environment.';
+    const server = serverManager.addServer({
+      name: "missing-command",
+      connectionType: "stdio",
+      command: "definitely-missing-moor-command",
+    });
+    const emitted: unknown[] = [];
+    const unsubscribe = eventBus.on("server:status", (_event, data) => emitted.push(data));
+
+    const response = await servers.request(`/${server.id}/start`, { method: "POST" });
+    unsubscribe();
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: publicMessage,
+      },
+    });
+    expect(JSON.stringify(emitted)).not.toContain("Moor searched PATH");
+    expect(
+      queryAll("SELECT status, error_message FROM mcp_servers WHERE id = ?", [server.id]),
+    ).toEqual([{ status: "error", error_message: publicMessage }]);
+    expect(emitted).toContainEqual({
+      type: "server:status",
+      data: {
+        serverId: server.id,
+        status: "error",
+        errorMessage: publicMessage,
+      },
+    });
   });
 });

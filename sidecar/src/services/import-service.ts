@@ -2,7 +2,7 @@ import { getServerRepository } from "../db/server-repository.js";
 import type { ScannedServer, ParsedImport, ImportPreview } from "@moor/types";
 
 export function getExistingNames(): Set<string> {
-  const rows = getServerRepository().findAll();
+  const rows = getServerRepository().findAllNames();
   return new Set(rows.map((server) => server.name));
 }
 
@@ -44,10 +44,4 @@ export function buildImportPreview(
     errors: parsed.errors,
     diagnostics: parsed.diagnostics,
   };
-}
-
-export function findServerIdByName(name: string): string | undefined {
-  const rows = getServerRepository().findAll();
-  const found = rows.find((server) => server.name === name);
-  return found?.id;
 }

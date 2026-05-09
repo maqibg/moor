@@ -1,16 +1,10 @@
 import type { Database } from "./index.js";
 import { getDatabase } from "./index.js";
 import type { Server } from "@moor/types";
-import { parseJsonValue, keysToCamelCase } from "./serializers.js";
+import { serializeServer } from "./serializers.js";
 
-function serializeServer(row: Record<string, unknown>): Server {
-  return keysToCamelCase({
-    ...row,
-    args: parseJsonValue(row.args, []),
-    env: parseJsonValue(row.env, {}),
-    headers: parseJsonValue(row.headers, null),
-    auto_start: Boolean(row.auto_start),
-  }) as unknown as Server;
+function toServer(row: Record<string, unknown>): Server {
+  return serializeServer(row) as unknown as Server;
 }
 
 export class ServerRepository {
@@ -18,15 +12,17 @@ export class ServerRepository {
 
   findAll(): Server[] {
     return this.db
-      .queryAll(
-        `SELECT s.*, GROUP_CONCAT(td.tool_name) as tools
-         FROM mcp_servers s
-         LEFT JOIN tool_discoveries td ON s.id = td.server_id
-         GROUP BY s.id
-         ORDER BY s.sort_order ASC, s.created_at DESC`,
-        [],
-      )
-      .map(serializeServer);
+      .queryAll("SELECT * FROM mcp_servers ORDER BY sort_order ASC, created_at DESC", [])
+      .map(toServer);
+  }
+
+  findAllNames(): Array<{ id: string; name: string }> {
+    return this.db
+      .queryAll("SELECT id, name FROM mcp_servers ORDER BY name ASC", [])
+      .map((row) => ({
+        id: String(row.id),
+        name: String(row.name),
+      }));
   }
 
   findIds(): string[] {
@@ -35,7 +31,7 @@ export class ServerRepository {
 
   findById(id: string): Server | null {
     const row = this.db.queryOne("SELECT * FROM mcp_servers WHERE id = ?", [id]);
-    return row ? serializeServer(row) : null;
+    return row ? toServer(row) : null;
   }
 
   findByIds(ids: string[]): Server[] {
@@ -45,7 +41,7 @@ export class ServerRepository {
       `SELECT * FROM mcp_servers WHERE id IN (${uniqueIds.map(() => "?").join(",")})`,
       uniqueIds,
     );
-    const byId = new Map(rows.map((row) => [String(row.id), serializeServer(row)]));
+    const byId = new Map(rows.map((row) => [String(row.id), toServer(row)]));
     return ids.flatMap((id) => {
       const row = byId.get(id);
       return row ? [row] : [];
@@ -53,7 +49,7 @@ export class ServerRepository {
   }
 
   loadAll(): Server[] {
-    return this.db.queryAll("SELECT * FROM mcp_servers", []).map(serializeServer);
+    return this.db.queryAll("SELECT * FROM mcp_servers", []).map(toServer);
   }
 
   insert(data: {

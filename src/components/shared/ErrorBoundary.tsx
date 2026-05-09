@@ -32,8 +32,8 @@ export class ErrorBoundary extends Component<Props, State> {
           <p className="text-sm text-[var(--fg-50)] max-w-md text-center">
             Moor hit an unexpected UI error. Try reloading this view.
           </p>
-          <Button onClick={() => this.setState({ hasError: false, error: null })} variant="outline">
-            Try again
+          <Button onClick={() => window.location.reload()} variant="outline">
+            Reload page
           </Button>
         </div>
       );
