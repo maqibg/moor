@@ -8,19 +8,14 @@ import {
 } from "./import-parser.js";
 import { FORMATTERS } from "./formatters.js";
 import { getServerRepository } from "../db/server-repository.js";
+import type { ConvertResult } from "@moor/types";
+export type { ConvertResult } from "@moor/types";
 
 export interface ConvertInput {
   source: "moor" | "scan" | "paste";
   sourceClient?: string;
   content?: string;
   serverIds?: string[];
-  targetClient: string;
-}
-
-export interface ConvertResult {
-  content: string;
-  warnings: string[];
-  targetPath: string;
   targetClient: string;
 }
 

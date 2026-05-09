@@ -3,6 +3,8 @@ import { getDatabase } from "./index.js";
 import type { Server } from "@moor/types";
 import { serializeServer } from "./serializers.js";
 
+const FIND_BY_IDS_BATCH_SIZE = 500;
+
 function toServer(row: Record<string, unknown>): Server {
   return serializeServer(row) as unknown as Server;
 }
@@ -37,10 +39,16 @@ export class ServerRepository {
   findByIds(ids: string[]): Server[] {
     if (ids.length === 0) return [];
     const uniqueIds = Array.from(new Set(ids));
-    const rows = this.db.queryAll(
-      `SELECT * FROM mcp_servers WHERE id IN (${uniqueIds.map(() => "?").join(",")})`,
-      uniqueIds,
-    );
+    const rows: Record<string, unknown>[] = [];
+    for (let start = 0; start < uniqueIds.length; start += FIND_BY_IDS_BATCH_SIZE) {
+      const batch = uniqueIds.slice(start, start + FIND_BY_IDS_BATCH_SIZE);
+      rows.push(
+        ...this.db.queryAll(
+          `SELECT * FROM mcp_servers WHERE id IN (${batch.map(() => "?").join(",")})`,
+          batch,
+        ),
+      );
+    }
     const byId = new Map(rows.map((row) => [String(row.id), toServer(row)]));
     return ids.flatMap((id) => {
       const row = byId.get(id);

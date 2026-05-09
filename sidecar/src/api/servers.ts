@@ -19,7 +19,8 @@ servers.post("/", async (c) => {
   const server = serverManager.addServer(body);
   profileService.assignToActiveProfile([server.id]);
   const row = getServerRepository().findById(server.id);
-  return c.json({ ...row, runtime: server }, 201);
+  if (!row) return c.json(apiError("INTERNAL_ERROR", "Created server could not be reloaded"), 500);
+  return c.json(row, 201);
 });
 
 servers.put("/order", async (c) => {
@@ -42,6 +43,7 @@ servers.get("/:id", (c) => {
     return c.json(apiError("NOT_FOUND", "Server not found"), 404);
   }
   const row = getServerRepository().findById(c.req.param("id"));
+  if (!row) return c.json(apiError("INTERNAL_ERROR", "Server row could not be reloaded"), 500);
   return c.json({ ...row, runtime: server });
 });
 
@@ -52,7 +54,8 @@ servers.put("/:id", async (c) => {
     return c.json(apiError("NOT_FOUND", "Server not found"), 404);
   }
   const row = getServerRepository().findById(server.id);
-  return c.json({ ...row, runtime: server });
+  if (!row) return c.json(apiError("INTERNAL_ERROR", "Updated server could not be reloaded"), 500);
+  return c.json(row);
 });
 
 servers.delete("/:id", async (c) => {

@@ -9,6 +9,7 @@ import { serverManager } from "../services/server-manager.js";
 import { profileService } from "../services/profiles.js";
 import {
   getExistingNames,
+  partitionImportCandidates,
   selectImportCandidates,
   buildImportPreview,
 } from "../services/import-service.js";
@@ -16,7 +17,7 @@ import { isRecord } from "../utils.js";
 import { apiError, formatZodError } from "./validate.js";
 import type { ScannedServer } from "@moor/types";
 
-export { selectImportCandidates };
+export { partitionImportCandidates, selectImportCandidates };
 
 const importApi = new Hono();
 
@@ -59,11 +60,9 @@ importApi.post("/parse", async (c) => {
 importApi.post("/execute", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { servers?: ScannedServer[] };
   const existingNames = getExistingNames();
-  const servers = body.servers?.length
-    ? selectImportCandidates(body.servers, existingNames)
-    : selectImportCandidates(scanAllConfigs().servers, existingNames);
+  const scannedServers = body.servers?.length ? body.servers : scanAllConfigs().servers;
+  const { candidates: servers, skipped } = partitionImportCandidates(scannedServers, existingNames);
   const imported: string[] = [];
-  const skipped: string[] = [];
   const importedIds: string[] = [];
 
   for (const serverConfig of servers) {

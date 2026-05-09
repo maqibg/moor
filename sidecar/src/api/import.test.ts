@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
+import { closeDb, initDb, queryAll, runMigrations } from "../db/index.js";
 import {
   parseCodexTomlConfig,
   parseJsonMcpConfig,
@@ -12,17 +13,38 @@ import { generateSnippets } from "../config/snippets.js";
 import { FORMATTERS } from "../config/formatters.js";
 import { getClientById, ALL_CLIENTS } from "../config/clients.js";
 import { importApi, selectImportCandidates } from "./import.js";
+import { eventBus } from "../services/event-bus.js";
+import { profileService } from "../services/profiles.js";
+import { serverManager } from "../services/server-manager.js";
 
 const originalHome = process.env.HOME;
 let tempHome: string | null = null;
+let tempDataDir: string | null = null;
 
-afterEach(() => {
+afterEach(async () => {
   process.env.HOME = originalHome;
   if (tempHome) {
     rmSync(tempHome, { recursive: true, force: true });
     tempHome = null;
   }
+  if (tempDataDir) {
+    await serverManager.stopAll();
+    serverManager.resetForTest();
+    eventBus.removeAll();
+    closeDb();
+    rmSync(tempDataDir, { recursive: true, force: true });
+    tempDataDir = null;
+  }
 });
+
+async function initImportDb() {
+  tempDataDir = mkdtempSync(path.join(tmpdir(), "moor-import-api-"));
+  await initDb({ dataDir: tempDataDir });
+  runMigrations();
+  profileService.seedDefault();
+  serverManager.resetForTest();
+  serverManager.loadFromDb();
+}
 
 describe("selectImportCandidates", () => {
   it("returns only scanned servers not already present by name", () => {
@@ -46,6 +68,49 @@ describe("selectImportCandidates", () => {
         url: "http://127.0.0.1:9223/mcp",
         source: "opencode",
       },
+    ]);
+  });
+});
+
+describe("import execute API", () => {
+  it("reports skipped server names for existing and duplicate import entries", async () => {
+    await initImportDb();
+    serverManager.addServer({
+      name: "github",
+      connectionType: "stdio",
+      command: "npx",
+    });
+
+    const response = await importApi.request("/execute", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        servers: [
+          { name: "github", connectionType: "stdio", command: "npx", source: "test" },
+          {
+            name: "linear",
+            connectionType: "http",
+            url: "https://mcp.example.com",
+            source: "test",
+          },
+          {
+            name: "linear",
+            connectionType: "http",
+            url: "https://mcp.example.com",
+            source: "test",
+          },
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      imported: ["linear"],
+      skipped: ["github", "linear"],
+    });
+    expect(queryAll("SELECT name FROM mcp_servers ORDER BY name ASC", [])).toEqual([
+      { name: "github" },
+      { name: "linear" },
     ]);
   });
 });

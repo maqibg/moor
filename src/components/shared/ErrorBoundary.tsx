@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
-import { Button } from "@/components/ui/button";
+import { Link } from "react-router-dom";
+import { Button, buttonVariants } from "@/components/ui/button";
 
 interface Props {
   children: ReactNode;
@@ -24,6 +25,10 @@ export class ErrorBoundary extends Component<Props, State> {
     console.error("ErrorBoundary caught:", error, errorInfo);
   }
 
+  private resetError = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
   render() {
     if (this.state.hasError) {
       return (
@@ -32,9 +37,14 @@ export class ErrorBoundary extends Component<Props, State> {
           <p className="text-sm text-[var(--fg-50)] max-w-md text-center">
             Moor hit an unexpected UI error. Try reloading this view.
           </p>
-          <Button onClick={() => window.location.reload()} variant="outline">
-            Reload page
-          </Button>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button onClick={this.resetError} variant="outline">
+              Try again
+            </Button>
+            <Link className={buttonVariants({ variant: "ghost" })} onClick={this.resetError} to="/">
+              Back to home
+            </Link>
+          </div>
         </div>
       );
     }

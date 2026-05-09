@@ -93,7 +93,8 @@ export class ServerManager {
   }): ManagedServer {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
-    getServerRepository().insert({
+    const serverRepo = getServerRepository();
+    serverRepo.insert({
       id,
       name: config.name,
       connectionType: config.connectionType,
@@ -104,7 +105,7 @@ export class ServerManager {
       headers: config.headers ? JSON.stringify(config.headers) : null,
       workingDir: config.workingDir ?? null,
       autoStart: config.autoStart ? 1 : 0,
-      sortOrder: getServerRepository().nextTopSortOrder(),
+      sortOrder: serverRepo.nextTopSortOrder(),
       createdAt: now,
       updatedAt: now,
     });

@@ -1,13 +1,7 @@
 import type { ScannedServer } from "./import-parser.js";
 import { ALL_CLIENTS, resolveConfigPaths } from "./clients.js";
 import { FORMATTERS } from "./formatters.js";
-
-interface ClientSnippet {
-  client: string;
-  description: string;
-  snippet: string;
-  cliCommand: string;
-}
+import type { ClientSnippet } from "@moor/types";
 
 export function generateSnippets(mcpUrl: string): ClientSnippet[] {
   const moorServer: ScannedServer = {

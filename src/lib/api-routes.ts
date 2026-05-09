@@ -2,14 +2,27 @@ function pathSegment(value: string): string {
   return encodeURIComponent(value);
 }
 
-function withQuery(path: string, params: Record<string, string | undefined>): string {
+type QueryValue = string | number | boolean | null | undefined;
+
+function withQuery(path: string, params: Record<string, QueryValue>): string {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value) query.set(key, value);
+    if (value !== undefined && value !== null && String(value).length > 0) {
+      query.set(key, String(value));
+    }
   }
   const qs = query.toString();
   return qs ? `${path}?${qs}` : path;
 }
+
+type LogListParams = {
+  server_id?: string;
+  tool_name?: string;
+  from?: string;
+  to?: string;
+  limit?: string | number;
+  offset?: string | number;
+};
 
 export const routes = {
   servers: {
@@ -40,7 +53,7 @@ export const routes = {
     reset: () => "/api/settings/reset",
   },
   logs: {
-    list: (qs?: string) => `/api/logs${qs ? `?${qs}` : ""}`,
+    list: (params?: LogListParams) => withQuery("/api/logs", params ?? {}),
     stats: () => "/api/logs/stats",
   },
   import: {

@@ -10,12 +10,27 @@ export function selectImportCandidates(
   servers: ScannedServer[],
   existingNames: Set<string>,
 ): ScannedServer[] {
+  return partitionImportCandidates(servers, existingNames).candidates;
+}
+
+export function partitionImportCandidates(
+  servers: ScannedServer[],
+  existingNames: Set<string>,
+): { candidates: ScannedServer[]; skipped: string[] } {
   const seenNames = new Set(existingNames);
-  return servers.filter((server) => {
-    if (seenNames.has(server.name)) return false;
+  const candidates: ScannedServer[] = [];
+  const skipped: string[] = [];
+
+  for (const server of servers) {
+    if (seenNames.has(server.name)) {
+      skipped.push(server.name);
+      continue;
+    }
     seenNames.add(server.name);
-    return true;
-  });
+    candidates.push(server);
+  }
+
+  return { candidates, skipped };
 }
 
 export function buildImportPreview(

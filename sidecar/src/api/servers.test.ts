@@ -167,4 +167,41 @@ describe("servers API ordering", () => {
       },
     });
   });
+
+  it("returns pure server payloads for create and update list-cache mutations", async () => {
+    const createResponse = await servers.request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "created",
+        connectionType: "stdio",
+        command: "node",
+      }),
+    });
+
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json();
+    expect(created).toMatchObject({
+      name: "created",
+      connectionType: "stdio",
+      command: "node",
+    });
+    expect(created).not.toHaveProperty("runtime");
+
+    const updateResponse = await servers.request(`/${created.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "updated" }),
+    });
+
+    expect(updateResponse.status).toBe(200);
+    const updated = await updateResponse.json();
+    expect(updated).toMatchObject({ id: created.id, name: "updated" });
+    expect(updated).not.toHaveProperty("runtime");
+
+    const detailResponse = await servers.request(`/${created.id}`);
+    expect(detailResponse.status).toBe(200);
+    const detail = await detailResponse.json();
+    expect(detail.runtime).toMatchObject({ id: created.id, name: "updated" });
+  });
 });

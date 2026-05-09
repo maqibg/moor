@@ -1,28 +1,10 @@
 import type { Database } from "./index.js";
 import { getDatabase } from "./index.js";
 import { parseJsonValue, keysToCamelCase } from "./serializers.js";
+import type { AuditLogEntry, LogStats } from "@moor/types";
 
-export interface AuditLogRow {
-  id: string;
-  timestamp: string;
-  profileId: string | null;
-  serverId: string | null;
-  toolName: string;
-  arguments: unknown;
-  result: unknown | null;
-  error: string | null;
-  durationMs: number | null;
-  agentInfo: string | null;
-}
-
-export interface LogStats {
-  totalCalls: number;
-  errorCalls: number;
-  errorRate: number;
-  avgDurationMs: number | null;
-  topTools: Array<{ toolName: string; count: number; avgDuration: number }>;
-  topServers: Array<{ serverId: string; count: number }>;
-}
+export type AuditLogRow = AuditLogEntry;
+export type { LogStats };
 
 function serializeAuditLog(row: Record<string, unknown>): AuditLogRow {
   const camel = keysToCamelCase({
@@ -81,20 +63,6 @@ export class AuditLogRepository {
     params.push(safeLimit, safeOffset);
 
     return this.db.queryAll(sql, params).map(serializeAuditLog);
-  }
-
-  countAll(): number {
-    return (this.db.queryOne("SELECT COUNT(*) as count FROM audit_logs", [])?.count ?? 0) as number;
-  }
-
-  countErrors(): number {
-    return (this.db.queryOne("SELECT COUNT(*) as count FROM audit_logs WHERE error IS NOT NULL", [])
-      ?.count ?? 0) as number;
-  }
-
-  avgDuration(): number | null {
-    const result = this.db.queryOne("SELECT AVG(duration_ms) as avg FROM audit_logs", []);
-    return (result?.avg as number | null) ?? null;
   }
 
   topTools(): Array<{ toolName: string; count: number; avgDuration: number }> {

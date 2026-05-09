@@ -19,12 +19,12 @@ function serializeToolDiscovery(row: Record<string, unknown>): ToolDiscoveryRow 
     input_schema: inputSchema,
   });
   return {
-    serverId: String(camel.serverId ?? camel.server_id),
-    toolName: String(camel.toolName ?? camel.tool_name),
-    exposedName: String(camel.exposedName ?? camel.exposed_name),
+    serverId: String(camel.serverId),
+    toolName: String(camel.toolName),
+    exposedName: String(camel.exposedName),
     description: (camel.description ?? null) as string | null,
-    inputSchema: camel.inputSchema ?? camel.input_schema,
-    discoveredAt: String(camel.discoveredAt ?? camel.discovered_at),
+    inputSchema: camel.inputSchema,
+    discoveredAt: String(camel.discoveredAt),
   };
 }
 

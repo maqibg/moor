@@ -35,36 +35,24 @@ function serializeProfileServerState(row: Record<string, unknown>): ProfileServe
     disabled_tools: parseDisabledTools(row.disabled_tools),
   });
   return {
-    serverId: String(camel.serverId ?? camel.server_id),
+    serverId: String(camel.serverId),
     enabled: Boolean(camel.enabled),
-    disabledTools: (camel.disabledTools ?? camel.disabled_tools ?? []) as string[],
+    disabledTools: (camel.disabledTools ?? []) as string[],
   };
 }
 
 function serializeProfileDetailServer(row: Record<string, unknown>): ProfileDetailServer {
-  const server = serializeServer({
-    id: row.id,
-    name: row.name,
-    connection_type: row.connection_type,
-    command: row.command,
-    args: row.args,
-    url: row.url,
-    env: row.env,
-    headers: row.headers,
-    working_dir: row.working_dir,
-    auto_start: row.auto_start,
-    sort_order: row.sort_order,
-    status: row.status,
-    error_message: row.error_message,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
-  }) as unknown as Omit<ProfileDetailServer, "profileServer">;
+  const { profile_enabled, profile_disabled_tools, ...serverRow } = row;
+  const server = serializeServer(serverRow) as unknown as Omit<
+    ProfileDetailServer,
+    "profileServer"
+  >;
 
   return {
     ...server,
     profileServer: {
-      enabled: row.profile_enabled == null ? false : Boolean(row.profile_enabled),
-      disabledTools: parseDisabledTools(row.profile_disabled_tools),
+      enabled: profile_enabled == null ? false : Boolean(profile_enabled),
+      disabledTools: parseDisabledTools(profile_disabled_tools),
     } satisfies ProfileServerState,
   };
 }
@@ -130,7 +118,7 @@ export class ProfileRepository {
     const existing = this.db.queryOne("SELECT id FROM profiles WHERE id = ?", [id]);
     if (!existing) return null;
     this.db.transaction(() => {
-      this.db.run("UPDATE profiles SET is_active = 0");
+      this.db.run("UPDATE profiles SET is_active = 0 WHERE id != ?", [id]);
       this.db.run("UPDATE profiles SET is_active = 1, updated_at = ? WHERE id = ?", [
         new Date().toISOString(),
         id,

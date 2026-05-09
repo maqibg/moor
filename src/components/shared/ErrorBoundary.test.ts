@@ -29,19 +29,22 @@ describe("ErrorBoundary", () => {
     });
   });
 
-  it("reloads the page from its recovery action", () => {
-    const reload = vi.fn();
-    Object.defineProperty(globalThis, "window", {
-      configurable: true,
-      value: { location: { reload } },
-    });
+  it("resets the boundary from its primary recovery action", () => {
     const boundary = new ErrorBoundary({ children: "content" });
     boundary.state = { hasError: true, error: new Error("boom") };
+    const setState = vi.spyOn(boundary, "setState");
 
-    const button = findElementByText(boundary.render(), "Reload page");
+    const button = findElementByText(boundary.render(), "Try again");
 
     expect(button).not.toBeNull();
     button?.props.onClick?.();
-    expect(reload).toHaveBeenCalledTimes(1);
+    expect(setState).toHaveBeenCalledWith({ hasError: false, error: null });
+  });
+
+  it("renders a home navigation recovery action", () => {
+    const boundary = new ErrorBoundary({ children: "content" });
+    boundary.state = { hasError: true, error: new Error("boom") };
+
+    expect(findElementByText(boundary.render(), "Back to home")).not.toBeNull();
   });
 });

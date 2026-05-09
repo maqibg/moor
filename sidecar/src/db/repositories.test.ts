@@ -61,6 +61,26 @@ function insertAuditLog(
   });
 }
 
+function serverRow(id: string): Record<string, unknown> {
+  return {
+    id,
+    name: id,
+    connection_type: "stdio",
+    command: "node",
+    args: null,
+    url: null,
+    env: null,
+    headers: null,
+    working_dir: null,
+    auto_start: 0,
+    sort_order: 0,
+    status: "stopped",
+    error_message: null,
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+  };
+}
+
 describe("repository layer", () => {
   beforeEach(async () => {
     dataDir = mkdtempSync(path.join(tmpdir(), "moor-repositories-"));
@@ -113,6 +133,29 @@ describe("repository layer", () => {
       { id: "server-2", name: "Linear" },
     ]);
     expect(rows[0]).not.toHaveProperty("command");
+  });
+
+  it("chunks server batch lookups while preserving requested order and duplicates", () => {
+    const queryParams: unknown[][] = [];
+    const repo = new ServerRepository({
+      run: () => undefined,
+      exec: () => undefined,
+      queryAll: (_sql, params = []) => {
+        queryParams.push(params);
+        return params.map((id) => serverRow(String(id)));
+      },
+      queryOne: () => null,
+      transaction: (callback) => callback(),
+    });
+    const ids = Array.from({ length: 501 }, (_, index) => `server-${index}`);
+    const requested = [ids[500], ...ids, ids[500]];
+
+    const rows = repo.findByIds(requested);
+
+    expect(queryParams).toHaveLength(2);
+    expect(queryParams[0]).toHaveLength(500);
+    expect(queryParams[1]).toHaveLength(1);
+    expect(rows.map((row) => row.id)).toEqual(requested);
   });
 
   it("stores null audit arguments as SQL NULL instead of a JSON string", () => {

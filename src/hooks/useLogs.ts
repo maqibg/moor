@@ -21,13 +21,7 @@ export function useLogs(filters?: {
 }) {
   const queryClient = useQueryClient();
 
-  const params = new URLSearchParams();
-  if (filters?.server_id) params.set("server_id", filters.server_id);
-  if (filters?.tool_name) params.set("tool_name", filters.tool_name);
-  if (filters?.from) params.set("from", filters.from);
-  if (filters?.to) params.set("to", filters.to);
-  const qs = params.toString();
-  const path = routes.logs.list(qs || undefined);
+  const path = routes.logs.list(filters);
 
   const {
     data: logs = [],
