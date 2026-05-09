@@ -1,117 +1,140 @@
-import { run, queryAll, queryOne, transaction } from "./index.js";
+import type { Database } from "./index.js";
+import { getDatabase } from "./index.js";
+import type { Server } from "@moor/types";
+import { parseJsonValue, keysToCamelCase } from "./serializers.js";
 
-export function findAll(): Record<string, unknown>[] {
-  return queryAll(
-    `SELECT s.*, GROUP_CONCAT(td.tool_name) as tools
-     FROM mcp_servers s
-     LEFT JOIN tool_discoveries td ON s.id = td.server_id
-     GROUP BY s.id
-     ORDER BY s.sort_order ASC, s.created_at DESC`,
-    [],
-  );
+function serializeServer(row: Record<string, unknown>): Server {
+  return keysToCamelCase({
+    ...row,
+    args: parseJsonValue(row.args, []),
+    env: parseJsonValue(row.env, {}),
+    headers: parseJsonValue(row.headers, null),
+    auto_start: Boolean(row.auto_start),
+  }) as unknown as Server;
 }
 
-export function findIds(): string[] {
-  return queryAll("SELECT id FROM mcp_servers", []).map((row) => String(row.id));
-}
+export class ServerRepository {
+  constructor(private db: Database) {}
 
-export function findById(id: string): Record<string, unknown> | null {
-  return queryOne("SELECT * FROM mcp_servers WHERE id = ?", [id]);
-}
+  findAll(): Server[] {
+    return this.db
+      .queryAll(
+        `SELECT s.*, GROUP_CONCAT(td.tool_name) as tools
+         FROM mcp_servers s
+         LEFT JOIN tool_discoveries td ON s.id = td.server_id
+         GROUP BY s.id
+         ORDER BY s.sort_order ASC, s.created_at DESC`,
+        [],
+      )
+      .map(serializeServer);
+  }
 
-export function findAutoStart(): Record<string, unknown>[] {
-  return queryAll("SELECT * FROM mcp_servers WHERE auto_start = 1", []);
-}
+  findIds(): string[] {
+    return this.db.queryAll("SELECT id FROM mcp_servers", []).map((row) => String(row.id));
+  }
 
-export function findActiveProfileServers(profileId: string): Record<string, unknown>[] {
-  return queryAll(
-    "SELECT ps.*, ms.name, ms.connection_type, ms.status FROM profile_servers ps JOIN mcp_servers ms ON ps.server_id = ms.id WHERE ps.profile_id = ? AND ps.enabled = 1",
-    [profileId],
-  );
-}
+  findById(id: string): Server | null {
+    const row = this.db.queryOne("SELECT * FROM mcp_servers WHERE id = ?", [id]);
+    return row ? serializeServer(row) : null;
+  }
 
-export interface InsertServerData {
-  id: string;
-  name: string;
-  connectionType: string;
-  command: string | null;
-  args: string | null;
-  url: string | null;
-  env: string | null;
-  headers: string | null;
-  workingDir: string | null;
-  autoStart: number;
-  sortOrder: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export function insert(data: InsertServerData): void {
-  run(
-    `INSERT INTO mcp_servers (id, name, connection_type, command, args, url, env, headers, working_dir, auto_start, sort_order, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'stopped', ?, ?)`,
-    [
-      data.id,
-      data.name,
-      data.connectionType,
-      data.command,
-      data.args,
-      data.url,
-      data.env,
-      data.headers,
-      data.workingDir,
-      data.autoStart,
-      data.sortOrder,
-      data.createdAt,
-      data.updatedAt,
-    ],
-  );
-}
-
-export function nextTopSortOrder(): number {
-  const row = queryOne("SELECT MIN(sort_order) AS min_sort_order FROM mcp_servers", []);
-  if (row?.min_sort_order == null) return 0;
-  return Number(row.min_sort_order) - 1;
-}
-
-export function update(id: string, setClauses: string[], values: unknown[]): void {
-  run(`UPDATE mcp_servers SET ${setClauses.join(", ")} WHERE id = ?`, [...values, id]);
-}
-
-export function remove(id: string): void {
-  transaction(() => {
-    run("UPDATE audit_logs SET server_id = NULL WHERE server_id = ?", [id]);
-    run("DELETE FROM mcp_servers WHERE id = ?", [id]);
-  });
-}
-
-export function reorder(ids: string[]): void {
-  transaction(() => {
-    ids.forEach((id, index) => {
-      run("UPDATE mcp_servers SET sort_order = ?, updated_at = ? WHERE id = ?", [
-        index,
-        new Date().toISOString(),
-        id,
-      ]);
+  findByIds(ids: string[]): Server[] {
+    if (ids.length === 0) return [];
+    const uniqueIds = Array.from(new Set(ids));
+    const rows = this.db.queryAll(
+      `SELECT * FROM mcp_servers WHERE id IN (${uniqueIds.map(() => "?").join(",")})`,
+      uniqueIds,
+    );
+    const byId = new Map(rows.map((row) => [String(row.id), serializeServer(row)]));
+    return ids.flatMap((id) => {
+      const row = byId.get(id);
+      return row ? [row] : [];
     });
-  });
+  }
+
+  loadAll(): Server[] {
+    return this.db.queryAll("SELECT * FROM mcp_servers", []).map(serializeServer);
+  }
+
+  insert(data: {
+    id: string;
+    name: string;
+    connectionType: string;
+    command: string | null;
+    args: string | null;
+    url: string | null;
+    env: string | null;
+    headers: string | null;
+    workingDir: string | null;
+    autoStart: number;
+    sortOrder: number;
+    createdAt: string;
+    updatedAt: string;
+  }): void {
+    this.db.run(
+      `INSERT INTO mcp_servers (id, name, connection_type, command, args, url, env, headers, working_dir, auto_start, sort_order, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'stopped', ?, ?)`,
+      [
+        data.id,
+        data.name,
+        data.connectionType,
+        data.command,
+        data.args,
+        data.url,
+        data.env,
+        data.headers,
+        data.workingDir,
+        data.autoStart,
+        data.sortOrder,
+        data.createdAt,
+        data.updatedAt,
+      ],
+    );
+  }
+
+  nextTopSortOrder(): number {
+    const row = this.db.queryOne("SELECT MIN(sort_order) AS min_sort_order FROM mcp_servers", []);
+    if (row?.min_sort_order == null) return 0;
+    return Number(row.min_sort_order) - 1;
+  }
+
+  update(id: string, setClauses: string[], values: unknown[]): void {
+    this.db.run(`UPDATE mcp_servers SET ${setClauses.join(", ")} WHERE id = ?`, [...values, id]);
+  }
+
+  remove(id: string): void {
+    this.db.transaction(() => {
+      this.db.run("UPDATE audit_logs SET server_id = NULL WHERE server_id = ?", [id]);
+      this.db.run("DELETE FROM mcp_servers WHERE id = ?", [id]);
+    });
+  }
+
+  reorder(ids: string[]): void {
+    this.db.transaction(() => {
+      ids.forEach((id, index) => {
+        this.db.run("UPDATE mcp_servers SET sort_order = ?, updated_at = ? WHERE id = ?", [
+          index,
+          new Date().toISOString(),
+          id,
+        ]);
+      });
+    });
+  }
+
+  updateStatus(id: string, status: string, errorMessage: string | null): void {
+    this.db.run(
+      "UPDATE mcp_servers SET status = ?, error_message = ?, updated_at = ? WHERE id = ?",
+      [status, errorMessage, new Date().toISOString(), id],
+    );
+  }
+
+  resetRunningStatuses(): void {
+    this.db.run(
+      "UPDATE mcp_servers SET status = 'stopped', error_message = NULL WHERE status IN ('running', 'starting')",
+    );
+  }
 }
 
-export function updateStatus(id: string, status: string, errorMessage: string | null): void {
-  run("UPDATE mcp_servers SET status = ?, error_message = ?, updated_at = ? WHERE id = ?", [
-    status,
-    errorMessage,
-    new Date().toISOString(),
-    id,
-  ]);
-}
-
-export function resetRunningStatuses(): void {
-  run(
-    "UPDATE mcp_servers SET status = 'stopped', error_message = NULL WHERE status IN ('running', 'starting')",
-  );
-}
-
-export function loadAll(): Record<string, unknown>[] {
-  return queryAll("SELECT * FROM mcp_servers", []);
+export function getServerRepository(): ServerRepository {
+  return new ServerRepository(getDatabase());
 }

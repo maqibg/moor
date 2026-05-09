@@ -18,6 +18,8 @@ import { CodeBlock } from "@/components/shared/CodeBlock";
 import { apiPost } from "@/lib/api";
 import { ArrowRight, AlertTriangle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { routes } from "@/lib/api-routes";
+import type { ConvertResult, Server } from "@moor/types";
 
 const CLIENTS = [
   { id: "claude-code", name: "Claude Code" },
@@ -38,19 +40,6 @@ const CLIENT_PATHS: Record<ClientId, string> = {
 const SOURCE_LABELS = { moor: "Moor", scan: "Scan", paste: "Paste" } as const;
 type InputSource = keyof typeof SOURCE_LABELS;
 
-interface ConvertResult {
-  content: string;
-  warnings: string[];
-  targetPath: string;
-  targetClient: string;
-}
-
-interface ConverterServer {
-  id: string;
-  name: string;
-  connectionType: "stdio" | "http";
-}
-
 function isClientId(value: string): value is ClientId {
   return CLIENTS.some((client) => client.id === value);
 }
@@ -67,9 +56,9 @@ export function ConverterPanel() {
   const [error, setError] = useState<string | null>(null);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const { data: servers = [] } = useQuery<ConverterServer[]>({
+  const { data: servers = [] } = useQuery<Server[]>({
     queryKey: ["servers"],
-    queryFn: () => api<ConverterServer[]>("/api/servers"),
+    queryFn: () => api<Server[]>(routes.servers.list()),
   });
 
   const [scanClient, setScanClient] = useState<ClientId>("claude-code");
@@ -111,7 +100,7 @@ export function ConverterPanel() {
           break;
       }
 
-      const res = await apiPost<ConvertResult>("/api/import/convert", body);
+      const res = await apiPost<ConvertResult>(routes.import.convert(), body);
       setResult(res);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Conversion failed");

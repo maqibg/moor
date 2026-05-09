@@ -1,4 +1,4 @@
-import { run } from "../db/index.js";
+import { getAuditLogRepository } from "../db/audit-log-repository.js";
 import { redactForAudit } from "./audit-redaction.js";
 import { settingsService } from "./settings.js";
 
@@ -47,23 +47,20 @@ export class AuditLogger {
     if (this.buffer.length === 0) return;
     const entries = this.buffer.splice(0);
     try {
+      const repo = getAuditLogRepository();
       for (const entry of entries) {
-        run(
-          `INSERT INTO audit_logs (id, timestamp, profile_id, server_id, tool_name, arguments, result, error, duration_ms, agent_info)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            entry.id,
-            entry.timestamp,
-            entry.profileId,
-            entry.serverId,
-            entry.toolName,
-            JSON.stringify(redactForAudit(entry.arguments)),
-            entry.result !== null ? JSON.stringify(redactForAudit(entry.result)) : null,
-            entry.error,
-            entry.durationMs,
-            entry.agentInfo,
-          ],
-        );
+        repo.insert({
+          id: entry.id,
+          timestamp: entry.timestamp,
+          profileId: entry.profileId,
+          serverId: entry.serverId,
+          toolName: entry.toolName,
+          arguments: redactForAudit(entry.arguments),
+          result: entry.result !== null ? redactForAudit(entry.result) : null,
+          error: entry.error,
+          durationMs: entry.durationMs,
+          agentInfo: entry.agentInfo,
+        });
       }
     } catch (err) {
       console.error("AuditLogger flush error:", err);

@@ -607,7 +607,7 @@ describe("convert API validation", () => {
     });
     expect(invalidSource.status).toBe(400);
     await expect(invalidSource.json()).resolves.toEqual({
-      error: expect.stringContaining("source"),
+      error: { code: "VALIDATION_ERROR", message: expect.stringContaining("source") },
     });
 
     const invalidTarget = await postConvert({
@@ -618,7 +618,7 @@ describe("convert API validation", () => {
     });
     expect(invalidTarget.status).toBe(400);
     await expect(invalidTarget.json()).resolves.toEqual({
-      error: expect.stringContaining("targetClient"),
+      error: { code: "VALIDATION_ERROR", message: expect.stringContaining("targetClient") },
     });
 
     const invalidServerIds = await postConvert({
@@ -628,7 +628,7 @@ describe("convert API validation", () => {
     });
     expect(invalidServerIds.status).toBe(400);
     await expect(invalidServerIds.json()).resolves.toEqual({
-      error: expect.stringContaining("serverIds"),
+      error: { code: "VALIDATION_ERROR", message: expect.stringContaining("serverIds") },
     });
   });
 
@@ -642,7 +642,7 @@ describe("convert API validation", () => {
 
     expect(response.status).toBe(413);
     await expect(response.json()).resolves.toEqual({
-      error: "content exceeds maximum allowed size",
+      error: { code: "PAYLOAD_TOO_LARGE", message: "content exceeds maximum allowed size" },
     });
   });
 
@@ -702,7 +702,7 @@ describe("convert API validation", () => {
 
     expect(response.status).toBe(422);
     await expect(response.json()).resolves.toEqual({
-      error: expect.stringContaining("Parse error"),
+      error: { code: "INTERNAL_ERROR", message: expect.stringContaining("Parse error") },
     });
   });
 });

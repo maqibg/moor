@@ -7,7 +7,7 @@ import {
   type ScannedServer,
 } from "./import-parser.js";
 import { FORMATTERS } from "./formatters.js";
-import { queryAll } from "../db/index.js";
+import { getServerRepository } from "../db/server-repository.js";
 
 export interface ConvertInput {
   source: "moor" | "scan" | "paste";
@@ -27,15 +27,6 @@ export interface ConvertResult {
 interface ResolvedSource {
   servers: ScannedServer[];
   warnings: string[];
-}
-
-function safeJsonParse(value: string | null | undefined): unknown | undefined {
-  if (!value) return undefined;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return undefined;
-  }
 }
 
 export function convertConfig(input: ConvertInput): ConvertResult {
@@ -77,30 +68,26 @@ function resolveSourceServers(input: ConvertInput): ResolvedSource {
 function resolveFromMoor(serverIds: string[]): ScannedServer[] {
   if (serverIds.length === 0) return [];
 
-  const rows = queryAll(
-    `SELECT id, name, connection_type, command, args, url, env, headers, working_dir
-     FROM mcp_servers WHERE id IN (${serverIds.map(() => "?").join(",")})`,
-    serverIds,
-  );
+  const rows = getServerRepository().findByIds(serverIds);
 
   return rows.map((row) => {
-    const connectionType = row.connection_type as "stdio" | "http";
+    const connectionType = row.connectionType;
     const base: ScannedServer = {
-      name: row.name as string,
+      name: row.name,
       connectionType,
       source: "moor",
     };
 
     if (connectionType === "stdio") {
-      base.command = row.command as string | undefined;
-      base.args = safeJsonParse(row.args as string) as string[] | undefined;
+      base.command = row.command ?? undefined;
+      base.args = row.args ?? undefined;
     } else {
-      base.url = row.url as string | undefined;
-      base.headers = safeJsonParse(row.headers as string) as Record<string, string> | undefined;
+      base.url = row.url ?? undefined;
+      base.headers = row.headers ?? undefined;
     }
 
-    base.env = safeJsonParse(row.env as string) as Record<string, string> | undefined;
-    base.workingDir = row.working_dir as string | undefined;
+    base.env = row.env ?? undefined;
+    base.workingDir = row.workingDir ?? undefined;
 
     return base;
   });

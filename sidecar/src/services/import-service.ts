@@ -1,9 +1,9 @@
-import { queryAll, queryOne } from "../db/index.js";
+import { getServerRepository } from "../db/server-repository.js";
 import type { ScannedServer, ParsedImport, ImportPreview } from "@moor/types";
 
 export function getExistingNames(): Set<string> {
-  const existingServers = queryAll("SELECT name FROM mcp_servers", []);
-  return new Set(existingServers.map((server) => server.name as string));
+  const rows = getServerRepository().findAll();
+  return new Set(rows.map((server) => server.name));
 }
 
 export function selectImportCandidates(
@@ -47,5 +47,7 @@ export function buildImportPreview(
 }
 
 export function findServerIdByName(name: string): string | undefined {
-  return queryOne("SELECT id FROM mcp_servers WHERE name = ?", [name])?.id as string | undefined;
+  const rows = getServerRepository().findAll();
+  const found = rows.find((server) => server.name === name);
+  return found?.id;
 }

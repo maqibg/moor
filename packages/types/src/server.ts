@@ -19,3 +19,15 @@ export interface Server {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface ServerRuntime {
+  id: string;
+  name: string;
+  connectionType: ConnectionType;
+  status: ServerStatus;
+  autoStart: boolean;
+}
+
+export interface ServerDetail extends Server {
+  runtime: ServerRuntime;
+}

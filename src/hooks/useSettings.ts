@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, apiPost } from "@/lib/api";
+import { routes } from "@/lib/api-routes";
 import { useSSEEvent } from "@/contexts/SSEContext";
 import { createDefaultSettings, type Settings, type SettingsUpdatePayload } from "@moor/types";
 
@@ -16,12 +17,12 @@ export function useSettings() {
     isFetched,
   } = useQuery<Settings>({
     queryKey: QUERY_KEY,
-    queryFn: () => api<Settings>("/api/settings"),
+    queryFn: () => api<Settings>(routes.settings.get()),
   });
 
   const updateSettings = useMutation({
     mutationFn: (payload: SettingsUpdatePayload) =>
-      api<Settings>("/api/settings", {
+      api<Settings>(routes.settings.update(), {
         method: "PATCH",
         body: JSON.stringify(payload),
       }),
@@ -31,7 +32,7 @@ export function useSettings() {
   });
 
   const resetSettings = useMutation({
-    mutationFn: () => apiPost<Settings>("/api/settings/reset", {}),
+    mutationFn: () => apiPost<Settings>(routes.settings.reset(), {}),
     onSuccess: (defaults) => {
       queryClient.setQueryData(QUERY_KEY, defaults);
     },

@@ -84,14 +84,20 @@ describe("servers API ordering", () => {
     const duplicate = await putOrder([first.id, first.id]);
     expect(duplicate.status).toBe(400);
     await expect(duplicate.json()).resolves.toEqual({
-      error: "Server order must include every existing server exactly once.",
+      error: {
+        code: "ORDER_INVALID",
+        message: "Server order must include every existing server exactly once.",
+      },
     });
     expect(serverIds()).toEqual(original);
 
     const incomplete = await putOrder([second.id]);
     expect(incomplete.status).toBe(400);
     await expect(incomplete.json()).resolves.toEqual({
-      error: "Server order must include every existing server exactly once.",
+      error: {
+        code: "ORDER_INVALID",
+        message: "Server order must include every existing server exactly once.",
+      },
     });
     expect(serverIds()).toEqual(original);
   });

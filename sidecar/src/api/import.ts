@@ -14,13 +14,14 @@ import {
   findServerIdByName,
 } from "../services/import-service.js";
 import { isRecord } from "../utils.js";
-import type { ScannedServer } from "@moor/types";
+import { formatZodError } from "./validate.js";
+import type { ScannedServer, ApiErrorCode } from "@moor/types";
 
 export { selectImportCandidates };
 
 const importApi = new Hono();
 
-const MAX_PARSE_BODY_BYTES = 512 * 1024; // 512 KB
+const MAX_PARSE_BODY_BYTES = 512 * 1024;
 const MAX_CONVERT_SERVER_IDS = 200;
 
 const clientIdSchema = z.string().refine((id) => Boolean(getClientById(id)), {
@@ -37,13 +38,6 @@ const convertInputSchema = z
   })
   .strict();
 
-function formatValidationError(error: z.ZodError): string {
-  const issue = error.issues[0];
-  if (!issue) return "invalid request";
-  const field = issue.path.join(".") || "request";
-  return `${field}: ${issue.message}`;
-}
-
 importApi.post("/scan", (c) => {
   const parsed = scanAllConfigs();
   const preview = buildImportPreview(parsed, getExistingNames());
@@ -53,10 +47,21 @@ importApi.post("/scan", (c) => {
 importApi.post("/parse", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { content?: string };
   if (!body.content?.trim()) {
-    return c.json({ error: "content is required" }, 400);
+    return c.json(
+      { error: { code: "VALIDATION_ERROR" as ApiErrorCode, message: "content is required" } },
+      400,
+    );
   }
   if (body.content.length > MAX_PARSE_BODY_BYTES) {
-    return c.json({ error: "content exceeds maximum allowed size" }, 413);
+    return c.json(
+      {
+        error: {
+          code: "PAYLOAD_TOO_LARGE" as ApiErrorCode,
+          message: "content exceeds maximum allowed size",
+        },
+      },
+      413,
+    );
   }
 
   const parsed = parseJsonMcpConfig(body.content, "json-import");
@@ -108,16 +113,43 @@ importApi.post("/convert", async (c) => {
   const rawBody = (await c.req.json().catch(() => null)) as unknown;
 
   if (!isRecord(rawBody)) {
-    return c.json({ error: "request body must be a JSON object" }, 400);
+    return c.json(
+      {
+        error: {
+          code: "VALIDATION_ERROR" as ApiErrorCode,
+          message: "request body must be a JSON object",
+        },
+      },
+      400,
+    );
   }
 
-  if (typeof rawBody.content === "string" && rawBody.content.length > MAX_PARSE_BODY_BYTES) {
-    return c.json({ error: "content exceeds maximum allowed size" }, 413);
+  if (
+    typeof rawBody.content === "string" &&
+    (rawBody.content as string).length > MAX_PARSE_BODY_BYTES
+  ) {
+    return c.json(
+      {
+        error: {
+          code: "PAYLOAD_TOO_LARGE" as ApiErrorCode,
+          message: "content exceeds maximum allowed size",
+        },
+      },
+      413,
+    );
   }
 
   const parsedBody = convertInputSchema.safeParse(rawBody);
   if (!parsedBody.success) {
-    return c.json({ error: formatValidationError(parsedBody.error) }, 400);
+    return c.json(
+      {
+        error: {
+          code: "VALIDATION_ERROR" as ApiErrorCode,
+          message: formatZodError(parsedBody.error),
+        },
+      },
+      400,
+    );
   }
 
   try {
@@ -132,7 +164,7 @@ importApi.post("/convert", async (c) => {
     return c.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Conversion failed";
-    return c.json({ error: message }, 422);
+    return c.json({ error: { code: "INTERNAL_ERROR" as ApiErrorCode, message } }, 422);
   }
 });
 

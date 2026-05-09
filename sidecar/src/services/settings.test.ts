@@ -110,13 +110,13 @@ describe("settings API validation", () => {
     const invalidTheme = await patchSettings({ appearance: { theme: "sepia" } });
     expect(invalidTheme.status).toBe(400);
     await expect(invalidTheme.json()).resolves.toEqual({
-      error: expect.stringContaining("appearance.theme"),
+      error: { code: "VALIDATION_ERROR", message: expect.stringContaining("appearance.theme") },
     });
 
     const invalidPort = await patchSettings({ advanced: { sidecarPort: 80 } });
     expect(invalidPort.status).toBe(400);
     await expect(invalidPort.json()).resolves.toEqual({
-      error: expect.stringContaining("advanced.sidecarPort"),
+      error: { code: "VALIDATION_ERROR", message: expect.stringContaining("advanced.sidecarPort") },
     });
   });
 
@@ -125,7 +125,7 @@ describe("settings API validation", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: expect.stringContaining("advanced"),
+      error: { code: "VALIDATION_ERROR", message: expect.stringContaining("advanced") },
     });
   });
 
@@ -144,6 +144,8 @@ describe("settings API validation", () => {
     });
 
     expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({ error: "request: invalid JSON" });
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "VALIDATION_ERROR", message: "Invalid JSON" },
+    });
   });
 });

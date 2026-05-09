@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { run, transaction, getDb } from "../db/index.js";
+import { getSettingsRepository } from "../db/settings-repository.js";
+import { getAuditLogRepository } from "../db/audit-log-repository.js";
 import { eventBus } from "./event-bus.js";
 import { createDefaultSettings, type Settings, type SettingsUpdatePayload } from "@moor/types";
 
@@ -142,7 +143,7 @@ class SettingsService {
     const cutoff = new Date(
       Date.now() - settings.advanced.logRetentionDays * 24 * 60 * 60 * 1000,
     ).toISOString();
-    run("DELETE FROM audit_logs WHERE timestamp < ?", [cutoff]);
+    getAuditLogRepository().deleteOlderThan(cutoff);
   }
 
   startLogCleanupInterval() {
@@ -163,8 +164,7 @@ class SettingsService {
   }
 
   private syncToDb(settings: Settings) {
-    const now = new Date().toISOString();
-    const flat: [string, string][] = [
+    getSettingsRepository().setMany([
       ["general.autoStartOnLogin", JSON.stringify(settings.general.autoStartOnLogin)],
       [
         "general.autoStartServersOnLaunch",
@@ -176,15 +176,7 @@ class SettingsService {
       ["advanced.logRetentionDays", JSON.stringify(settings.advanced.logRetentionDays)],
       ["advanced.enableAuditLogging", JSON.stringify(settings.advanced.enableAuditLogging)],
       ["advanced.sidecarPort", JSON.stringify(settings.advanced.sidecarPort)],
-    ];
-    transaction(() => {
-      const stmt = getDb().prepare(
-        "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
-      );
-      for (const [key, value] of flat) {
-        stmt.run(key, value, now);
-      }
-    });
+    ]);
   }
 }
 

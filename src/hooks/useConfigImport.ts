@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { apiPost } from "@/lib/api";
+import { routes } from "@/lib/api-routes";
 import { formatJsonImport, getJsonImportDiagnostics } from "@/lib/json-import-editor";
 import type { ScannedServer, ImportPreview as ImportPreviewType } from "@moor/types";
 
@@ -27,7 +28,7 @@ export function useConfigImport() {
 
   const scan = useCallback(async () => {
     try {
-      const result = await apiPost<ImportPreview>("/api/import/scan", {});
+      const result = await apiPost<ImportPreview>(routes.import.scan(), {});
       applyImportPreview(result);
     } catch (err) {
       setScanStatus((err as Error).message);
@@ -61,7 +62,7 @@ export function useConfigImport() {
     }
 
     try {
-      const result = await apiPost<ImportPreview>("/api/import/parse", { content: jsonImport });
+      const result = await apiPost<ImportPreview>(routes.import.parse(), { content: jsonImport });
       if (result.errors.length > 0 || (result.diagnostics?.length ?? 0) > 0) {
         setImportPreview(result);
         setScanCandidates([]);
@@ -86,7 +87,7 @@ export function useConfigImport() {
     async (onComplete: () => void) => {
       const serversToImport = scanCandidates.filter((server) => selectedImports.has(server.name));
       const result = await apiPost<{ imported: string[]; skipped: string[] }>(
-        "/api/import/execute",
+        routes.import.execute(),
         {
           servers: serversToImport,
         },

@@ -123,8 +123,18 @@ function formatApiRetryError(
 
 async function readApiError(resp: Response): Promise<string> {
   const parsed = (await resp.json().catch(() => null)) as unknown;
-  if (isRecord(parsed) && typeof parsed.error === "string") {
-    return parsed.error;
+  if (isRecord(parsed)) {
+    if (typeof parsed.error === "string") {
+      return parsed.error;
+    }
+    if (isRecord(parsed.error)) {
+      if (typeof parsed.error.message === "string" && parsed.error.message.length > 0) {
+        return parsed.error.message;
+      }
+      if (typeof parsed.error.code === "string" && parsed.error.code.length > 0) {
+        return parsed.error.code;
+      }
+    }
   }
   return resp.statusText || `API error: ${resp.status}`;
 }

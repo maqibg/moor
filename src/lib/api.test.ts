@@ -126,6 +126,27 @@ describe("api runtime recovery", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("uses structured API error messages when available", async () => {
+    invokeMock.mockResolvedValueOnce(runtime(9223, "token"));
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      jsonResponse(
+        { error: { code: "VALIDATION_ERROR", message: "advanced.sidecarPort: Too small" } },
+        { status: 400 },
+      ),
+    );
+
+    await expect(api("/api/settings")).rejects.toThrow("advanced.sidecarPort: Too small");
+  });
+
+  it("falls back to structured API error code when message is missing", async () => {
+    invokeMock.mockResolvedValueOnce(runtime(9223, "token"));
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      jsonResponse({ error: { code: "NOT_FOUND" } }, { status: 404 }),
+    );
+
+    await expect(api("/api/profiles/missing")).rejects.toThrow("NOT_FOUND");
+  });
+
   it("uses the same runtime for a request URL and token", async () => {
     invokeMock.mockResolvedValueOnce(runtime(9224, "same-token"));
     const fetchMock = vi
