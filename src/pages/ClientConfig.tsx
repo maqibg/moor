@@ -7,14 +7,9 @@ import { CodeBlock } from "@/components/shared/CodeBlock";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { routes } from "@/lib/api-routes";
 import { ConverterPanel } from "@/components/converter/ConverterPanel";
-
-interface ClientSnippet {
-  client: string;
-  description: string;
-  snippet: string;
-  cliCommand: string;
-}
+import type { ClientSnippet } from "@moor/types";
 
 const FALLBACK_SNIPPETS: ClientSnippet[] = [
   {
@@ -52,7 +47,7 @@ export function ClientConfig() {
   const [activeTab, setActiveTab] = useState("snippets");
   const { data: snippets } = useQuery<ClientSnippet[]>({
     queryKey: ["snippets"],
-    queryFn: () => api<ClientSnippet[]>("/api/import/snippets"),
+    queryFn: () => api<ClientSnippet[]>(routes.import.snippets()),
   });
 
   const displaySnippets = !snippets || snippets.length === 0 ? FALLBACK_SNIPPETS : snippets;

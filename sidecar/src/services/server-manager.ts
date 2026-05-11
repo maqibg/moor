@@ -1,11 +1,12 @@
-import { run, queryAll, transaction } from "../db/index.js";
-import { parseJsonValue, serializeToolDiscovery } from "../db/serializers.js";
-import { buildToolCatalogFromRows, type ToolCatalogRow } from "../db/tool-catalog.js";
+import { getServerRepository, ServerRepository } from "../db/server-repository.js";
+import { getToolDiscoveryRepository } from "../db/tool-discovery-repository.js";
+import { getProfileRepository } from "../db/profile-repository.js";
+import { getDatabase } from "../db/index.js";
+import { toolCatalogService } from "./tool-catalog-service.js";
 import { profileService } from "./profiles.js";
-import * as serverRepo from "../db/server-repository.js";
 import { SessionManager } from "./session-manager.js";
 import type { StoredServerConfig, ServerSession, SessionFactory } from "./session-manager.js";
-import type { ToolCatalogEntry } from "@moor/types";
+import type { Server, ToolCatalogEntry } from "@moor/types";
 import { eventBus } from "./event-bus.js";
 
 export type { StoredServerConfig, ServerSession, SessionFactory };
@@ -18,6 +19,23 @@ export interface ManagedServer {
   autoStart: boolean;
 }
 
+export function getPublicServerStartErrorMessage(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const missingCommand =
+    /^Command "([^"]+)" was not found on PATH while starting this stdio server\./.exec(message);
+  if (missingCommand) {
+    return `Command "${missingCommand[1]}" was not found. Configure an absolute command path or update this server environment.`;
+  }
+
+  const missingAbsoluteCommand =
+    /^Command "([^"]+)" is not executable while starting this stdio server\./.exec(message);
+  if (missingAbsoluteCommand) {
+    return `Command "${missingAbsoluteCommand[1]}" is not executable. Check that the absolute path exists and has execute permission.`;
+  }
+
+  return "Server failed to start. Check logs for details.";
+}
+
 export class ServerManager {
   private servers: Map<string, ManagedServer> = new Map();
   private sessionManager: SessionManager;
@@ -28,16 +46,18 @@ export class ServerManager {
 
   loadFromDb() {
     this.servers.clear();
-    transaction(() => {
+    const db = getDatabase();
+    db.transaction(() => {
+      const serverRepo = new ServerRepository(db);
       serverRepo.resetRunningStatuses();
       const rows = serverRepo.loadAll();
       for (const row of rows) {
-        this.servers.set(row.id as string, {
-          id: row.id as string,
-          name: row.name as string,
-          connectionType: row.connection_type as "stdio" | "http",
-          status: row.status as ManagedServer["status"],
-          autoStart: Boolean(row.auto_start),
+        this.servers.set(row.id, {
+          id: row.id,
+          name: row.name,
+          connectionType: row.connectionType,
+          status: row.status,
+          autoStart: row.autoStart,
         });
       }
     });
@@ -73,6 +93,7 @@ export class ServerManager {
   }): ManagedServer {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
+    const serverRepo = getServerRepository();
     serverRepo.insert({
       id,
       name: config.name,
@@ -84,6 +105,7 @@ export class ServerManager {
       headers: config.headers ? JSON.stringify(config.headers) : null,
       workingDir: config.workingDir ?? null,
       autoStart: config.autoStart ? 1 : 0,
+      sortOrder: serverRepo.nextTopSortOrder(),
       createdAt: now,
       updatedAt: now,
     });
@@ -135,7 +157,7 @@ export class ServerManager {
     setClauses.push("updated_at = ?");
     values.push(new Date().toISOString());
 
-    serverRepo.update(id, setClauses, values);
+    getServerRepository().update(id, setClauses, values);
     if (updates.name) server.name = updates.name as string;
     if ("autoStart" in updates) server.autoStart = Boolean(updates.autoStart);
     return server;
@@ -145,9 +167,20 @@ export class ServerManager {
     const server = this.servers.get(id);
     if (!server) return false;
     if (server.status === "running") await this.stopServer(id);
-    serverRepo.remove(id);
+    getServerRepository().remove(id);
     this.servers.delete(id);
     return true;
+  }
+
+  reorderServers(ids: string[]): Server[] | null {
+    if (new Set(ids).size !== ids.length) return null;
+    const serverRepo = getServerRepository();
+    const existingIds = serverRepo.findIds();
+    const existing = new Set(existingIds);
+    if (ids.length !== existingIds.length || ids.some((id) => !existing.has(id))) return null;
+
+    serverRepo.reorder(ids);
+    return serverRepo.findAll();
   }
 
   async startServer(id: string): Promise<void> {
@@ -185,7 +218,8 @@ export class ServerManager {
       this.setServerStatus(id, "running");
     } catch (err) {
       await this.sessionManager.destroySession(id).catch(() => {});
-      this.setServerStatus(id, "error", (err as Error).message);
+      console.error(`Failed to start server ${id}:`, err);
+      this.setServerStatus(id, "error", getPublicServerStartErrorMessage(err));
       throw err;
     }
   }
@@ -225,126 +259,47 @@ export class ServerManager {
   }
 
   findToolOwner(exposedName: string): ToolCatalogEntry | null {
-    return this.getToolCatalog().find((tool) => tool.exposedName === exposedName) ?? null;
+    return toolCatalogService.findToolOwner(exposedName);
   }
 
   getToolCatalog(profileId?: string | null): ToolCatalogEntry[] {
-    const activeProfileId = profileId ?? this.getActiveProfileId();
-    if (!activeProfileId) return [];
-
-    const rows = queryAll(
-      `
-      SELECT
-        ps.server_id AS serverId,
-        ms.name AS serverName,
-        ps.disabled_tools AS disabledTools,
-        td.tool_name AS toolName,
-        td.description AS description,
-        td.input_schema AS inputSchema
-      FROM profile_servers ps
-      JOIN mcp_servers ms ON ps.server_id = ms.id
-      JOIN tool_discoveries td ON td.server_id = ms.id
-      WHERE ps.profile_id = ? AND ps.enabled = 1
-      ORDER BY ms.name ASC, td.tool_name ASC
-    `,
-      [activeProfileId],
-    );
-
-    return buildToolCatalogFromRows(
-      rows.map(
-        (row) =>
-          ({
-            serverId: row.serverId as string,
-            serverName: row.serverName as string,
-            disabledTools: parseJsonValue(row.disabledTools, []) as string[],
-            toolName: row.toolName as string,
-            description: row.description as string | null,
-            inputSchema: parseJsonValue(row.inputSchema, undefined),
-          }) satisfies ToolCatalogRow,
-      ),
-    );
+    return toolCatalogService.getToolCatalog(profileId);
   }
 
   getActiveProfileServers() {
     const activeProfileId = profileService.getActiveProfileId();
     if (!activeProfileId) return [];
-    return serverRepo
-      .findActiveProfileServers(activeProfileId)
-      .map((row) => ({
-        serverId: row.server_id as string,
-        server: this.servers.get(row.server_id as string)!,
-        enabled: Boolean(row.enabled),
-        disabledTools: parseJsonValue(row.disabled_tools, []) as string[],
-      }))
-      .filter((item) => item.server);
+    const serverIds = getProfileRepository().findActiveProfileServerIds();
+    return serverIds
+      .map((serverId) => {
+        const server = this.servers.get(serverId);
+        if (!server) return null;
+        return { serverId, server };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
   }
 
   cacheTools(
     serverId: string,
     tools: Array<{ name: string; description?: string; inputSchema?: unknown }>,
   ) {
-    transaction(() => {
-      run("DELETE FROM tool_discoveries WHERE server_id = ?", [serverId]);
-      const now = new Date().toISOString();
-      for (const tool of tools) {
-        run(
-          "INSERT INTO tool_discoveries (server_id, tool_name, exposed_name, description, input_schema, discovered_at) VALUES (?, ?, ?, ?, ?, ?)",
-          [
-            serverId,
-            tool.name,
-            tool.name,
-            tool.description ?? null,
-            tool.inputSchema ? JSON.stringify(tool.inputSchema) : null,
-            now,
-          ],
-        );
-      }
-    });
+    getToolDiscoveryRepository().replaceToolsForServer(serverId, tools);
     eventBus.emit("server:tools", { type: "server:tools", data: { serverId, tools } });
   }
 
   getDiscoveredTools(serverId: string) {
-    return queryAll("SELECT * FROM tool_discoveries WHERE server_id = ?", [serverId]).map(
-      serializeToolDiscovery,
-    );
+    return toolCatalogService.getDiscoveredTools(serverId);
   }
 
   getToolDetails(serverId: string, profileId?: string) {
-    const catalog = this.getToolCatalog(profileId);
-    const disabledRows = profileId
-      ? queryAll(
-          "SELECT disabled_tools FROM profile_servers WHERE profile_id = ? AND server_id = ?",
-          [profileId, serverId],
-        )
-      : queryAll("SELECT disabled_tools FROM profile_servers WHERE server_id = ?", [serverId]);
-    const disabledForServer = new Set(
-      disabledRows.flatMap((row) => {
-        try {
-          return JSON.parse(row.disabled_tools as string) as string[];
-        } catch {
-          return [];
-        }
-      }),
-    );
-    return this.getDiscoveredTools(serverId).map((row) => {
-      const serialized = serializeToolDiscovery(row);
-      const rawToolName = serialized.toolName as string;
-      const catalogEntry = catalog.find(
-        (tool) => tool.serverId === serverId && tool.toolName === rawToolName,
-      );
-      return {
-        ...serialized,
-        exposedName: catalogEntry?.exposedName ?? rawToolName,
-        disabled: disabledForServer.has(rawToolName),
-      };
-    });
+    return toolCatalogService.getToolDetails(serverId, profileId);
   }
 
   private setServerStatus(id: string, status: ManagedServer["status"], errorMessage?: string) {
     const server = this.servers.get(id);
     if (!server) return;
     server.status = status;
-    serverRepo.updateStatus(id, status, errorMessage ?? null);
+    getServerRepository().updateStatus(id, status, errorMessage ?? null);
     eventBus.emit("server:status", {
       type: "server:status",
       data: { serverId: id, status, errorMessage },
@@ -352,19 +307,19 @@ export class ServerManager {
   }
 
   private getStoredServerConfig(id: string): StoredServerConfig {
-    const row = serverRepo.findById(id);
+    const row = getServerRepository().findById(id);
     if (!row) throw new Error(`Server ${id} not found`);
     return {
-      id: row.id as string,
-      name: row.name as string,
-      connection_type: row.connection_type as "stdio" | "http",
-      command: row.command as string | null,
-      args: parseJsonValue(row.args, null) as string[] | null,
-      url: row.url as string | null,
-      env: parseJsonValue(row.env, null) as Record<string, string> | null,
-      headers: parseJsonValue(row.headers, null) as Record<string, string> | null,
-      working_dir: row.working_dir as string | null,
-      auto_start: Boolean(row.auto_start),
+      id: row.id,
+      name: row.name,
+      connection_type: row.connectionType,
+      command: row.command ?? null,
+      args: row.args ?? null,
+      url: row.url ?? null,
+      env: row.env ?? null,
+      headers: row.headers ?? null,
+      working_dir: row.workingDir ?? null,
+      auto_start: row.autoStart,
     };
   }
 }

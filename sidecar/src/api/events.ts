@@ -4,6 +4,7 @@ import { eventBus } from "../services/event-bus.js";
 const events = new Hono();
 
 events.get("/", (c) => {
+  const origin = c.req.header("origin");
   const stream = new ReadableStream({
     start(controller) {
       const encoder = new TextEncoder();
@@ -43,6 +44,7 @@ events.get("/", (c) => {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
+      ...(origin ? { "Access-Control-Allow-Origin": origin, Vary: "Origin" } : {}),
     },
   });
 });

@@ -1,8 +1,9 @@
 import { useCallback, useState, type Dispatch, type SetStateAction } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, apiPost, apiPut, apiDelete } from "@/lib/api";
+import { routes } from "@/lib/api-routes";
 import { useSSEEvent } from "@/contexts/SSEContext";
-import type { Server } from "@moor/types";
+import type { Server, ServerDetail, ToolDetail } from "@moor/types";
 import {
   applyServerAction,
   getServerStatusEventPayload,
@@ -96,7 +97,7 @@ export function useServers() {
     error,
   } = useQuery<Server[]>({
     queryKey: ["servers"],
-    queryFn: () => api<Server[]>("/api/servers"),
+    queryFn: () => api<Server[]>(routes.servers.list()),
   });
 
   const setData = useCallback(
@@ -131,7 +132,7 @@ export function useServers() {
       headers?: Record<string, string>;
       autoStart?: boolean;
     }) => {
-      return apiPost<Server>("/api/servers", config);
+      return apiPost<Server>(routes.servers.create(), config);
     },
     onSuccess: (server) => {
       queryClient.setQueryData<Server[]>(["servers"], (prev) => [...(prev ?? []), server]);
@@ -143,7 +144,7 @@ export function useServers() {
       await runServerMutation({
         id,
         action: "starting",
-        path: `/api/servers/${id}/start`,
+        path: routes.servers.start(id),
         setData,
         setServerAction,
         clearServerAction,
@@ -158,7 +159,7 @@ export function useServers() {
       await runServerMutation({
         id,
         action: "stopping",
-        path: `/api/servers/${id}/stop`,
+        path: routes.servers.stop(id),
         setData,
         setServerAction,
         clearServerAction,
@@ -170,7 +171,7 @@ export function useServers() {
 
   const updateServer = useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: Record<string, unknown> }) => {
-      return apiPut<Server>(`/api/servers/${id}`, updates);
+      return apiPut<Server>(routes.servers.update(id), updates);
     },
     onSuccess: (updated, { id }) => {
       queryClient.setQueryData<Server[]>(["servers"], (prev) =>
@@ -182,12 +183,31 @@ export function useServers() {
 
   const removeServer = useMutation({
     mutationFn: async (id: string) => {
-      await apiDelete(`/api/servers/${id}`);
+      await apiDelete(routes.servers.delete(id));
     },
     onSuccess: (_data, id) => {
       queryClient.setQueryData<Server[]>(["servers"], (prev) => prev?.filter((s) => s.id !== id));
     },
   });
+
+  const reorderServers = useCallback(
+    async (nextServers: Server[]) => {
+      const previous = queryClient.getQueryData<Server[]>(["servers"]) ?? servers;
+      queryClient.setQueryData<Server[]>(["servers"], nextServers);
+      try {
+        const ordered = await apiPut<Server[]>(routes.servers.order(), {
+          serverIds: nextServers.map((server) => server.id),
+        });
+        queryClient.setQueryData<Server[]>(["servers"], ordered);
+        return ordered;
+      } catch (err) {
+        queryClient.setQueryData<Server[]>(["servers"], previous);
+        await refreshSilently();
+        throw err;
+      }
+    },
+    [queryClient, refreshSilently, servers],
+  );
 
   useSSEEvent("server:status", (data) => mergeStatusEvent(data));
   useSSEEvent("server:tools", () => void refreshSilently());
@@ -205,30 +225,8 @@ export function useServers() {
     startServer,
     stopServer,
     removeServer: removeServer.mutateAsync,
+    reorderServers,
   };
-}
-
-export interface ServerDetailData {
-  id: string;
-  name: string;
-  connectionType: "stdio" | "http";
-  command: string | null;
-  args: string[] | null;
-  url: string | null;
-  env: Record<string, string> | null;
-  headers: Record<string, string> | null;
-  workingDir: string | null;
-  autoStart: boolean;
-  status: string;
-  errorMessage: string | null;
-}
-
-export interface ToolDetail {
-  toolName: string;
-  exposedName: string;
-  description: string | null;
-  inputSchema: unknown;
-  disabled: boolean;
 }
 
 export function useServer(id: string | undefined) {
@@ -238,9 +236,9 @@ export function useServer(id: string | undefined) {
     data: server,
     isLoading,
     error,
-  } = useQuery<ServerDetailData>({
+  } = useQuery<ServerDetail>({
     queryKey: ["servers", id],
-    queryFn: () => api<ServerDetailData>(`/api/servers/${id}`),
+    queryFn: () => api<ServerDetail>(routes.servers.detail(id!)),
     enabled: !!id,
   });
 
@@ -259,10 +257,7 @@ export function useServerTools(serverId: string | undefined, profileId?: string)
 
   const { data: tools = [] } = useQuery<ToolDetail[]>({
     queryKey: ["servers", serverId, "tools", profileId],
-    queryFn: () =>
-      api<ToolDetail[]>(
-        `/api/servers/${serverId}/tools${profileId ? `?profile_id=${profileId}` : ""}`,
-      ),
+    queryFn: () => api<ToolDetail[]>(routes.servers.tools(serverId!, profileId)),
     enabled: !!serverId,
   });
 

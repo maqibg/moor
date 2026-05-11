@@ -1,28 +1,8 @@
 import { useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-
-export interface AuditLogEntry {
-  id: string;
-  timestamp: string;
-  profileId: string | null;
-  serverId: string | null;
-  toolName: string;
-  arguments: unknown;
-  result: unknown | null;
-  error: string | null;
-  durationMs: number | null;
-  agentInfo: string | null;
-}
-
-export interface LogStats {
-  totalCalls: number;
-  errorCalls: number;
-  errorRate: number;
-  avgDurationMs: number | null;
-  topTools: Array<{ toolName: string; count: number; avgDuration: number }>;
-  topServers: Array<{ serverId: string; count: number }>;
-}
+import { routes } from "@/lib/api-routes";
+import type { AuditLogEntry, LogStats } from "@moor/types";
 
 const DEFAULT_STATS: LogStats = {
   totalCalls: 0,
@@ -41,13 +21,7 @@ export function useLogs(filters?: {
 }) {
   const queryClient = useQueryClient();
 
-  const params = new URLSearchParams();
-  if (filters?.server_id) params.set("server_id", filters.server_id);
-  if (filters?.tool_name) params.set("tool_name", filters.tool_name);
-  if (filters?.from) params.set("from", filters.from);
-  if (filters?.to) params.set("to", filters.to);
-  const qs = params.toString();
-  const path = `/api/logs${qs ? `?${qs}` : ""}`;
+  const path = routes.logs.list(filters);
 
   const {
     data: logs = [],
@@ -74,7 +48,7 @@ export function useLogStats() {
     error,
   } = useQuery<LogStats>({
     queryKey: ["logs", "stats"],
-    queryFn: () => api<LogStats>("/api/logs/stats"),
+    queryFn: () => api<LogStats>(routes.logs.stats()),
   });
 
   const refresh = useCallback(async () => {

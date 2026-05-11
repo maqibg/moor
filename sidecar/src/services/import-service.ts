@@ -1,21 +1,36 @@
-import { queryAll, queryOne } from "../db/index.js";
+import { getServerRepository } from "../db/server-repository.js";
 import type { ScannedServer, ParsedImport, ImportPreview } from "@moor/types";
 
 export function getExistingNames(): Set<string> {
-  const existingServers = queryAll("SELECT name FROM mcp_servers", []);
-  return new Set(existingServers.map((server) => server.name as string));
+  const rows = getServerRepository().findAllNames();
+  return new Set(rows.map((server) => server.name));
 }
 
 export function selectImportCandidates(
   servers: ScannedServer[],
   existingNames: Set<string>,
 ): ScannedServer[] {
+  return partitionImportCandidates(servers, existingNames).candidates;
+}
+
+export function partitionImportCandidates(
+  servers: ScannedServer[],
+  existingNames: Set<string>,
+): { candidates: ScannedServer[]; skipped: string[] } {
   const seenNames = new Set(existingNames);
-  return servers.filter((server) => {
-    if (seenNames.has(server.name)) return false;
+  const candidates: ScannedServer[] = [];
+  const skipped: string[] = [];
+
+  for (const server of servers) {
+    if (seenNames.has(server.name)) {
+      skipped.push(server.name);
+      continue;
+    }
     seenNames.add(server.name);
-    return true;
-  });
+    candidates.push(server);
+  }
+
+  return { candidates, skipped };
 }
 
 export function buildImportPreview(
@@ -44,8 +59,4 @@ export function buildImportPreview(
     errors: parsed.errors,
     diagnostics: parsed.diagnostics,
   };
-}
-
-export function findServerIdByName(name: string): string | undefined {
-  return queryOne("SELECT id FROM mcp_servers WHERE name = ?", [name])?.id as string | undefined;
 }

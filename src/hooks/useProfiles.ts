@@ -1,17 +1,9 @@
 import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, apiPost, apiPut, apiDelete } from "@/lib/api";
+import { routes } from "@/lib/api-routes";
 import { useSSEEvent } from "@/contexts/SSEContext";
-import type { Profile, Server } from "@moor/types";
-
-interface ProfileServerState {
-  enabled: boolean;
-  disabledTools: string[];
-}
-
-export interface ProfileDetailData extends Profile {
-  servers: Array<Server & { profileServer: ProfileServerState }>;
-}
+import type { Profile, ProfileDetail } from "@moor/types";
 
 export function useProfiles() {
   const queryClient = useQueryClient();
@@ -28,7 +20,7 @@ export function useProfiles() {
     error,
   } = useQuery<Profile[]>({
     queryKey: ["profiles"],
-    queryFn: () => api<Profile[]>("/api/profiles"),
+    queryFn: () => api<Profile[]>(routes.profiles.list()),
   });
 
   const refresh = useCallback(async () => {
@@ -36,7 +28,7 @@ export function useProfiles() {
   }, [queryClient]);
 
   const createProfile = useMutation({
-    mutationFn: (name: string) => apiPost<Profile>("/api/profiles", { name }),
+    mutationFn: (name: string) => apiPost<Profile>(routes.profiles.create(), { name }),
     onSuccess: (profile) => {
       queryClient.setQueryData<Profile[]>(["profiles"], (prev) => [...(prev ?? []), profile]);
     },
@@ -44,15 +36,17 @@ export function useProfiles() {
 
   const activateProfile = useCallback(
     async (id: string) => {
-      await apiPut(`/api/profiles/${id}/activate`, {});
-      await queryClient.invalidateQueries({ queryKey: ["profiles"] });
-      await queryClient.invalidateQueries({ queryKey: ["servers"] });
+      await apiPut(routes.profiles.activate(id), {});
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["profiles"] }),
+        queryClient.invalidateQueries({ queryKey: ["servers"] }),
+      ]);
     },
     [queryClient],
   );
 
   const deleteProfile = useMutation({
-    mutationFn: (id: string) => apiDelete(`/api/profiles/${id}`).then(() => id),
+    mutationFn: (id: string) => apiDelete(routes.profiles.delete(id)).then(() => id),
     onSuccess: (id) => {
       queryClient.setQueryData<Profile[]>(["profiles"], (prev) => prev?.filter((p) => p.id !== id));
     },
@@ -60,7 +54,7 @@ export function useProfiles() {
 
   const updateProfile = useCallback(
     async (id: string, updates: { name?: string }) => {
-      await apiPut(`/api/profiles/${id}`, updates);
+      await apiPut(routes.profiles.update(id), updates);
       await queryClient.invalidateQueries({ queryKey: ["profiles"] });
     },
     [queryClient],
@@ -72,7 +66,7 @@ export function useProfiles() {
       serverId: string,
       updates: { enabled?: boolean; disabledTools?: string[] },
     ) => {
-      await apiPut(`/api/profiles/${profileId}/servers/${serverId}`, updates);
+      await apiPut(routes.profiles.updateServer(profileId, serverId), updates);
     },
     [],
   );
@@ -97,9 +91,9 @@ export function useProfile(id: string | undefined) {
     data: profile,
     isLoading,
     error,
-  } = useQuery<ProfileDetailData | null>({
+  } = useQuery<ProfileDetail | null>({
     queryKey: ["profiles", id],
-    queryFn: () => api<ProfileDetailData | null>(`/api/profiles/${id ?? ""}`),
+    queryFn: () => api<ProfileDetail | null>(routes.profiles.detail(id!)),
     enabled: !!id,
   });
 

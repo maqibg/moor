@@ -9,18 +9,19 @@ import { serverManager } from "../services/server-manager.js";
 import { profileService } from "../services/profiles.js";
 import {
   getExistingNames,
+  partitionImportCandidates,
   selectImportCandidates,
   buildImportPreview,
-  findServerIdByName,
 } from "../services/import-service.js";
 import { isRecord } from "../utils.js";
+import { apiError, formatZodError } from "./validate.js";
 import type { ScannedServer } from "@moor/types";
 
-export { selectImportCandidates };
+export { partitionImportCandidates, selectImportCandidates };
 
 const importApi = new Hono();
 
-const MAX_PARSE_BODY_BYTES = 512 * 1024; // 512 KB
+const MAX_PARSE_BODY_BYTES = 512 * 1024;
 const MAX_CONVERT_SERVER_IDS = 200;
 
 const clientIdSchema = z.string().refine((id) => Boolean(getClientById(id)), {
@@ -37,13 +38,6 @@ const convertInputSchema = z
   })
   .strict();
 
-function formatValidationError(error: z.ZodError): string {
-  const issue = error.issues[0];
-  if (!issue) return "invalid request";
-  const field = issue.path.join(".") || "request";
-  return `${field}: ${issue.message}`;
-}
-
 importApi.post("/scan", (c) => {
   const parsed = scanAllConfigs();
   const preview = buildImportPreview(parsed, getExistingNames());
@@ -53,10 +47,10 @@ importApi.post("/scan", (c) => {
 importApi.post("/parse", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { content?: string };
   if (!body.content?.trim()) {
-    return c.json({ error: "content is required" }, 400);
+    return c.json(apiError("VALIDATION_ERROR", "content is required"), 400);
   }
   if (body.content.length > MAX_PARSE_BODY_BYTES) {
-    return c.json({ error: "content exceeds maximum allowed size" }, 413);
+    return c.json(apiError("PAYLOAD_TOO_LARGE", "content exceeds maximum allowed size"), 413);
   }
 
   const parsed = parseJsonMcpConfig(body.content, "json-import");
@@ -66,19 +60,13 @@ importApi.post("/parse", async (c) => {
 importApi.post("/execute", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { servers?: ScannedServer[] };
   const existingNames = getExistingNames();
-  const servers = body.servers?.length
-    ? selectImportCandidates(body.servers, existingNames)
-    : selectImportCandidates(scanAllConfigs().servers, existingNames);
+  const scannedServers = body.servers?.length ? body.servers : scanAllConfigs().servers;
+  const { candidates: servers, skipped } = partitionImportCandidates(scannedServers, existingNames);
   const imported: string[] = [];
-  const skipped: string[] = [];
+  const importedIds: string[] = [];
 
   for (const serverConfig of servers) {
-    if (findServerIdByName(serverConfig.name)) {
-      skipped.push(serverConfig.name);
-      continue;
-    }
-
-    serverManager.addServer({
+    const server = serverManager.addServer({
       name: serverConfig.name,
       connectionType: serverConfig.connectionType,
       command: serverConfig.command,
@@ -89,11 +77,11 @@ importApi.post("/execute", async (c) => {
       workingDir: serverConfig.workingDir,
     });
     imported.push(serverConfig.name);
+    importedIds.push(server.id);
   }
 
   if (imported.length > 0) {
-    const serverIds = imported.map((name) => findServerIdByName(name)).filter(Boolean) as string[];
-    profileService.assignToActiveProfile(serverIds);
+    profileService.assignToActiveProfile(importedIds);
   }
 
   return c.json({ imported, skipped });
@@ -108,16 +96,19 @@ importApi.post("/convert", async (c) => {
   const rawBody = (await c.req.json().catch(() => null)) as unknown;
 
   if (!isRecord(rawBody)) {
-    return c.json({ error: "request body must be a JSON object" }, 400);
+    return c.json(apiError("VALIDATION_ERROR", "request body must be a JSON object"), 400);
   }
 
-  if (typeof rawBody.content === "string" && rawBody.content.length > MAX_PARSE_BODY_BYTES) {
-    return c.json({ error: "content exceeds maximum allowed size" }, 413);
+  if (
+    typeof rawBody.content === "string" &&
+    (rawBody.content as string).length > MAX_PARSE_BODY_BYTES
+  ) {
+    return c.json(apiError("PAYLOAD_TOO_LARGE", "content exceeds maximum allowed size"), 413);
   }
 
   const parsedBody = convertInputSchema.safeParse(rawBody);
   if (!parsedBody.success) {
-    return c.json({ error: formatValidationError(parsedBody.error) }, 400);
+    return c.json(apiError("VALIDATION_ERROR", formatZodError(parsedBody.error)), 400);
   }
 
   try {
@@ -132,7 +123,7 @@ importApi.post("/convert", async (c) => {
     return c.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Conversion failed";
-    return c.json({ error: message }, 422);
+    return c.json(apiError("INTERNAL_ERROR", message), 422);
   }
 });
 

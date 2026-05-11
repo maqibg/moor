@@ -7,6 +7,7 @@ import { useProfiles } from "@/hooks/useProfiles";
 import { Plus, Trash2, Check, Code, FlaskConical, User, Home } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { getProfilesForDisplay } from "./profiles-state";
 
 const profileIcons = [Code, FlaskConical, User, Home, Code, FlaskConical, User, Home];
 const profileAccents = [
@@ -21,6 +22,7 @@ export function Profiles() {
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const navigate = useNavigate();
+  const displayProfiles = getProfilesForDisplay(profiles);
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
@@ -71,9 +73,9 @@ export function Profiles() {
 
       {/* Profiles Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {profiles.map((profile, index) => {
-          const Icon = profileIcons[index % profileIcons.length];
-          const accent = profileAccents[index % profileAccents.length];
+        {displayProfiles.map(({ profile, originalIndex }) => {
+          const Icon = profileIcons[originalIndex % profileIcons.length];
+          const accent = profileAccents[originalIndex % profileAccents.length];
           return (
             <Card
               key={profile.id}
@@ -125,7 +127,7 @@ export function Profiles() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-7 text-xs px-2"
+                        className="text-xs px-2"
                         onClick={(e) => {
                           e.stopPropagation();
                           activateProfile(profile.id);
@@ -135,14 +137,14 @@ export function Profiles() {
                       </Button>
                       <Button
                         variant="ghost"
-                        size="icon-sm"
+                        size="icon"
                         className="text-[var(--fg-35)] hover:text-error-warm"
                         onClick={(e) => {
                           e.stopPropagation();
                           deleteProfile(profile.id);
                         }}
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </>
                   )}

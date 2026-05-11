@@ -19,6 +19,12 @@ export const createServerSchema = z.discriminatedUnion("connectionType", [
   }),
 ]);
 
+export const serverOrderSchema = z
+  .object({
+    serverIds: z.array(z.string().min(1)).nonempty(),
+  })
+  .strict();
+
 export const createProfileSchema = z.object({
   name: z.string().min(1),
 });

@@ -139,6 +139,7 @@ export function runMigrations() {
       headers TEXT,
       working_dir TEXT,
       auto_start INTEGER NOT NULL DEFAULT 0,
+      sort_order INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'stopped' CHECK(status IN ('stopped', 'starting', 'running', 'error')),
       error_message TEXT,
       created_at TEXT NOT NULL,
@@ -192,11 +193,28 @@ export function runMigrations() {
   ensureColumn("tool_discoveries", "exposed_name", "TEXT");
   ensureColumn("mcp_servers", "headers", "TEXT");
   ensureColumn("mcp_servers", "auto_start", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn("mcp_servers", "sort_order", "INTEGER NOT NULL DEFAULT 0");
+  backfillServerSortOrder();
 }
 
 function ensureColumn(table: string, column: string, definition: string) {
   const exists = queryAll(`PRAGMA table_info(${table})`).some((row) => row.name === column);
   if (!exists) run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+function backfillServerSortOrder() {
+  const rows = queryAll("SELECT id, sort_order FROM mcp_servers ORDER BY created_at DESC, id ASC");
+  if (rows.length <= 1) return;
+
+  const sortOrders = rows.map((row) => Number(row.sort_order ?? 0));
+  const needsBackfill = new Set(sortOrders).size === 1;
+  if (!needsBackfill) return;
+
+  transaction(() => {
+    rows.forEach((row, index) => {
+      run("UPDATE mcp_servers SET sort_order = ? WHERE id = ?", [index, row.id]);
+    });
+  });
 }
 
 export function run(sql: string, params: unknown[] = []) {

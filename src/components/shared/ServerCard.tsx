@@ -1,11 +1,12 @@
+import { useState, type ReactNode } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "./StatusBadge";
 import {
   AlertTriangle,
   Loader2,
+  PanelRightOpen,
   Play,
-  Settings,
   Square,
   Terminal,
   Trash2,
@@ -15,10 +16,13 @@ import { useNavigate } from "react-router-dom";
 import type { Server } from "@moor/types";
 import type { ServerAction } from "@/hooks/useServersState";
 import { cn } from "@/lib/utils";
+import { getRemoveFeedback, type RemoveFeedback } from "./server-card-state";
 
 interface ServerCardProps {
   server: Server;
   action?: ServerAction;
+  dragHandle?: ReactNode;
+  isSorting?: boolean;
   onStart: (id: string) => Promise<void>;
   onStop: (id: string) => Promise<void>;
   onRemove: (id: string) => Promise<void>;
@@ -127,33 +131,31 @@ function ServerControls({
   isStarting,
   isStopping,
   isBusy,
+  isRemoving,
   onStart,
   onStop,
-  onRemove,
+  onRequestRemove,
 }: {
   server: Server;
   isStarting: boolean;
   isStopping: boolean;
   isBusy: boolean;
+  isRemoving: boolean;
   onStart: (id: string) => Promise<void>;
   onStop: (id: string) => Promise<void>;
-  onRemove: (id: string) => Promise<void>;
+  onRequestRemove: () => void;
 }) {
   const navigate = useNavigate();
-  const confirmRemove = () => {
-    if (window.confirm(`Remove server "${server.name}"? This cannot be undone.`)) {
-      void onRemove(server.id);
-    }
-  };
+  const controlsDisabled = isBusy || isRemoving;
 
   return (
-    <div className="flex items-center gap-0.5 shrink-0 bg-surface-300/50 rounded-lg p-0.5">
+    <div className="flex items-center gap-1 shrink-0 bg-surface-300/50 rounded-lg p-1">
       <LifecycleButton
         serverId={server.id}
         isRunning={server.status === "running"}
         isStarting={isStarting}
         isStopping={isStopping}
-        isBusy={isBusy}
+        isBusy={controlsDisabled}
         onStart={onStart}
         onStop={onStop}
       />
@@ -161,20 +163,89 @@ function ServerControls({
         variant="ghost"
         size="icon"
         className="text-[var(--fg-45)] hover:text-cursor-dark hover:bg-surface-400 active:bg-surface-500 transition-all duration-150"
+        disabled={controlsDisabled}
         onClick={() => navigate(`/servers/${server.id}`)}
         title="Server details"
+        aria-label={`Open details for ${server.name}`}
       >
-        <Settings className="h-4 w-4" />
+        <PanelRightOpen className="h-4 w-4" />
       </Button>
       <Button
         variant="ghost"
         size="icon"
         className="text-[var(--fg-45)] hover:text-error-warm hover:bg-error-warm/10 active:bg-error-warm/20 transition-all duration-150"
-        onClick={confirmRemove}
+        disabled={controlsDisabled}
+        onClick={onRequestRemove}
         title="Remove server"
+        aria-label={`Remove ${server.name}`}
       >
-        <Trash2 className="h-4 w-4" />
+        {isRemoving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
       </Button>
+    </div>
+  );
+}
+
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : "Unable to remove server";
+}
+
+function RemoveFeedbackRow({
+  feedback,
+  onCancel,
+  onConfirm,
+}: {
+  feedback: NonNullable<RemoveFeedback>;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const isError = feedback.kind === "error";
+  const isRemoving = feedback.kind === "removing";
+
+  return (
+    <div
+      className={cn(
+        "mt-3 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 animate-fade-in",
+        isError ? "border-error-warm/15 bg-error-warm/8" : "border-gold/15 bg-gold/8",
+      )}
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        {isRemoving ? (
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-gold" />
+        ) : (
+          <AlertTriangle
+            className={cn("h-3.5 w-3.5 shrink-0", isError ? "text-error-warm" : "text-gold")}
+          />
+        )}
+        <p
+          className={cn(
+            "truncate font-body text-xs",
+            isError ? "text-error-warm" : "text-[var(--fg-55)]",
+          )}
+          title={feedback.message}
+        >
+          {feedback.message}
+        </p>
+      </div>
+      {feedback.kind === "confirm" && (
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Button variant="ghost" size="sm" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-error-warm hover:bg-error-warm/10 hover:text-error-warm"
+            onClick={onConfirm}
+          >
+            Remove
+          </Button>
+        </div>
+      )}
+      {feedback.kind === "error" && (
+        <Button variant="ghost" size="sm" onClick={onCancel}>
+          Dismiss
+        </Button>
+      )}
     </div>
   );
 }
@@ -190,18 +261,54 @@ function ServerErrorMessage({ message }: { message: string }) {
   );
 }
 
-export function ServerCard({ server, action, onStart, onStop, onRemove }: ServerCardProps) {
+export function ServerCard({
+  server,
+  action,
+  dragHandle,
+  isSorting,
+  onStart,
+  onStop,
+  onRemove,
+}: ServerCardProps) {
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [isRemoving, setIsRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const isRunning = server.status === "running";
   const isError = server.status === "error";
   const isStarting = server.status === "starting" || action === "starting";
   const isStopping = action === "stopping";
   const commandPreview = getCommandPreview(server);
   const displayStatus = isStopping ? "stopping" : server.status;
+  const removeFeedback = getRemoveFeedback({
+    serverName: server.name,
+    confirmingRemove,
+    isRemoving,
+    removeError,
+  });
+
+  const handleRemove = async () => {
+    setIsRemoving(true);
+    setRemoveError(null);
+    try {
+      await onRemove(server.id);
+      setConfirmingRemove(false);
+    } catch (err) {
+      setRemoveError(getErrorMessage(err));
+    } finally {
+      setIsRemoving(false);
+    }
+  };
+
+  const clearRemoveFeedback = () => {
+    setConfirmingRemove(false);
+    setRemoveError(null);
+  };
 
   return (
     <Card
       className={cn(
         "group transition-all duration-200 hover:shadow-[rgba(0,0,0,0.04)_0px_12px_40px,rgba(0,0,0,0.02)_0px_0px_16px]",
+        isSorting && "shadow-[rgba(0,0,0,0.08)_0px_18px_44px] ring-1 ring-cursor-orange/20",
         isRunning && !isStopping && "bg-success-muted/[0.02] border-success-muted/10",
         isError && "bg-error-warm/[0.02] border-error-warm/10",
         isStarting && "bg-gold/[0.02] border-gold/10",
@@ -212,6 +319,7 @@ export function ServerCard({ server, action, onStart, onStop, onRemove }: Server
         <div>
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0 flex-1">
+              {dragHandle}
               <ServerAvatar isRunning={isRunning} isError={isError} />
               <ServerIdentity
                 server={server}
@@ -224,11 +332,22 @@ export function ServerCard({ server, action, onStart, onStop, onRemove }: Server
               isStarting={isStarting}
               isStopping={isStopping}
               isBusy={isStarting || isStopping}
+              isRemoving={isRemoving}
               onStart={onStart}
               onStop={onStop}
-              onRemove={onRemove}
+              onRequestRemove={() => {
+                setConfirmingRemove(true);
+                setRemoveError(null);
+              }}
             />
           </div>
+          {removeFeedback && (
+            <RemoveFeedbackRow
+              feedback={removeFeedback}
+              onCancel={clearRemoveFeedback}
+              onConfirm={() => void handleRemove()}
+            />
+          )}
           {isError && server.errorMessage && <ServerErrorMessage message={server.errorMessage} />}
         </div>
       </CardContent>

@@ -20,6 +20,8 @@ use tauri_plugin_shell::{
     ShellExt,
 };
 
+mod login_autostart;
+
 const LEGACY_BUNDLE_IDENTIFIER: &str = "dev.moor.app";
 
 #[derive(Clone, Debug, Serialize)]
@@ -167,7 +169,9 @@ mod tests {
             12345,
         );
 
-        assert!(args.windows(2).any(|pair| pair == ["--parent-pid", "12345"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--parent-pid", "12345"]));
     }
 }
 
@@ -297,9 +301,17 @@ fn get_sidecar_info(state: State<'_, SidecarState>) -> Result<SidecarInfo, Strin
 fn apply_autostart_setting(app: &AppHandle, enabled: bool) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
 
+    login_autostart::validate_login_autostart_enable(enabled)?;
+
+    let should_reload_login_agent = enabled && login_autostart::login_agent_needs_reload(app);
+
     let autolaunch = app.autolaunch();
     if enabled {
-        autolaunch.enable().map_err(|err| err.to_string())
+        autolaunch.enable().map_err(|err| err.to_string())?;
+        if should_reload_login_agent {
+            login_autostart::refresh_stale_login_agent(app);
+        }
+        Ok(())
     } else {
         autolaunch.disable().map_err(|err| err.to_string())
     }

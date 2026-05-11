@@ -13,11 +13,16 @@ function writeJson(filePath, value) {
 function createVersionFixture() {
   const root = mkdtempSync(path.join(tmpdir(), "moor-version-sync-"));
   mkdirSync(path.join(root, "sidecar"), { recursive: true });
+  mkdirSync(path.join(root, "packages", "types"), { recursive: true });
   mkdirSync(path.join(root, "src-tauri"), { recursive: true });
 
   writeJson(path.join(root, "sidecar", "package.json"), {
     name: "moor-sidecar",
     version: "0.2.1-beta.1",
+  });
+  writeJson(path.join(root, "packages", "types", "package.json"), {
+    name: "@moor/types",
+    version: "0.2.1-beta.0",
   });
   writeJson(path.join(root, "package.json"), {
     name: "moor",
