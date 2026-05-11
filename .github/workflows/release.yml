@@ -21,10 +21,8 @@ jobs:
         include:
           - platform: "macos-latest"
             target: "aarch64-apple-darwin"
-            node_arch: "arm64"
           - platform: "macos-latest"
             target: "x86_64-apple-darwin"
-            node_arch: "x64"
 
     runs-on: ${{ matrix.platform }}
 
@@ -38,8 +36,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          architecture: ${{ matrix.node_arch }}
           registry-url: "https://registry.npmjs.org"
+
+      - name: Resolve SEA Node runtime
+        id: sea-node
+        run: node sidecar/scripts/resolve-sea-node.mjs --target "${{ matrix.target }}"
 
       - name: Resolve release metadata
         id: release
@@ -124,6 +125,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MOOR_SIDECAR_TARGET_TRIPLE: ${{ matrix.target }}
+          MOOR_SEA_NODE_EXEC_PATH: ${{ steps.sea-node.outputs.exec_path }}
         with:
           tagName: ${{ steps.release.outputs.tag }}
           releaseName: "Moor ${{ steps.release.outputs.tag }}"
@@ -131,3 +134,60 @@ jobs:
           releaseDraft: true
           prerelease: ${{ steps.release.outputs.prerelease }}
           args: "--target ${{ matrix.target }}"
+
+      - name: Collect bundle diagnostics
+        if: failure()
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          SEA_NODE_EXEC_PATH: ${{ steps.sea-node.outputs.exec_path }}
+        run: |
+          set -euo pipefail
+
+          echo "Host runtime:"
+          uname -a
+          node -p "JSON.stringify({execPath:process.execPath,version:process.version,platform:process.platform,arch:process.arch})"
+
+          echo "SEA Node runtime:"
+          if [[ -n "${SEA_NODE_EXEC_PATH}" && -x "${SEA_NODE_EXEC_PATH}" ]]; then
+            "${SEA_NODE_EXEC_PATH}" -p "JSON.stringify({execPath:process.execPath,version:process.version,platform:process.platform,arch:process.arch})"
+            file "${SEA_NODE_EXEC_PATH}" || true
+            lipo -info "${SEA_NODE_EXEC_PATH}" || true
+          else
+            echo "SEA Node runtime is unavailable: ${SEA_NODE_EXEC_PATH}"
+          fi
+
+          echo "Built sidecar binary:"
+          sidecar_binary="src-tauri/binaries/moor-sidecar-${TARGET}"
+          if [[ -f "${sidecar_binary}" ]]; then
+            file "${sidecar_binary}" || true
+            lipo -info "${sidecar_binary}" || true
+          else
+            echo "Missing ${sidecar_binary}"
+          fi
+
+          echo "Built app binary:"
+          app_binary="src-tauri/target/${TARGET}/release/bundle/macos/Moor.app/Contents/MacOS/moor"
+          if [[ ! -f "${app_binary}" ]]; then
+            app_binary="src-tauri/target/release/bundle/macos/Moor.app/Contents/MacOS/moor"
+          fi
+          if [[ -f "${app_binary}" ]]; then
+            file "${app_binary}" || true
+            lipo -info "${app_binary}" || true
+          else
+            echo "Moor.app binary not found"
+          fi
+
+          echo "DMG bundle directory:"
+          find src-tauri/target -path "*/release/bundle/dmg/*" -print || true
+
+      - name: Upload DMG diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dmg-diagnostics-${{ matrix.target }}
+          if-no-files-found: ignore
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg
+            src-tauri/target/release/bundle/dmg
+            src-tauri/binaries/moor-sidecar-${{ matrix.target }}

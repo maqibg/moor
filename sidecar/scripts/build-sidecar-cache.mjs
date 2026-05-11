@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 const helperPath = fileURLToPath(import.meta.url);
 
 function listFilesRecursive(root) {
@@ -54,9 +54,13 @@ export function computeSeaBuildFingerprint({
   repoRoot,
   sidecarRoot,
   buildScriptPath,
+  targetTriple,
   nodeVersion = process.version,
   platform = process.platform,
   arch = process.arch,
+  seaNodeVersion = nodeVersion,
+  seaNodePlatform = platform,
+  seaNodeArch = arch,
 }) {
   const hash = createHash("sha256");
   const srcFiles = listFilesRecursive(path.join(sidecarRoot, "src"));
@@ -70,9 +74,13 @@ export function computeSeaBuildFingerprint({
   ];
 
   hash.update(`cache-version:${CACHE_VERSION}\0`);
+  hash.update(`target:${targetTriple}\0`);
   hash.update(`node:${nodeVersion}\0`);
   hash.update(`platform:${platform}\0`);
   hash.update(`arch:${arch}\0`);
+  hash.update(`sea-node:${seaNodeVersion}\0`);
+  hash.update(`sea-platform:${seaNodePlatform}\0`);
+  hash.update(`sea-arch:${seaNodeArch}\0`);
 
   for (const filePath of inputFiles) {
     updateHashWithFile(hash, path.relative(repoRoot, filePath), filePath);
@@ -80,9 +88,13 @@ export function computeSeaBuildFingerprint({
 
   return {
     hash: hash.digest("hex"),
+    targetTriple,
     nodeVersion,
     platform,
     arch,
+    seaNodeVersion,
+    seaNodePlatform,
+    seaNodeArch,
     inputCount: inputFiles.length,
   };
 }
@@ -93,17 +105,25 @@ export function getSeaBuildCacheState({
   outputBinary,
   cachePath,
   buildScriptPath,
+  targetTriple,
   nodeVersion = process.version,
   platform = process.platform,
   arch = process.arch,
+  seaNodeVersion = nodeVersion,
+  seaNodePlatform = platform,
+  seaNodeArch = arch,
 }) {
   const fingerprint = computeSeaBuildFingerprint({
     repoRoot,
     sidecarRoot,
     buildScriptPath,
+    targetTriple,
     nodeVersion,
     platform,
     arch,
+    seaNodeVersion,
+    seaNodePlatform,
+    seaNodeArch,
   });
 
   if (!existsSync(outputBinary)) {

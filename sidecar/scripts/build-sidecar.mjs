@@ -4,6 +4,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { getSeaBuildCacheState, writeSeaBuildCache } from "./build-sidecar-cache.mjs";
+import {
+  binaryNameForTarget,
+  cacheFileNameForTarget,
+  resolveTargetTriple,
+} from "./build-sidecar-target.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sidecarRoot = path.resolve(__dirname, "..");
@@ -25,21 +30,28 @@ function run(command, args, options = {}) {
   }
 }
 
-function targetTriple() {
-  const platform = process.platform;
-  const arch = process.arch;
-  if (platform === "darwin" && arch === "arm64") return "aarch64-apple-darwin";
-  if (platform === "darwin" && arch === "x64") return "x86_64-apple-darwin";
-  if (platform === "linux" && arch === "x64") return "x86_64-unknown-linux-gnu";
-  if (platform === "linux" && arch === "arm64") return "aarch64-unknown-linux-gnu";
-  if (platform === "win32" && arch === "x64") return "x86_64-pc-windows-msvc";
-  if (platform === "win32" && arch === "arm64") return "aarch64-pc-windows-msvc";
-  throw new Error(`Unsupported platform ${platform}/${arch}`);
+function runCapture(command, args, options = {}) {
+  const result = spawnSync(command, args, { encoding: "utf8", cwd: sidecarRoot, ...options });
+  if (result.status !== 0) {
+    throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status}`);
+  }
+  return result.stdout.trim();
 }
 
-function binaryName() {
-  const suffix = process.platform === "win32" ? ".exe" : "";
-  return `moor-sidecar-${targetTriple()}${suffix}`;
+function resolveSeaNodeExecPath() {
+  const configuredPath = process.env.MOOR_SEA_NODE_EXEC_PATH?.trim();
+  if (!configuredPath) {
+    return process.execPath;
+  }
+  return path.resolve(configuredPath);
+}
+
+function readSeaNodeIdentity(seaNodeExecPath) {
+  const output = runCapture(seaNodeExecPath, [
+    "-p",
+    "JSON.stringify({version:process.version,platform:process.platform,arch:process.arch})",
+  ]);
+  return JSON.parse(output);
 }
 
 function assertSeaBundleSafe() {
@@ -62,8 +74,11 @@ function assertSeaBundleSafe() {
 mkdirSync(distDir, { recursive: true });
 mkdirSync(tauriBinDir, { recursive: true });
 
-const outputBinary = path.join(tauriBinDir, binaryName());
-const seaCachePath = path.join(distDir, "moor-sidecar.sea-cache.json");
+const targetTriple = resolveTargetTriple();
+const seaNodeExecPath = resolveSeaNodeExecPath();
+const seaNodeIdentity = readSeaNodeIdentity(seaNodeExecPath);
+const outputBinary = path.join(tauriBinDir, binaryNameForTarget(targetTriple));
+const seaCachePath = path.join(distDir, cacheFileNameForTarget(targetTriple));
 let cacheState = null;
 
 if (cached && !bundleOnly) {
@@ -73,6 +88,10 @@ if (cached && !bundleOnly) {
     outputBinary,
     cachePath: seaCachePath,
     buildScriptPath: fileURLToPath(import.meta.url),
+    targetTriple,
+    seaNodeVersion: seaNodeIdentity.version,
+    seaNodePlatform: seaNodeIdentity.platform,
+    seaNodeArch: seaNodeIdentity.arch,
   });
 
   if (!cacheState.shouldBuild) {
@@ -123,9 +142,9 @@ writeFileSync(
   ),
 );
 
-run(process.execPath, ["--experimental-sea-config", seaConfigPath]);
+run(seaNodeExecPath, ["--experimental-sea-config", seaConfigPath]);
 
-copyFileSync(process.execPath, outputBinary);
+copyFileSync(seaNodeExecPath, outputBinary);
 chmodSync(outputBinary, 0o755);
 
 if (process.platform === "darwin") {
