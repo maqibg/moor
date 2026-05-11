@@ -1,5 +1,11 @@
 # @moor/types
 
+## 0.4.0
+
+### Minor Changes
+
+- Implement server ordering API and UI, enhance import API with improved candidate selection and error handling, refactor server management and tool catalog services, improve API error handling and validation responses, and add IPC patterns documentation with macOS login autostart improvements.
+
 ## 0.3.0
 
 ### Patch Changes

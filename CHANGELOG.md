@@ -1,5 +1,16 @@
 # moor-sidecar
 
+## 0.4.0
+
+### Minor Changes
+
+- Implement server ordering API and UI, enhance import API with improved candidate selection and error handling, refactor server management and tool catalog services, improve API error handling and validation responses, and add IPC patterns documentation with macOS login autostart improvements.
+
+### Patch Changes
+
+- Updated dependencies
+  - @moor/types@0.4.0
+
 ## 0.3.0
 
 ### Minor Changes
