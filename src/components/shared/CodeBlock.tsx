@@ -19,7 +19,7 @@ export function CodeBlock({ code, label }: CodeBlockProps) {
         </pre>
         <CopyButton
           text={code}
-          className="absolute top-2.5 right-2.5 h-7 w-7 text-text-inverted-muted hover:text-text-inverted hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"
+          className="absolute top-2 right-2 text-text-inverted-muted hover:text-text-inverted hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"
         />
       </div>
     </div>

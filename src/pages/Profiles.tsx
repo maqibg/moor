@@ -137,14 +137,14 @@ export function Profiles() {
                       </Button>
                       <Button
                         variant="ghost"
-                        size="icon-sm"
+                        size="icon"
                         className="text-[var(--fg-35)] hover:text-error-warm"
                         onClick={(e) => {
                           e.stopPropagation();
                           deleteProfile(profile.id);
                         }}
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </>
                   )}

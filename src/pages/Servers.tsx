@@ -65,14 +65,14 @@ function SortableServerCard({
         dragHandle={
           <Button
             variant="ghost"
-            size="icon-sm"
+            size="icon"
             className="shrink-0 cursor-grab text-[var(--fg-30)] hover:text-cursor-dark active:cursor-grabbing"
             title={`Reorder ${server.name}`}
             aria-label={`Reorder ${server.name}`}
             {...attributes}
             {...listeners}
           >
-            <GripVertical className="h-4 w-4" />
+            <GripVertical className="h-[18px] w-[18px]" />
           </Button>
         }
         onStart={onStart}
@@ -115,6 +115,8 @@ export function Servers() {
   );
 
   const handleScan = useCallback(() => {
+    setShowAdd(false);
+    setShowJsonImport(false);
     void importState.scan();
   }, [importState]);
 
@@ -147,13 +149,24 @@ export function Servers() {
             <Button variant="outline" onClick={() => void refresh()} disabled={loading}>
               <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} /> Refresh
             </Button>
-            <Button variant="outline" onClick={() => setShowJsonImport(true)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowAdd(false);
+                setShowJsonImport(true);
+              }}
+            >
               <FileJson className="h-4 w-4 mr-2" /> Import JSON
             </Button>
             <Button variant="outline" onClick={handleScan}>
               <ScanSearch className="h-4 w-4 mr-2" /> Scan Configs
             </Button>
-            <Button onClick={() => setShowAdd(true)}>
+            <Button
+              onClick={() => {
+                setShowJsonImport(false);
+                setShowAdd(true);
+              }}
+            >
               <Plus className="h-4 w-4 mr-2" /> Add Server
             </Button>
           </div>

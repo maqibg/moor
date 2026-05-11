@@ -149,7 +149,7 @@ function ServerControls({
   const controlsDisabled = isBusy || isRemoving;
 
   return (
-    <div className="flex items-center gap-0.5 shrink-0 bg-surface-300/50 rounded-lg p-0.5">
+    <div className="flex items-center gap-1 shrink-0 bg-surface-300/50 rounded-lg p-1">
       <LifecycleButton
         serverId={server.id}
         isRunning={server.status === "running"}

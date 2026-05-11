@@ -107,10 +107,10 @@ describe("repository layer", () => {
        VALUES ('server-1', 'echo', 'echo', '2026-01-01T00:00:00.000Z')`,
     );
 
-    const rows = repo.findAll() as Array<Record<string, unknown>>;
+    const rows = repo.findAll();
 
     expect(rows).toHaveLength(1);
-    expect(rows[0]).not.toHaveProperty("tools");
+    expect(Object.hasOwn(rows[0], "tools")).toBe(false);
   });
 
   it("returns lightweight server names for import duplicate checks", () => {

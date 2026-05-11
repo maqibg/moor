@@ -371,12 +371,8 @@ function AdvancedSection({
                     : "•".repeat(20)
                   : "Loading..."}
               </code>
-              <Button variant="ghost" size="icon-sm" onClick={() => setTokenVisible(!tokenVisible)}>
-                {tokenVisible ? (
-                  <EyeOff className="h-3.5 w-3.5" />
-                ) : (
-                  <Eye className="h-3.5 w-3.5" />
-                )}
+              <Button variant="ghost" size="icon" onClick={() => setTokenVisible(!tokenVisible)}>
+                {tokenVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </Button>
               {runtimeInfo && <CopyButton text={runtimeInfo.apiToken} />}
             </div>
