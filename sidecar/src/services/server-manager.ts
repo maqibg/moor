@@ -259,11 +259,23 @@ export class ServerManager {
   }
 
   findToolOwner(exposedName: string): ToolCatalogEntry | null {
-    return toolCatalogService.findToolOwner(exposedName);
+    return this.getToolCatalog().find((tool) => tool.exposedName === exposedName) ?? null;
   }
 
   getToolCatalog(profileId?: string | null): ToolCatalogEntry[] {
-    return toolCatalogService.getToolCatalog(profileId);
+    return toolCatalogService.getToolCatalog(profileId, {
+      serverIds: this.getCallableServerIds(),
+    });
+  }
+
+  private getCallableServerIds(): ReadonlySet<string> {
+    const ids = new Set<string>();
+    for (const server of this.servers.values()) {
+      if (server.status === "running" && this.sessionManager.getSession(server.id)) {
+        ids.add(server.id);
+      }
+    }
+    return ids;
   }
 
   getActiveProfileServers() {
@@ -292,7 +304,9 @@ export class ServerManager {
   }
 
   getToolDetails(serverId: string, profileId?: string) {
-    return toolCatalogService.getToolDetails(serverId, profileId);
+    return toolCatalogService.getToolDetails(serverId, profileId, {
+      serverIds: this.getCallableServerIds(),
+    });
   }
 
   private setServerStatus(id: string, status: ManagedServer["status"], errorMessage?: string) {

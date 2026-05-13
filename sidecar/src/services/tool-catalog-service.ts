@@ -3,14 +3,22 @@ import { getProfileRepository } from "../db/profile-repository.js";
 import { buildToolCatalogFromRows, type ToolCatalogRow } from "../db/tool-catalog.js";
 import type { ToolCatalogEntry } from "@moor/types";
 
+interface ToolCatalogOptions {
+  serverIds?: ReadonlySet<string>;
+}
+
 export class ToolCatalogService {
-  getToolCatalog(profileId?: string | null): ToolCatalogEntry[] {
+  getToolCatalog(profileId?: string | null, options: ToolCatalogOptions = {}): ToolCatalogEntry[] {
     const activeProfileId = profileId ?? getProfileRepository().findActiveId();
     if (!activeProfileId) return [];
 
     const rows = getToolDiscoveryRepository().findByProfileId(activeProfileId);
+    const visibleServerIds = options.serverIds;
+    const visibleRows = visibleServerIds
+      ? rows.filter((row) => visibleServerIds.has(row.serverId))
+      : rows;
     return buildToolCatalogFromRows(
-      rows.map(
+      visibleRows.map(
         (row) =>
           ({
             serverId: row.serverId,
@@ -32,8 +40,8 @@ export class ToolCatalogService {
     return getToolDiscoveryRepository().findByServerId(serverId);
   }
 
-  getToolDetails(serverId: string, profileId?: string) {
-    const catalog = this.getToolCatalog(profileId);
+  getToolDetails(serverId: string, profileId?: string, options: ToolCatalogOptions = {}) {
+    const catalog = this.getToolCatalog(profileId, options);
     const disabledForServer = getToolDiscoveryRepository().findDisabledToolsForServer(
       profileId,
       serverId,

@@ -20,6 +20,9 @@ let dataDir: string;
 
 interface TestManager {
   addServer: typeof serverManager.addServer;
+  cacheTools: typeof serverManager.cacheTools;
+  getToolDetails: typeof serverManager.getToolDetails;
+  getToolCatalog: typeof serverManager.getToolCatalog;
   getServer: typeof serverManager.getServer;
   loadFromDb: typeof serverManager.loadFromDb;
   removeServer: typeof serverManager.removeServer;
@@ -31,10 +34,13 @@ interface TestManager {
 type TestSessionFactory = NonNullable<ConstructorParameters<typeof ServerManager>[0]>;
 type TestServerSession = Awaited<ReturnType<TestSessionFactory>>;
 
-function createFakeSession(onClose: () => void = () => undefined): TestServerSession {
+function createFakeSession(
+  onClose: () => void = () => undefined,
+  tools: Array<{ name: string; description?: string; inputSchema?: unknown }> = [],
+): TestServerSession {
   return {
     client: {
-      listTools: async () => ({ tools: [] }),
+      listTools: async () => ({ tools }),
       close: async () => {
         onClose();
       },
@@ -110,6 +116,31 @@ describe("ServerManager MCP lifecycle", () => {
     ).resolves.toMatchObject({
       content: [{ type: "text", text: "hello" }],
     });
+
+    await serverManager.stopServer(managed.id);
+
+    expect(
+      queryAll("SELECT tool_name FROM tool_discoveries WHERE server_id = ?", [managed.id]),
+    ).toEqual([{ tool_name: "echo" }]);
+    expect(serverManager.getToolCatalog()).toEqual([]);
+    expect(serverManager.findToolOwner("echo")).toBeNull();
+  });
+
+  it("ignores stopped servers before computing duplicate exposed tool names", async () => {
+    const manager = createTestManager(async () =>
+      createFakeSession(() => undefined, [{ name: "search" }]),
+    );
+    const running = addAutoStartServer(manager, "Visible");
+    const stopped = addAutoStartServer(manager, "Hidden");
+    manager.cacheTools(stopped.id, [{ name: "search" }]);
+
+    await manager.startServer(running.id);
+
+    expect(manager.getServer(running.id)?.status).toBe("running");
+    expect(manager.getServer(stopped.id)?.status).toBe("stopped");
+    expect(manager.getToolCatalog().map((tool) => tool.exposedName)).toEqual(["search"]);
+    expect(manager.getToolDetails(running.id).map((tool) => tool.exposedName)).toEqual(["search"]);
+    expect(manager.getToolDetails(stopped.id).map((tool) => tool.exposedName)).toEqual(["search"]);
   });
 
   it("reuses the in-flight start when a server is already starting", async () => {

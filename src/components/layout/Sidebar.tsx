@@ -22,15 +22,15 @@ const navItems = [
 export function Sidebar() {
   return (
     <aside className="w-[220px] shrink-0 border-r border-[var(--fg-10)] bg-surface-300 flex flex-col">
-      <div className="p-5 flex items-center gap-3">
-        <div className="h-8 w-8 rounded-lg bg-cursor-dark flex items-center justify-center">
+      <div className="px-5 py-4 flex items-center gap-2.5">
+        <div className="h-9 w-9 rounded-xl bg-cursor-dark flex items-center justify-center">
           <MoorLogo className="h-7 w-7 text-surface-200" />
         </div>
-        <div>
-          <span className="font-headline text-lg tracking-tight text-cursor-dark leading-tight block">
+        <div className="-space-y-0.5">
+          <span className="font-headline text-lg font-semibold tracking-tight text-cursor-dark leading-tight block">
             Moor
           </span>
-          <span className="font-mono text-[10px] text-[var(--fg-40)] tracking-wide uppercase">
+          <span className="font-mono text-[10px] text-[var(--fg-40)] tracking-wider uppercase leading-none">
             MCP Manager
           </span>
         </div>

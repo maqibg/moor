@@ -134,7 +134,7 @@ writeFileSync(
       main: bundlePath,
       output: seaBlobPath,
       disableExperimentalSEAWarning: true,
-      useCodeCache: false,
+      useCodeCache: true,
       useSnapshot: false,
     },
     null,
