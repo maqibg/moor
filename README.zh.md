@@ -40,7 +40,23 @@
 > _Moor 暴露单一端点（`http://127.0.0.1:<port>/mcp`），根据当前激活的 Profile 动态只提供你需要的工具。切换 Profile 无需断开 Agent 连接，每一次工具调用都有审计记录。这就是我打造 Moor 的原因。_
 
 <p align="center">
-  <img src="./assets/screenshot.png" alt="Moor 界面截图" width="800">
+  <img src="./assets/Dashboard%20Page.png" alt="Dashboard" width="800"><br>
+  <sub>Dashboard — 总览当前 Profile、Server 状态与审计统计。</sub>
+</p>
+
+<p align="center">
+  <img src="./assets/Servers%20Page.png" alt="Servers" width="800"><br>
+  <sub>Servers — 管理 MCP Server、导入配置、监控健康状态。</sub>
+</p>
+
+<p align="center">
+  <img src="./assets/Profiles%20Page.png" alt="Profiles" width="800"><br>
+  <sub>Profiles — 创建 Profile、开关 Server、启用/禁用工具。</sub>
+</p>
+
+<p align="center">
+  <img src="./assets/Audit%20Page.png" alt="Audit" width="800"><br>
+  <sub>Audit — 查看每一次工具调用的完整上下文与筛选。</sub>
 </p>
 
 ## 安装

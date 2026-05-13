@@ -40,7 +40,23 @@
 > _Moor は単一エンドポイント（`http://127.0.0.1:<port>/mcp`）を公開し、アクティブな Profile に基づいて必要なツールのみを動的に提供します。Agent を切断することなく Profile を切り替えられ、すべてのツール呼び出しが監査されます。これが私が Moor を作った理由です。_
 
 <p align="center">
-  <img src="./assets/screenshot.png" alt="Moor スクリーンショット" width="800">
+  <img src="./assets/Dashboard%20Page.png" alt="Dashboard" width="800"><br>
+  <sub>Dashboard — アクティブな Profile、Server の状態、監査統計を一覧表示。</sub>
+</p>
+
+<p align="center">
+  <img src="./assets/Servers%20Page.png" alt="Servers" width="800"><br>
+  <sub>Servers — MCP Server の管理、設定のインポート、健全性の監視。</sub>
+</p>
+
+<p align="center">
+  <img src="./assets/Profiles%20Page.png" alt="Profiles" width="800"><br>
+  <sub>Profiles — Profile の作成、Server のオン/オフ、ツールの有効/無効化。</sub>
+</p>
+
+<p align="center">
+  <img src="./assets/Audit%20Page.png" alt="Audit" width="800"><br>
+  <sub>Audit — ツール呼び出しの全文脈とフィルタで詳細を確認。</sub>
 </p>
 
 <a id="install"></a>

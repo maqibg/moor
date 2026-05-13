@@ -40,7 +40,23 @@
 > _Moor expone un único endpoint (`http://127.0.0.1:<port>/mcp`) que sirve dinámicamente solo las herramientas que deseas, basado en tu Perfil activo. Cambia perfiles sin desconectar tu Agente, y cada llamada a herramienta es auditada. Por eso lo construí._
 
 <p align="center">
-  <img src="./assets/screenshot.png" alt="Captura de pantalla de Moor" width="800">
+  <img src="./assets/Dashboard%20Page.png" alt="Dashboard" width="800"><br>
+  <sub>Dashboard — Vista general del Perfil activo, estado de los servidores y estadísticas de auditoría.</sub>
+</p>
+
+<p align="center">
+  <img src="./assets/Servers%20Page.png" alt="Servers" width="800"><br>
+  <sub>Servers — Gestiona servidores MCP, importa configuraciones y monitoriza el estado.</sub>
+</p>
+
+<p align="center">
+  <img src="./assets/Profiles%20Page.png" alt="Profiles" width="800"><br>
+  <sub>Profiles — Crea perfiles, activa/desactiva servidores y habilita/deshabilita herramientas.</sub>
+</p>
+
+<p align="center">
+  <img src="./assets/Audit%20Page.png" alt="Audit" width="800"><br>
+  <sub>Audit — Inspecciona cada llamada a herramienta con contexto completo y filtros.</sub>
 </p>
 
 <a id="install"></a>
