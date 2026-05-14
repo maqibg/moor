@@ -38,10 +38,6 @@ jobs:
           node-version: 24
           registry-url: "https://registry.npmjs.org"
 
-      - name: Resolve SEA Node runtime
-        id: sea-node
-        run: node sidecar/scripts/resolve-sea-node.mjs --target "${{ matrix.target }}"
-
       - name: Resolve release metadata
         id: release
         shell: bash
@@ -125,8 +121,6 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MOOR_SIDECAR_TARGET_TRIPLE: ${{ matrix.target }}
-          MOOR_SEA_NODE_EXEC_PATH: ${{ steps.sea-node.outputs.exec_path }}
         with:
           tagName: ${{ steps.release.outputs.tag }}
           releaseName: "Moor ${{ steps.release.outputs.tag }}"
@@ -138,9 +132,6 @@ jobs:
       - name: Collect bundle diagnostics
         if: failure()
         shell: bash
-        env:
-          TARGET: ${{ matrix.target }}
-          SEA_NODE_EXEC_PATH: ${{ steps.sea-node.outputs.exec_path }}
         run: |
           set -euo pipefail
 
@@ -148,26 +139,8 @@ jobs:
           uname -a
           node -p "JSON.stringify({execPath:process.execPath,version:process.version,platform:process.platform,arch:process.arch})"
 
-          echo "SEA Node runtime:"
-          if [[ -n "${SEA_NODE_EXEC_PATH}" && -x "${SEA_NODE_EXEC_PATH}" ]]; then
-            "${SEA_NODE_EXEC_PATH}" -p "JSON.stringify({execPath:process.execPath,version:process.version,platform:process.platform,arch:process.arch})"
-            file "${SEA_NODE_EXEC_PATH}" || true
-            lipo -info "${SEA_NODE_EXEC_PATH}" || true
-          else
-            echo "SEA Node runtime is unavailable: ${SEA_NODE_EXEC_PATH}"
-          fi
-
-          echo "Built sidecar binary:"
-          sidecar_binary="src-tauri/binaries/moor-sidecar-${TARGET}"
-          if [[ -f "${sidecar_binary}" ]]; then
-            file "${sidecar_binary}" || true
-            lipo -info "${sidecar_binary}" || true
-          else
-            echo "Missing ${sidecar_binary}"
-          fi
-
           echo "Built app binary:"
-          app_binary="src-tauri/target/${TARGET}/release/bundle/macos/Moor.app/Contents/MacOS/moor"
+          app_binary="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Moor.app/Contents/MacOS/moor"
           if [[ ! -f "${app_binary}" ]]; then
             app_binary="src-tauri/target/release/bundle/macos/Moor.app/Contents/MacOS/moor"
           fi
@@ -190,4 +163,3 @@ jobs:
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg
             src-tauri/target/release/bundle/dmg
-            src-tauri/binaries/moor-sidecar-${{ matrix.target }}

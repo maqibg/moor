@@ -6,7 +6,8 @@
   "packageManager": "pnpm@10.33.4",
   "scripts": {
     "dev": "vp dev",
-    "build": "pnpm --filter moor-sidecar build && tsc -b && vp build",
+    "build": "pnpm build:frontend",
+    "build:frontend": "tsc -b && vp build",
     "preview": "vp preview",
     "tauri": "tauri",
     "sidecar": "pnpm --filter moor-sidecar dev",

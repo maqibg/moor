@@ -1,26 +1,20 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::{
-    fs::{self, File},
-    io::Read,
-    path::PathBuf,
+    fs,
+    path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        Arc,
     },
-    thread,
-    time::Duration,
 };
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Manager, RunEvent, State,
-};
-use tauri_plugin_shell::{
-    process::{CommandChild, CommandEvent},
-    ShellExt,
+    Manager, RunEvent, State,
 };
 
 mod login_autostart;
+mod sidecar;
 
 const LEGACY_BUNDLE_IDENTIFIER: &str = "dev.moor.app";
 
@@ -32,64 +26,6 @@ struct SidecarInfo {
     api_token: String,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ReadyPayload {
-    port: u16,
-    base_url: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SettingsFile {
-    #[serde(default)]
-    general: GeneralSettingsFile,
-    #[serde(default)]
-    advanced: AdvancedSettingsFile,
-}
-
-#[derive(Debug, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct GeneralSettingsFile {
-    #[serde(default)]
-    minimize_to_tray_on_close: Option<bool>,
-    #[serde(default)]
-    show_window_on_launch: Option<bool>,
-    #[serde(default)]
-    auto_start_on_login: Option<bool>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct AdvancedSettingsFile {
-    #[serde(default = "default_port")]
-    sidecar_port: Option<u16>,
-}
-
-fn default_port() -> Option<u16> {
-    Some(9223)
-}
-
-impl Default for SettingsFile {
-    fn default() -> Self {
-        Self {
-            general: GeneralSettingsFile::default(),
-            advanced: AdvancedSettingsFile::default(),
-        }
-    }
-}
-
-fn read_settings_file(data_dir: &PathBuf) -> SettingsFile {
-    let path = data_dir.join("settings.json");
-    if !path.exists() {
-        return SettingsFile::default();
-    }
-    match fs::read_to_string(&path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-        Err(_) => SettingsFile::default(),
-    }
-}
-
 fn should_show_main_window_on_launch(
     minimize_to_tray_on_close: bool,
     show_window_on_launch: bool,
@@ -97,159 +33,35 @@ fn should_show_main_window_on_launch(
     !minimize_to_tray_on_close || show_window_on_launch
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{
-        build_sidecar_args, should_show_main_window_on_launch, sync_runtime_settings_from_file,
-        SidecarState,
-    };
-    use std::{fs, path::PathBuf, time::SystemTime};
+fn read_settings_file(data_dir: &Path) -> sidecar::services::settings::Settings {
+    sidecar::services::settings::read_settings_file(data_dir)
+}
 
-    fn temp_data_dir(test_name: &str) -> PathBuf {
-        let timestamp = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("system time is before unix epoch")
-            .as_nanos();
-        std::env::temp_dir().join(format!("moor-{test_name}-{timestamp}"))
-    }
-
-    #[test]
-    fn shows_window_for_default_settings() {
-        assert!(should_show_main_window_on_launch(true, true));
-    }
-
-    #[test]
-    fn hides_window_when_tray_mode_disables_launch_window() {
-        assert!(!should_show_main_window_on_launch(true, false));
-    }
-
-    #[test]
-    fn shows_window_when_minimize_to_tray_is_disabled() {
-        assert!(should_show_main_window_on_launch(false, false));
-    }
-
-    #[test]
-    fn updates_minimize_to_tray_runtime_state() {
-        let state = SidecarState::new("token".to_string(), PathBuf::from("."), None, true);
-
-        state.set_minimize_to_tray(false);
-
-        assert!(!state.get_minimize_to_tray());
-    }
-
-    #[test]
-    fn sync_runtime_settings_only_updates_window_runtime_state() {
-        let data_dir = temp_data_dir("runtime-settings");
-        fs::create_dir_all(&data_dir).expect("failed to create temp settings dir");
-        fs::write(
-            data_dir.join("settings.json"),
-            r#"{
-              "general": {
-                "autoStartOnLogin": true,
-                "minimizeToTrayOnClose": false
-              }
-            }"#,
-        )
-        .expect("failed to write temp settings file");
-        let state = SidecarState::new("token".to_string(), data_dir.clone(), None, true);
-
-        sync_runtime_settings_from_file(&state).expect("runtime settings sync failed");
-
-        assert!(!state.get_minimize_to_tray());
-        fs::remove_dir_all(data_dir).expect("failed to remove temp settings dir");
-    }
-
-    #[test]
-    fn sidecar_args_include_parent_pid() {
-        let args = build_sidecar_args(
-            "token".to_string(),
-            PathBuf::from("/tmp/moor-data"),
-            Some(PathBuf::from("/tmp/moor-legacy")),
-            9224,
-            12345,
-        );
-
-        assert!(args
-            .windows(2)
-            .any(|pair| pair == ["--parent-pid", "12345"]));
-    }
+fn generate_api_token() -> Result<String, String> {
+    let mut bytes = [0u8; 32];
+    getrandom::getrandom(&mut bytes).map_err(|e| format!("Failed to generate API token: {e}"))?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 #[derive(Clone)]
-struct SidecarState {
-    inner: Arc<SidecarInner>,
+struct MoorState {
+    inner: Arc<MoorInner>,
 }
 
-struct SidecarInner {
-    info: Mutex<Option<SidecarInfo>>,
-    child: Mutex<Option<CommandChild>>,
+struct MoorInner {
+    port: u16,
     api_token: String,
     data_dir: PathBuf,
-    legacy_data_dir: Option<PathBuf>,
-    restart_count: AtomicUsize,
-    shutting_down: AtomicBool,
-    terminated_child_pid: Mutex<Option<u32>>,
     minimize_to_tray: AtomicBool,
 }
 
-impl SidecarState {
-    fn new(
-        api_token: String,
-        data_dir: PathBuf,
-        legacy_data_dir: Option<PathBuf>,
-        minimize_to_tray: bool,
-    ) -> Self {
-        Self {
-            inner: Arc::new(SidecarInner {
-                info: Mutex::new(None),
-                child: Mutex::new(None),
-                api_token,
-                data_dir,
-                legacy_data_dir,
-                restart_count: AtomicUsize::new(0),
-                shutting_down: AtomicBool::new(false),
-                terminated_child_pid: Mutex::new(None),
-                minimize_to_tray: AtomicBool::new(minimize_to_tray),
-            }),
+impl MoorState {
+    fn info(&self) -> SidecarInfo {
+        SidecarInfo {
+            port: self.inner.port,
+            base_url: format!("http://127.0.0.1:{}", self.inner.port),
+            api_token: self.inner.api_token.clone(),
         }
-    }
-
-    fn info(&self) -> Option<SidecarInfo> {
-        self.inner.info.lock().ok().and_then(|info| info.clone())
-    }
-
-    fn set_info(&self, info: Option<SidecarInfo>) {
-        if let Ok(mut guard) = self.inner.info.lock() {
-            *guard = info;
-        }
-    }
-
-    fn set_child(&self, child: CommandChild) {
-        if let Ok(mut terminated_pid) = self.inner.terminated_child_pid.lock() {
-            *terminated_pid = None;
-        }
-        if let Ok(mut guard) = self.inner.child.lock() {
-            *guard = Some(child);
-        }
-    }
-
-    fn mark_child_terminated(&self, pid: u32) {
-        if let Ok(mut terminated_pid) = self.inner.terminated_child_pid.lock() {
-            *terminated_pid = Some(pid);
-        }
-    }
-
-    fn is_child_terminated(&self, pid: u32) -> bool {
-        self.inner
-            .terminated_child_pid
-            .lock()
-            .map(|terminated_pid| *terminated_pid == Some(pid))
-            .unwrap_or(false)
-    }
-
-    fn should_restart(&self) -> bool {
-        !self.inner.shutting_down.load(Ordering::SeqCst)
-            && self.inner.restart_count.fetch_add(1, Ordering::SeqCst) < 3
     }
 
     fn get_minimize_to_tray(&self) -> bool {
@@ -259,52 +71,17 @@ impl SidecarState {
     fn set_minimize_to_tray(&self, value: bool) {
         self.inner.minimize_to_tray.store(value, Ordering::SeqCst);
     }
-
-    fn stop(&self) {
-        self.inner.shutting_down.store(true, Ordering::SeqCst);
-        if let Ok(mut guard) = self.inner.child.lock() {
-            if let Some(child) = guard.take() {
-                #[cfg(unix)]
-                {
-                    let pid = child.pid();
-                    let _ = std::process::Command::new("kill")
-                        .args(["-s", "TERM", &pid.to_string()])
-                        .status();
-                    let start = std::time::Instant::now();
-                    while start.elapsed() < Duration::from_secs(3) {
-                        if self.is_child_terminated(pid) {
-                            break;
-                        }
-                        std::thread::sleep(Duration::from_millis(200));
-                    }
-                    if self.is_child_terminated(pid) {
-                        return;
-                    }
-                }
-                let _ = child.kill();
-            }
-        }
-    }
 }
 
 #[tauri::command]
-fn get_sidecar_info(state: State<'_, SidecarState>) -> Result<SidecarInfo, String> {
-    for _ in 0..50 {
-        if let Some(info) = state.info() {
-            return Ok(info);
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-    Err("Moor sidecar is not ready".to_string())
+fn get_sidecar_info(state: State<'_, MoorState>) -> Result<SidecarInfo, String> {
+    Ok(state.info())
 }
 
-fn apply_autostart_setting(app: &AppHandle, enabled: bool) -> Result<(), String> {
+fn apply_autostart_setting(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
-
     login_autostart::validate_login_autostart_enable(enabled)?;
-
     let should_reload_login_agent = enabled && login_autostart::login_agent_needs_reload(app);
-
     let autolaunch = app.autolaunch();
     if enabled {
         autolaunch.enable().map_err(|err| err.to_string())?;
@@ -317,158 +94,63 @@ fn apply_autostart_setting(app: &AppHandle, enabled: bool) -> Result<(), String>
     }
 }
 
-fn sync_runtime_settings_from_file(state: &SidecarState) -> Result<(), String> {
-    let settings = read_settings_file(&state.inner.data_dir);
-    let minimize_to_tray = settings.general.minimize_to_tray_on_close.unwrap_or(true);
-
+fn sync_runtime_settings_from_file(state: &MoorState, data_dir: &Path) -> Result<(), String> {
+    let settings = read_settings_file(data_dir);
+    let minimize_to_tray = settings.general.minimize_to_tray_on_close;
     state.set_minimize_to_tray(minimize_to_tray);
     Ok(())
 }
 
 #[tauri::command]
-fn sync_runtime_settings(state: State<'_, SidecarState>) -> Result<(), String> {
-    sync_runtime_settings_from_file(&state)
+fn sync_runtime_settings(state: State<'_, MoorState>) -> Result<(), String> {
+    sync_runtime_settings_from_file(&state, &state.inner.data_dir)
 }
 
 #[tauri::command]
-fn apply_login_autostart_setting(app: AppHandle, enabled: bool) -> Result<(), String> {
+fn apply_login_autostart_setting(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     apply_autostart_setting(&app, enabled)
 }
 
 #[tauri::command]
-fn restart_sidecar(app: AppHandle, state: State<'_, SidecarState>) -> Result<(), String> {
-    let state = (*state).clone();
-    state.stop();
-    state.inner.shutting_down.store(false, Ordering::SeqCst);
-    state.inner.restart_count.store(0, Ordering::SeqCst);
-    thread::sleep(Duration::from_millis(500));
-
-    // Re-read settings for potentially updated port
-    let settings = read_settings_file(&state.inner.data_dir);
-    let port = settings.advanced.sidecar_port.unwrap_or(9223);
-    spawn_sidecar_with_port(&app, state, port)
+fn restart_sidecar() -> Result<(), String> {
+    Err("The Rust sidecar runs in-process. Restart Moor to apply runtime port changes.".to_string())
 }
 
-fn generate_api_token() -> String {
-    let mut bytes = [0u8; 32];
-    if File::open("/dev/urandom")
-        .and_then(|mut file| file.read_exact(&mut bytes))
-        .is_err()
-    {
-        let fallback = format!("{:?}{:?}", std::time::SystemTime::now(), std::process::id());
-        let fallback_bytes = fallback.as_bytes();
-        for (index, byte) in bytes.iter_mut().enumerate() {
-            *byte = fallback_bytes[index % fallback_bytes.len()];
+fn find_available_port(host: &str, start: u16, max: u16) -> Result<u16, String> {
+    for port in start..=max {
+        if std::net::TcpListener::bind((host, port)).is_ok() {
+            return Ok(port);
         }
     }
-
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    Err(format!("No available port in range {start}-{max}"))
 }
 
-fn parse_ready_line(line: &str, api_token: &str) -> Option<SidecarInfo> {
-    let payload = line.trim().strip_prefix("MOOR_READY ")?;
-    let ready = serde_json::from_str::<ReadyPayload>(payload).ok()?;
-    Some(SidecarInfo {
-        port: ready.port,
-        base_url: ready.base_url,
-        api_token: api_token.to_string(),
-    })
-}
+fn migrate_legacy_data_dir(data_dir: &PathBuf, legacy_data_dir: Option<&PathBuf>) {
+    let Some(legacy) = legacy_data_dir else {
+        return;
+    };
+    if data_dir == legacy {
+        return;
+    };
+    let _ = fs::create_dir_all(data_dir);
 
-fn build_sidecar_args(
-    api_token: String,
-    data_dir: PathBuf,
-    legacy_data_dir: Option<PathBuf>,
-    port: u16,
-    parent_pid: u32,
-) -> Vec<String> {
-    let mut args = vec![
-        "--host".to_string(),
-        "127.0.0.1".to_string(),
-        "--port".to_string(),
-        port.to_string(),
-        "--api-token".to_string(),
-        api_token,
-        "--data-dir".to_string(),
-        data_dir.to_string_lossy().to_string(),
-        "--parent-pid".to_string(),
-        parent_pid.to_string(),
-    ];
-    if let Some(legacy_data_dir) = legacy_data_dir {
-        args.push("--legacy-data-dir".to_string());
-        args.push(legacy_data_dir.to_string_lossy().to_string());
+    let current_settings = data_dir.join("settings.json");
+    let legacy_settings = legacy.join("settings.json");
+    if !current_settings.exists() && legacy_settings.exists() {
+        let _ = fs::copy(&legacy_settings, current_settings);
     }
-    args
-}
 
-fn spawn_sidecar_with_port(app: &AppHandle, state: SidecarState, port: u16) -> Result<(), String> {
-    fs::create_dir_all(&state.inner.data_dir).map_err(|err| err.to_string())?;
-    state.set_info(None);
-
-    let args = build_sidecar_args(
-        state.inner.api_token.clone(),
-        state.inner.data_dir.clone(),
-        state.inner.legacy_data_dir.clone(),
-        port,
-        std::process::id(),
-    );
-
-    let (mut rx, child) = app
-        .shell()
-        .sidecar("moor-sidecar")
-        .map_err(|err| err.to_string())?
-        .args(args)
-        .spawn()
-        .map_err(|err| err.to_string())?;
-    let child_pid = child.pid();
-    state.set_child(child);
-
-    let app_handle = app.clone();
-    let state_for_events = state.clone();
-    tauri::async_runtime::spawn(async move {
-        while let Some(event) = rx.recv().await {
-            match event {
-                CommandEvent::Stdout(bytes) => {
-                    if let Ok(line) = String::from_utf8(bytes) {
-                        if let Some(info) =
-                            parse_ready_line(&line, &state_for_events.inner.api_token)
-                        {
-                            state_for_events.set_info(Some(info));
-                        }
-                    }
-                }
-                CommandEvent::Stderr(bytes) => {
-                    if let Ok(line) = String::from_utf8(bytes) {
-                        eprint!("{line}");
-                    }
-                }
-                CommandEvent::Error(error) => eprintln!("Moor sidecar error: {error}"),
-                CommandEvent::Terminated(_) => {
-                    state_for_events.mark_child_terminated(child_pid);
-                    state_for_events.set_info(None);
-                    if state_for_events.should_restart() {
-                        let app_for_restart = app_handle.clone();
-                        let state_for_restart = state_for_events.clone();
-                        tauri::async_runtime::spawn(async move {
-                            thread::sleep(Duration::from_secs(1));
-                            // Re-read settings for potentially updated port
-                            let settings = read_settings_file(&state_for_restart.inner.data_dir);
-                            let port = settings.advanced.sidecar_port.unwrap_or(9223);
-                            if let Err(error) =
-                                spawn_sidecar_with_port(&app_for_restart, state_for_restart, port)
-                            {
-                                eprintln!("Failed to restart Moor sidecar: {error}");
-                            }
-                        });
-                    }
-                    break;
-                }
-                _ => {}
-            }
+    let current_db = data_dir.join("moor.db");
+    let legacy_db = legacy.join("moor.db");
+    if current_db.exists() || !legacy_db.exists() {
+        return;
+    };
+    for name in &["moor.db", "moor.db-wal", "moor.db-shm"] {
+        let src = legacy.join(name);
+        if src.exists() {
+            let _ = fs::copy(&src, data_dir.join(name));
         }
-    });
-
-    Ok(())
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -496,32 +178,100 @@ pub fn run() {
                 .ok()
                 .map(|dir| dir.join(LEGACY_BUNDLE_IDENTIFIER));
 
-            // Read settings before spawning sidecar
+            // Legacy data migration
+            migrate_legacy_data_dir(&data_dir, legacy_data_dir.as_ref());
+
+            // Read settings after migration so the runtime and HTTP API share settings.json.
             let settings = read_settings_file(&data_dir);
-            let port = settings.advanced.sidecar_port.unwrap_or(9223);
-            let minimize_to_tray = settings.general.minimize_to_tray_on_close.unwrap_or(true);
-            let show_window_on_launch = settings.general.show_window_on_launch.unwrap_or(true);
+            sidecar::services::settings::write_settings_file(&data_dir, &settings)
+                .map_err(|e| format!("Failed to initialize settings: {e}"))?;
+            let configured_port = settings.advanced.sidecar_port;
+            let minimize_to_tray = settings.general.minimize_to_tray_on_close;
+            let show_window_on_launch = settings.general.show_window_on_launch;
             let should_show_window =
                 should_show_main_window_on_launch(minimize_to_tray, show_window_on_launch);
-            let auto_start = settings.general.auto_start_on_login.unwrap_or(false);
+            let auto_start = settings.general.auto_start_on_login;
 
-            let sidecar_state = SidecarState::new(
-                generate_api_token(),
-                data_dir,
-                legacy_data_dir,
-                minimize_to_tray,
-            );
-            app.manage(sidecar_state.clone());
+            // Init database
+            fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+            let db_path = data_dir.join("moor.db");
+            let db = sidecar::db::Database::open(&db_path)
+                .map_err(|e| format!("Failed to open database: {e}"))?;
+            db.run_migrations()
+                .map_err(|e| format!("Failed to run migrations: {e}"))?;
+
+            // Seed default profile
+            let profile_repo = sidecar::db::profile_repo::ProfileRepository::new(&db);
+            profile_repo
+                .seed_default()
+                .map_err(|e| format!("Failed to seed default profile: {e}"))?;
+
+            // Reset running statuses (crash recovery)
+            let server_repo = sidecar::db::server_repo::ServerRepository::new(&db);
+            server_repo
+                .reset_running_statuses()
+                .map_err(|e| format!("Failed to reset statuses: {e}"))?;
+
+            // Find available port
+            let api_token = generate_api_token()?;
+            let max_port = configured_port.saturating_add(10);
+            let port = find_available_port("127.0.0.1", configured_port, max_port)
+                .map_err(|e| format!("Failed to find available port: {e}"))?;
+
+            // Write port file for external tool discovery
+            let port_file = data_dir.join("port");
+            let _ = fs::write(&port_file, port.to_string());
+            let pid_file = data_dir.join("pid");
+            let _ = fs::write(&pid_file, std::process::id().to_string());
+
+            // Build app state and start in-process HTTP server
+            let db_arc = Arc::new(db);
+            let event_bus = Arc::new(sidecar::services::event_bus::EventBus::new(256));
+            let server_manager = Arc::new(sidecar::services::server_manager::ServerManager::new(
+                db_arc.clone(),
+                event_bus.clone(),
+            ));
+            let app_state = Arc::new(sidecar::http::AppState {
+                db: db_arc,
+                api_token: api_token.clone(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+                port,
+                data_dir: data_dir.clone(),
+                event_bus: event_bus.clone(),
+                server_manager: server_manager.clone(),
+            });
+
+            let state = MoorState {
+                inner: Arc::new(MoorInner {
+                    port,
+                    api_token,
+                    data_dir: data_dir.clone(),
+                    minimize_to_tray: AtomicBool::new(minimize_to_tray),
+                }),
+            };
+            app.manage(state);
+
+            // Spawn axum server
+            let host = "127.0.0.1".to_string();
+            let sm = server_manager.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = sidecar::http::start_server(app_state, &host, port).await {
+                    eprintln!("HTTP server error: {e}");
+                }
+            });
+
+            // Load servers and start auto-start servers
+            tauri::async_runtime::spawn(async move {
+                sm.load_from_db().await;
+                sm.start_auto_start_servers().await;
+            });
 
             let _ = apply_autostart_setting(app.handle(), auto_start);
 
-            spawn_sidecar_with_port(app.handle(), sidecar_state, port)
-                .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
-
+            // Tray menu
             let quit = MenuItem::with_id(app, "quit", "Quit Moor", true, None::<&str>)?;
             let show = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
-
             let _tray = TrayIconBuilder::new()
                 .icon(tauri::include_image!("./icons/tray-template.png"))
                 .icon_as_template(true)
@@ -555,20 +305,99 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app_handle, event| match event {
             RunEvent::Exit | RunEvent::ExitRequested { .. } => {
-                app_handle.state::<SidecarState>().stop();
+                // Server will be dropped automatically when the process exits
             }
-            RunEvent::WindowEvent { event, label, .. } if label == "main" => {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    let state = app_handle.state::<SidecarState>();
-                    if state.get_minimize_to_tray() {
-                        api.prevent_close();
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let _ = window.hide();
-                        }
+            RunEvent::WindowEvent {
+                event: tauri::WindowEvent::CloseRequested { api, .. },
+                label,
+                ..
+            } if label == "main" => {
+                let state = app_handle.state::<MoorState>();
+                if state.get_minimize_to_tray() {
+                    api.prevent_close();
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let _ = window.hide();
                     }
-                    // If minimize_to_tray is false, the window closes normally (app exits)
                 }
             }
             _ => {}
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{fs, time::SystemTime};
+
+    fn temp_data_dir(test_name: &str) -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("system time is before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("moor-{test_name}-{timestamp}"))
+    }
+
+    #[test]
+    fn shows_window_for_default_settings() {
+        assert!(should_show_main_window_on_launch(true, true));
+    }
+
+    #[test]
+    fn hides_window_when_tray_mode_disables_launch_window() {
+        assert!(!should_show_main_window_on_launch(true, false));
+    }
+
+    #[test]
+    fn shows_window_when_minimize_to_tray_is_disabled() {
+        assert!(should_show_main_window_on_launch(false, false));
+    }
+
+    #[test]
+    fn updates_minimize_to_tray_runtime_state() {
+        let state = MoorState {
+            inner: Arc::new(MoorInner {
+                port: 9223,
+                api_token: "token".to_string(),
+                data_dir: PathBuf::from("."),
+                minimize_to_tray: AtomicBool::new(true),
+            }),
+        };
+        state.set_minimize_to_tray(false);
+        assert!(!state.get_minimize_to_tray());
+    }
+
+    #[test]
+    fn sync_runtime_settings_only_updates_window_runtime_state() {
+        let data_dir = temp_data_dir("runtime-settings");
+        fs::create_dir_all(&data_dir).expect("failed to create temp settings dir");
+        fs::write(
+            data_dir.join("settings.json"),
+            r#"{
+              "general": {
+                "autoStartOnLogin": true,
+                "minimizeToTrayOnClose": false
+              }
+            }"#,
+        )
+        .expect("failed to write temp settings file");
+
+        let state = MoorState {
+            inner: Arc::new(MoorInner {
+                port: 9223,
+                api_token: "token".to_string(),
+                data_dir: data_dir.clone(),
+                minimize_to_tray: AtomicBool::new(true),
+            }),
+        };
+
+        sync_runtime_settings_from_file(&state, &data_dir).expect("runtime settings sync failed");
+        assert!(!state.get_minimize_to_tray());
+        fs::remove_dir_all(data_dir).expect("failed to remove temp settings dir");
+    }
+
+    #[test]
+    fn finds_available_port() {
+        let port = find_available_port("127.0.0.1", 19223, 19233).unwrap();
+        assert!((19223..=19233).contains(&port));
+    }
 }
