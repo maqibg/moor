@@ -7,7 +7,7 @@ use crate::sidecar::mcp::transport::stdio_client::{
     build_stdio_environment, find_executable_on_path, StdioClientTransport,
 };
 use crate::sidecar::services::event_bus::EventBus;
-use crate::sidecar::services::tool_catalog::ToolCatalogService;
+use crate::sidecar::services::tool_catalog::{ToolCatalogService, ToolDetail};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -115,15 +115,26 @@ impl ServerManager {
     }
 
     pub async fn start_server(&self, id: &str) -> Result<(), String> {
-        let server = self.servers.lock().await.get(id).cloned();
-        let Some(server) = server else {
-            return Err(format!("Server {id} not found"));
+        let should_wait = {
+            let mut servers = self.servers.lock().await;
+            let Some(server) = servers.get_mut(id) else {
+                return Err(format!("Server {id} not found"));
+            };
+            match server.status.as_str() {
+                "running" => return Ok(()),
+                "starting" => true,
+                _ => {
+                    server.status = "starting".to_string();
+                    false
+                }
+            }
         };
-        if server.status == "running" {
-            return Ok(());
+
+        if should_wait {
+            return self.wait_for_start(id).await;
         }
 
-        self.set_server_status(id, "starting", None).await;
+        self.persist_server_status(id, "starting", None);
 
         let config = self.get_stored_config(id)?;
 
@@ -152,6 +163,32 @@ impl ServerManager {
                 Err(e)
             }
         }
+    }
+
+    async fn wait_for_start(&self, id: &str) -> Result<(), String> {
+        for _ in 0..300 {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let server = self.servers.lock().await.get(id).cloned();
+            match server.as_ref().map(|server| server.status.as_str()) {
+                Some("running") => return Ok(()),
+                Some("error") => {
+                    let repo = ServerRepository::new(&self.db);
+                    let message = repo
+                        .find_by_id(id)
+                        .ok()
+                        .flatten()
+                        .and_then(|server| server.error_message)
+                        .unwrap_or_else(|| {
+                            "Server failed to start. Check logs for details.".to_string()
+                        });
+                    return Err(message);
+                }
+                Some("starting") => {}
+                Some(_) => return Ok(()),
+                None => return Err(format!("Server {id} not found")),
+            }
+        }
+        Err(format!("Timed out while waiting for server {id} to start"))
     }
 
     async fn start_stdio(
@@ -282,8 +319,10 @@ impl ServerManager {
             .collect();
         drop(servers);
 
-        for id in to_start {
-            let _ = self.start_server(&id).await;
+        for result in
+            futures::future::join_all(to_start.iter().map(|id| self.start_server(id))).await
+        {
+            let _ = result;
         }
     }
 
@@ -335,6 +374,15 @@ impl ServerManager {
         ToolCatalogService::get_tool_catalog(&self.db, profile_id, Some(&callable_ids))
     }
 
+    pub async fn get_tool_details(
+        &self,
+        server_id: &str,
+        profile_id: Option<&str>,
+    ) -> Vec<ToolDetail> {
+        let callable_ids = self.get_callable_server_ids().await;
+        ToolCatalogService::get_tool_details(&self.db, server_id, profile_id, Some(&callable_ids))
+    }
+
     async fn get_callable_server_ids(&self) -> HashSet<String> {
         let sessions = self.sessions.lock().await;
         let servers = self.servers.lock().await;
@@ -364,6 +412,10 @@ impl ServerManager {
                 server.status = status.to_string();
             }
         }
+        self.persist_server_status(id, status, error_message);
+    }
+
+    fn persist_server_status(&self, id: &str, status: &str, error_message: Option<&str>) {
         let repo = ServerRepository::new(&self.db);
         let _ = repo.update_status(id, status, error_message);
         self.event_bus.emit(
@@ -457,4 +509,195 @@ fn extract_missing_command(err: &str) -> Option<String> {
     let re = regex_lite::Regex::new(r#"Command "([^"]+)" was not found"#).ok()?;
     let caps = re.captures(err)?;
     Some(caps[1].to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sidecar::db::profile_repo::ProfileRepository;
+    use std::time::SystemTime;
+
+    fn temp_data_dir(test_name: &str) -> std::path::PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("system time is before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("moor-server-manager-{test_name}-{timestamp}"))
+    }
+
+    fn write_delayed_mcp_server(
+        data_dir: &std::path::Path,
+        marker: &std::path::Path,
+        script_name: &str,
+        server_name: &str,
+        response_delay_ms: u64,
+    ) -> String {
+        let script = data_dir.join(script_name);
+        std::fs::write(
+            &script,
+            format!(
+                r#"
+import fs from "node:fs";
+fs.appendFileSync({marker:?}, {server_name:?} + "\n");
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {{
+  buffer += chunk;
+  const lines = buffer.split("\n");
+  buffer = lines.pop() ?? "";
+  for (const line of lines) {{
+    if (!line.trim()) continue;
+    const request = JSON.parse(line);
+    if (request.id === undefined) continue;
+    setTimeout(() => {{
+      let result = {{}};
+      if (request.method === "initialize") {{
+        result = {{ protocolVersion: "2024-11-05", capabilities: {{ tools: {{}} }}, serverInfo: {{ name: "slow", version: "1.0.0" }} }};
+      }} else if (request.method === "tools/list") {{
+        result = {{ tools: [{{ name: "echo", description: "Echo", inputSchema: {{ type: "object" }} }}] }};
+      }}
+      process.stdout.write(JSON.stringify({{ jsonrpc: "2.0", id: request.id, result }}) + "\n");
+    }}, {response_delay_ms});
+  }}
+}});
+"#,
+                marker = marker.to_string_lossy(),
+                server_name = server_name,
+                response_delay_ms = response_delay_ms
+            ),
+        )
+        .expect("failed to write delayed MCP server");
+        script.to_string_lossy().to_string()
+    }
+
+    fn write_slow_mcp_server(data_dir: &std::path::Path, marker: &std::path::Path) -> String {
+        write_delayed_mcp_server(data_dir, marker, "slow-mcp-server.mjs", "started", 100)
+    }
+
+    fn insert_stdio_server(
+        db: &Database,
+        id: &str,
+        name: &str,
+        script: String,
+        auto_start: bool,
+        sort_order: i64,
+    ) {
+        let now = chrono::Utc::now().to_rfc3339();
+        let args = serde_json::to_string(&vec![script]).expect("failed to serialize args");
+        ServerRepository::new(db)
+            .insert(
+                id,
+                name,
+                "stdio",
+                Some("node"),
+                Some(&args),
+                None,
+                None,
+                None,
+                None,
+                auto_start,
+                sort_order,
+                &now,
+                &now,
+            )
+            .expect("failed to insert server");
+    }
+
+    #[tokio::test]
+    async fn concurrent_starts_share_one_start_attempt() {
+        let data_dir = temp_data_dir("dedupe-start");
+        std::fs::create_dir_all(&data_dir).expect("failed to create temp dir");
+        let marker = data_dir.join("starts.log");
+        let script = write_slow_mcp_server(&data_dir, &marker);
+
+        let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
+        db.run_migrations().expect("failed to run migrations");
+        let profile_repo = ProfileRepository::new(&db);
+        profile_repo.seed_default().expect("failed to seed profile");
+
+        let server_id = uuid::Uuid::new_v4().to_string();
+        insert_stdio_server(&db, &server_id, "slow", script, false, 0);
+        profile_repo
+            .assign_to_active_profile(std::slice::from_ref(&server_id))
+            .expect("failed to assign server");
+
+        let event_bus = Arc::new(EventBus::new(16));
+        let manager = Arc::new(ServerManager::new(db, event_bus));
+        manager.load_from_db().await;
+
+        let left = {
+            let manager = manager.clone();
+            let server_id = server_id.clone();
+            tokio::spawn(async move { manager.start_server(&server_id).await })
+        };
+        let right = {
+            let manager = manager.clone();
+            let server_id = server_id.clone();
+            tokio::spawn(async move { manager.start_server(&server_id).await })
+        };
+        let (left, right) = tokio::join!(left, right);
+        left.expect("left task failed").expect("left start failed");
+        right
+            .expect("right task failed")
+            .expect("right start failed");
+
+        let starts = std::fs::read_to_string(&marker).expect("marker should exist");
+        assert_eq!(starts.lines().count(), 1);
+
+        manager.stop_server(&server_id).await.expect("stop failed");
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn auto_start_servers_begin_concurrently() {
+        let data_dir = temp_data_dir("auto-start-concurrent");
+        std::fs::create_dir_all(&data_dir).expect("failed to create temp dir");
+        let marker = data_dir.join("starts.log");
+        let slow_script =
+            write_delayed_mcp_server(&data_dir, &marker, "slow-auto-start.mjs", "slow", 400);
+        let fast_script =
+            write_delayed_mcp_server(&data_dir, &marker, "fast-auto-start.mjs", "fast", 0);
+
+        let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
+        db.run_migrations().expect("failed to run migrations");
+        let profile_repo = ProfileRepository::new(&db);
+        profile_repo.seed_default().expect("failed to seed profile");
+
+        let slow_id = uuid::Uuid::new_v4().to_string();
+        let fast_id = uuid::Uuid::new_v4().to_string();
+        insert_stdio_server(&db, &slow_id, "slow", slow_script, true, 0);
+        insert_stdio_server(&db, &fast_id, "fast", fast_script, true, 1);
+        profile_repo
+            .assign_to_active_profile(&[slow_id.clone(), fast_id.clone()])
+            .expect("failed to assign servers");
+
+        let event_bus = Arc::new(EventBus::new(16));
+        let manager = Arc::new(ServerManager::new(db, event_bus));
+        manager.load_from_db().await;
+
+        let auto_start = {
+            let manager = manager.clone();
+            tokio::spawn(async move { manager.start_auto_start_servers().await })
+        };
+
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        let starts = std::fs::read_to_string(&marker).unwrap_or_default();
+        let fast_started_before_slow_completed = starts.lines().any(|line| line == "fast");
+
+        auto_start.await.expect("auto-start task failed");
+        manager
+            .stop_server(&slow_id)
+            .await
+            .expect("stop slow failed");
+        manager
+            .stop_server(&fast_id)
+            .await
+            .expect("stop fast failed");
+        let _ = std::fs::remove_dir_all(data_dir);
+
+        assert!(
+            fast_started_before_slow_completed,
+            "fast auto-start server should begin before slow server finishes; starts: {starts:?}"
+        );
+    }
 }

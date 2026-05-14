@@ -146,6 +146,7 @@ async fn snippets_handler(
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ConvertBody {
     source: Option<String>,
     target_client: Option<String>,
@@ -254,5 +255,24 @@ mod tests {
             .unwrap_or("")
             .contains("127.0.0.1:19444")));
         let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn convert_body_accepts_frontend_camel_case_fields() {
+        let body: ConvertBody = serde_json::from_value(serde_json::json!({
+            "source": "paste",
+            "targetClient": "claude-code",
+            "sourceClient": "cursor",
+            "serverIds": ["server-a"],
+            "content": "{}"
+        }))
+        .expect("frontend convert payload should deserialize");
+
+        assert_eq!(body.target_client.as_deref(), Some("claude-code"));
+        assert_eq!(body.source_client.as_deref(), Some("cursor"));
+        assert_eq!(
+            body.server_ids.as_deref(),
+            Some(&["server-a".to_string()][..])
+        );
     }
 }

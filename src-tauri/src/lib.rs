@@ -37,6 +37,12 @@ fn read_settings_file(data_dir: &Path) -> sidecar::services::settings::Settings 
     sidecar::services::settings::read_settings_file(data_dir)
 }
 
+fn should_start_auto_start_servers_on_launch(
+    settings: &sidecar::services::settings::Settings,
+) -> bool {
+    settings.general.auto_start_servers_on_launch
+}
+
 fn generate_api_token() -> Result<String, String> {
     let mut bytes = [0u8; 32];
     getrandom::getrandom(&mut bytes).map_err(|e| format!("Failed to generate API token: {e}"))?;
@@ -261,9 +267,12 @@ pub fn run() {
             });
 
             // Load servers and start auto-start servers
+            let start_auto_start_servers = should_start_auto_start_servers_on_launch(&settings);
             tauri::async_runtime::spawn(async move {
                 sm.load_from_db().await;
-                sm.start_auto_start_servers().await;
+                if start_auto_start_servers {
+                    sm.start_auto_start_servers().await;
+                }
             });
 
             let _ = apply_autostart_setting(app.handle(), auto_start);
@@ -393,6 +402,17 @@ mod tests {
         sync_runtime_settings_from_file(&state, &data_dir).expect("runtime settings sync failed");
         assert!(!state.get_minimize_to_tray());
         fs::remove_dir_all(data_dir).expect("failed to remove temp settings dir");
+    }
+
+    #[test]
+    fn server_auto_start_respects_global_launch_setting() {
+        let mut settings = sidecar::services::settings::default_settings();
+
+        settings.general.auto_start_servers_on_launch = false;
+        assert!(!should_start_auto_start_servers_on_launch(&settings));
+
+        settings.general.auto_start_servers_on_launch = true;
+        assert!(should_start_auto_start_servers_on_launch(&settings));
     }
 
     #[test]

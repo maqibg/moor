@@ -17,7 +17,6 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct LogQuery {
     server_id: Option<String>,
     tool_name: Option<String>,
@@ -55,4 +54,131 @@ async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ApiErr
 
 fn api_error(_code: &str, message: &str) -> ApiErrorResponse {
     internal_error(message.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sidecar::db::audit_log_repo::AuditLogRepository;
+    use crate::sidecar::db::server_repo::ServerRepository;
+    use crate::sidecar::db::Database;
+    use crate::sidecar::services::event_bus::EventBus;
+    use crate::sidecar::services::server_manager::ServerManager;
+    use axum::body::{to_bytes, Body};
+    use std::sync::Arc;
+    use std::time::SystemTime;
+    use tower::ServiceExt;
+
+    fn temp_data_dir(test_name: &str) -> std::path::PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("system time is before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("moor-logs-route-{test_name}-{timestamp}"))
+    }
+
+    fn test_state(data_dir: std::path::PathBuf) -> Arc<AppState> {
+        std::fs::create_dir_all(&data_dir).expect("failed to create temp data dir");
+        let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
+        db.run_migrations().expect("failed to run migrations");
+        let event_bus = Arc::new(EventBus::new(16));
+        Arc::new(AppState {
+            db: db.clone(),
+            api_token: "test-token".to_string(),
+            version: "test".to_string(),
+            port: 19323,
+            data_dir,
+            event_bus: event_bus.clone(),
+            server_manager: Arc::new(ServerManager::new(db, event_bus)),
+        })
+    }
+
+    fn insert_server(db: &Database, id: &str, name: &str) {
+        let now = chrono::Utc::now().to_rfc3339();
+        ServerRepository::new(db)
+            .insert(
+                id,
+                name,
+                "stdio",
+                Some("node"),
+                Some("[]"),
+                None,
+                None,
+                None,
+                None,
+                false,
+                0,
+                &now,
+                &now,
+            )
+            .expect("failed to insert server");
+    }
+
+    #[tokio::test]
+    async fn stats_handles_empty_audit_log_table() {
+        let data_dir = temp_data_dir("empty-stats");
+        let state = test_state(data_dir.clone());
+
+        let Json(value) = stats(State(state)).await.expect("stats should succeed");
+
+        assert_eq!(value["totalCalls"], 0);
+        assert_eq!(value["errorCalls"], 0);
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn list_accepts_snake_case_frontend_filters() {
+        let data_dir = temp_data_dir("snake-case-filters");
+        let state = test_state(data_dir.clone());
+        insert_server(&state.db, "server-a", "Alpha");
+        insert_server(&state.db, "server-b", "Beta");
+        let repo = AuditLogRepository::new(&state.db);
+        repo.insert(
+            "log-a",
+            "2026-01-01T00:00:00Z",
+            None,
+            Some("server-a"),
+            "search",
+            None,
+            None,
+            None,
+            10,
+            None,
+        )
+        .expect("failed to insert first log");
+        repo.insert(
+            "log-b",
+            "2026-01-01T00:00:01Z",
+            None,
+            Some("server-b"),
+            "search",
+            None,
+            None,
+            None,
+            10,
+            None,
+        )
+        .expect("failed to insert second log");
+
+        let response = router()
+            .with_state(state)
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/logs?server_id=server-a")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("route should respond");
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .expect("response body should read");
+        let logs: serde_json::Value =
+            serde_json::from_slice(&body).expect("response should be json");
+
+        assert_eq!(logs.as_array().expect("logs should be array").len(), 1);
+        assert_eq!(logs[0]["serverId"], "server-a");
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
 }

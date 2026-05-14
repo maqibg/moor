@@ -133,7 +133,7 @@ impl<'a> AuditLogRepository<'a> {
 
     pub fn get_stats(&self) -> Result<LogStats, String> {
         let summary = self.db.query_one(
-            "SELECT COUNT(*) as total_calls, SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) as error_calls, AVG(duration_ms) as avg_duration_ms FROM audit_logs",
+            "SELECT COUNT(*) as total_calls, COALESCE(SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END), 0) as error_calls, AVG(duration_ms) as avg_duration_ms FROM audit_logs",
             &[],
             |row| {
                 Ok((

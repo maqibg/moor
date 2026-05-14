@@ -30,20 +30,18 @@ async fn update_settings(
         settings_store::update_settings_file(&state.data_dir, body).map_err(validation_error)?;
     let settings_value = serde_json::to_value(&settings).unwrap_or_else(|_| json!({}));
 
-    state.event_bus.emit(
-        "settings:changed",
-        serde_json::json!({ "type": "settings:changed", "data": &settings_value }),
-    );
+    state
+        .event_bus
+        .emit("settings:changed", settings_value.clone());
     Ok(Json(settings_value))
 }
 
 async fn reset_settings(State(state): State<Arc<AppState>>) -> ApiResult<Value> {
     let defaults = settings_store::reset_settings_file(&state.data_dir).map_err(internal_error)?;
     let defaults_value = serde_json::to_value(&defaults).unwrap_or_else(|_| json!({}));
-    state.event_bus.emit(
-        "settings:changed",
-        serde_json::json!({ "type": "settings:changed", "data": &defaults_value }),
-    );
+    state
+        .event_bus
+        .emit("settings:changed", defaults_value.clone());
     Ok(Json(defaults_value))
 }
 
@@ -111,6 +109,31 @@ mod tests {
                 .sidecar_port,
             9223
         );
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn settings_changed_event_payload_is_settings_object() {
+        let data_dir = temp_data_dir("event-payload");
+        let state = test_state(data_dir.clone());
+        let mut events = state.event_bus.subscribe();
+
+        let Json(value) = update_settings(
+            State(state),
+            axum::Json(serde_json::json!({
+                "general": { "minimizeToTrayOnClose": false }
+            })),
+        )
+        .await
+        .expect("settings update should succeed");
+
+        let (event, payload) = events
+            .recv()
+            .await
+            .expect("settings event should be emitted");
+        assert_eq!(event, "settings:changed");
+        assert_eq!(payload, value);
+        assert_eq!(payload["general"]["minimizeToTrayOnClose"], false);
         let _ = std::fs::remove_dir_all(data_dir);
     }
 }

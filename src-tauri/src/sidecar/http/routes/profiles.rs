@@ -5,7 +5,7 @@ use crate::sidecar::http::{
 use axum::{
     extract::{Path, State},
     response::Json,
-    routing::{get, post},
+    routing::{get, put},
     Router,
 };
 use serde::Deserialize;
@@ -19,7 +19,7 @@ pub fn router() -> Router<Arc<AppState>> {
             "/api/profiles/{id}",
             get(get_one).put(update).delete(remove),
         )
-        .route("/api/profiles/{id}/activate", post(activate))
+        .route("/api/profiles/{id}/activate", put(activate))
         .route(
             "/api/profiles/{profileId}/servers/{serverId}",
             get(get_profile_server).put(upsert_profile_server),
@@ -171,5 +171,66 @@ fn api_error(code: &str, message: &str) -> ApiErrorResponse {
         "VALIDATION_ERROR" | "ACTIVE_PROFILE" => validation_error(message.to_string()),
         "NOT_FOUND" => not_found(message.to_string()),
         _ => internal_error(message.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sidecar::db::profile_repo::ProfileRepository;
+    use crate::sidecar::db::Database;
+    use crate::sidecar::services::event_bus::EventBus;
+    use crate::sidecar::services::server_manager::ServerManager;
+    use axum::body::Body;
+    use std::sync::Arc;
+    use std::time::SystemTime;
+    use tower::ServiceExt;
+
+    fn temp_data_dir(test_name: &str) -> std::path::PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("system time is before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("moor-profiles-route-{test_name}-{timestamp}"))
+    }
+
+    fn test_state(data_dir: std::path::PathBuf) -> Arc<AppState> {
+        std::fs::create_dir_all(&data_dir).expect("failed to create temp data dir");
+        let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
+        db.run_migrations().expect("failed to run migrations");
+        let event_bus = Arc::new(EventBus::new(16));
+        Arc::new(AppState {
+            db: db.clone(),
+            api_token: "test-token".to_string(),
+            version: "test".to_string(),
+            port: 19323,
+            data_dir,
+            event_bus: event_bus.clone(),
+            server_manager: Arc::new(ServerManager::new(db, event_bus)),
+        })
+    }
+
+    #[tokio::test]
+    async fn activate_profile_accepts_frontend_put_route() {
+        let data_dir = temp_data_dir("activate-put");
+        let state = test_state(data_dir.clone());
+        let repo = ProfileRepository::new(&state.db);
+        repo.seed_default().expect("failed to seed profile");
+        let profile = repo.create("Work").expect("failed to create profile");
+
+        let response = router()
+            .with_state(state)
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(axum::http::Method::PUT)
+                    .uri(format!("/api/profiles/{}/activate", profile.id))
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("route should respond");
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let _ = std::fs::remove_dir_all(data_dir);
     }
 }
