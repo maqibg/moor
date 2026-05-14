@@ -1,5 +1,11 @@
 # moor-sidecar
 
+## 0.5.0
+
+### Minor Changes
+
+- Major rewrite introducing a Rust-native sidecar layer with full MCP communication support (stdio + Streamable HTTP + SSE transports), server lifecycle management with concurrency control, tool catalog discovery, settings persistence, database migrations, configuration import from popular MCP clients (Claude, Cursor, etc.), audit log redaction, and improved frontend hooks with abort signal support.
+
 ## 0.4.0
 
 ### Minor Changes
