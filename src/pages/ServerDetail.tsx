@@ -46,7 +46,11 @@ export function ServerDetail() {
     } else {
       disabledTools.add(toolName);
     }
-    await updateProfileServer(activeProfile.id, id, { disabledTools: Array.from(disabledTools) });
+    await updateProfileServer({
+      profileId: activeProfile.id,
+      serverId: id,
+      updates: { disabledTools: Array.from(disabledTools) },
+    });
     refreshTools();
   };
 

@@ -20,7 +20,7 @@ export function useProfiles() {
     error,
   } = useQuery<Profile[]>({
     queryKey: ["profiles"],
-    queryFn: () => api<Profile[]>(routes.profiles.list()),
+    queryFn: ({ signal }) => api<Profile[]>(routes.profiles.list(), { signal }),
   });
 
   const refresh = useCallback(async () => {
@@ -34,16 +34,15 @@ export function useProfiles() {
     },
   });
 
-  const activateProfile = useCallback(
-    async (id: string) => {
+  const activateProfile = useMutation({
+    mutationFn: async (id: string) => {
       await apiPut(routes.profiles.activate(id), {});
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["profiles"] }),
-        queryClient.invalidateQueries({ queryKey: ["servers"] }),
-      ]);
     },
-    [queryClient],
-  );
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["profiles"] });
+      void queryClient.invalidateQueries({ queryKey: ["servers"] });
+    },
+  });
 
   const deleteProfile = useMutation({
     mutationFn: (id: string) => apiDelete(routes.profiles.delete(id)).then(() => id),
@@ -52,24 +51,28 @@ export function useProfiles() {
     },
   });
 
-  const updateProfile = useCallback(
-    async (id: string, updates: { name?: string }) => {
+  const updateProfile = useMutation({
+    mutationFn: async ({ id, updates }: { id: string; updates: { name?: string } }) => {
       await apiPut(routes.profiles.update(id), updates);
-      await queryClient.invalidateQueries({ queryKey: ["profiles"] });
     },
-    [queryClient],
-  );
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["profiles"] });
+    },
+  });
 
-  const updateProfileServer = useCallback(
-    async (
-      profileId: string,
-      serverId: string,
-      updates: { enabled?: boolean; disabledTools?: string[] },
-    ) => {
+  const updateProfileServer = useMutation({
+    mutationFn: async ({
+      profileId,
+      serverId,
+      updates,
+    }: {
+      profileId: string;
+      serverId: string;
+      updates: { enabled?: boolean; disabledTools?: string[] };
+    }) => {
       await apiPut(routes.profiles.updateServer(profileId, serverId), updates);
     },
-    [],
-  );
+  });
 
   return {
     profiles,
@@ -77,10 +80,10 @@ export function useProfiles() {
     error: error?.message ?? null,
     refresh,
     createProfile: createProfile.mutateAsync,
-    activateProfile,
+    activateProfile: activateProfile.mutateAsync,
     deleteProfile: deleteProfile.mutateAsync,
-    updateProfile,
-    updateProfileServer,
+    updateProfile: updateProfile.mutateAsync,
+    updateProfileServer: updateProfileServer.mutateAsync,
   };
 }
 
@@ -93,7 +96,7 @@ export function useProfile(id: string | undefined) {
     error,
   } = useQuery<ProfileDetail | null>({
     queryKey: ["profiles", id],
-    queryFn: () => api<ProfileDetail | null>(routes.profiles.detail(id!)),
+    queryFn: ({ signal }) => api<ProfileDetail | null>(routes.profiles.detail(id!), { signal }),
     enabled: !!id,
   });
 

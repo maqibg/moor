@@ -82,6 +82,37 @@ function mergeStoredSettings(raw: unknown): Settings {
   };
 }
 
+function settingsToDbEntries(settings: Settings): Array<[string, string]> {
+  return [
+    ["general.autoStartOnLogin", JSON.stringify(settings.general.autoStartOnLogin)],
+    ["general.autoStartServersOnLaunch", JSON.stringify(settings.general.autoStartServersOnLaunch)],
+    ["general.minimizeToTrayOnClose", JSON.stringify(settings.general.minimizeToTrayOnClose)],
+    ["general.showWindowOnLaunch", JSON.stringify(settings.general.showWindowOnLaunch)],
+    ["appearance.theme", JSON.stringify(settings.appearance.theme)],
+    ["advanced.logRetentionDays", JSON.stringify(settings.advanced.logRetentionDays)],
+    ["advanced.enableAuditLogging", JSON.stringify(settings.advanced.enableAuditLogging)],
+    ["advanced.sidecarPort", JSON.stringify(settings.advanced.sidecarPort)],
+  ];
+}
+
+function dbEntriesToSettings(entries: Map<string, string>): Settings {
+  const raw: Record<string, unknown> = {};
+  for (const [key, value] of entries) {
+    const parts = key.split(".");
+    let target = raw;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (!target[parts[i]]) target[parts[i]] = {};
+      target = target[parts[i]] as Record<string, unknown>;
+    }
+    try {
+      target[parts[parts.length - 1]] = JSON.parse(value);
+    } catch {
+      target[parts[parts.length - 1]] = value;
+    }
+  }
+  return mergeStoredSettings(raw);
+}
+
 class SettingsService {
   private dataDir = "";
   private filePath = "";
@@ -92,21 +123,28 @@ class SettingsService {
     this.dataDir = dataDir;
     this.filePath = path.join(dataDir, SETTINGS_FILE);
 
-    let settings: Settings;
-    if (fs.existsSync(this.filePath)) {
-      try {
-        const raw = fs.readFileSync(this.filePath, "utf-8");
-        settings = mergeStoredSettings(JSON.parse(raw));
-      } catch {
+    const repo = getSettingsRepository();
+    const existing = repo.getAll();
+
+    if (existing.size > 0) {
+      this.cache = dbEntriesToSettings(existing);
+    } else {
+      let settings: Settings;
+      if (fs.existsSync(this.filePath)) {
+        try {
+          const raw = fs.readFileSync(this.filePath, "utf-8");
+          settings = mergeStoredSettings(JSON.parse(raw));
+        } catch {
+          settings = createDefaultSettings();
+        }
+      } else {
         settings = createDefaultSettings();
       }
-    } else {
-      settings = createDefaultSettings();
+      this.cache = settings;
+      repo.setMany(settingsToDbEntries(settings));
     }
 
-    this.cache = settings;
-    this.writeFile(settings);
-    this.syncToDb(settings);
+    this.writeJsonBackup(this.cache);
   }
 
   getSettings(): Settings {
@@ -121,19 +159,13 @@ class SettingsService {
       appearance: { ...current.appearance, ...payload.appearance },
       advanced: { ...current.advanced, ...payload.advanced },
     };
-    this.cache = updated;
-    this.writeFile(updated);
-    this.syncToDb(updated);
-    eventBus.emit("settings:changed", updated);
+    this.persist(updated);
     return updated;
   }
 
   resetSettings(): Settings {
     const defaults = createDefaultSettings();
-    this.cache = defaults;
-    this.writeFile(defaults);
-    this.syncToDb(defaults);
-    eventBus.emit("settings:changed", defaults);
+    this.persist(defaults);
     return defaults;
   }
 
@@ -158,25 +190,16 @@ class SettingsService {
     }
   }
 
-  private writeFile(settings: Settings) {
-    fs.mkdirSync(this.dataDir, { recursive: true });
-    fs.writeFileSync(this.filePath, JSON.stringify(settings, null, 2) + "\n");
+  private persist(settings: Settings) {
+    this.writeJsonBackup(settings);
+    getSettingsRepository().setMany(settingsToDbEntries(settings));
+    this.cache = settings;
+    eventBus.emit("settings:changed", settings);
   }
 
-  private syncToDb(settings: Settings) {
-    getSettingsRepository().setMany([
-      ["general.autoStartOnLogin", JSON.stringify(settings.general.autoStartOnLogin)],
-      [
-        "general.autoStartServersOnLaunch",
-        JSON.stringify(settings.general.autoStartServersOnLaunch),
-      ],
-      ["general.minimizeToTrayOnClose", JSON.stringify(settings.general.minimizeToTrayOnClose)],
-      ["general.showWindowOnLaunch", JSON.stringify(settings.general.showWindowOnLaunch)],
-      ["appearance.theme", JSON.stringify(settings.appearance.theme)],
-      ["advanced.logRetentionDays", JSON.stringify(settings.advanced.logRetentionDays)],
-      ["advanced.enableAuditLogging", JSON.stringify(settings.advanced.enableAuditLogging)],
-      ["advanced.sidecarPort", JSON.stringify(settings.advanced.sidecarPort)],
-    ]);
+  private writeJsonBackup(settings: Settings) {
+    fs.mkdirSync(this.dataDir, { recursive: true });
+    fs.writeFileSync(this.filePath, JSON.stringify(settings, null, 2) + "\n");
   }
 }
 

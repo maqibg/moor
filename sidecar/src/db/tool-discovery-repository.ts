@@ -1,6 +1,6 @@
 import type { Database } from "./index.js";
 import { getDatabase } from "./index.js";
-import { parseJsonValue, keysToCamelCase } from "./serializers.js";
+import { parseJsonValue } from "./serializers.js";
 
 export interface ToolDiscoveryRow {
   serverId: string;
@@ -11,20 +11,16 @@ export interface ToolDiscoveryRow {
   discoveredAt: string;
 }
 
-function serializeToolDiscovery(row: Record<string, unknown>): ToolDiscoveryRow {
+function toToolDiscovery(row: Record<string, unknown>): ToolDiscoveryRow {
   const inputSchema =
     "inputSchema" in row ? row.inputSchema : parseJsonValue(row.input_schema, undefined);
-  const camel = keysToCamelCase({
-    ...row,
-    input_schema: inputSchema,
-  });
   return {
-    serverId: String(camel.serverId),
-    toolName: String(camel.toolName),
-    exposedName: String(camel.exposedName),
-    description: (camel.description ?? null) as string | null,
-    inputSchema: camel.inputSchema,
-    discoveredAt: String(camel.discoveredAt),
+    serverId: String(row.server_id),
+    toolName: String(row.tool_name),
+    exposedName: String(row.exposed_name),
+    description: (row.description as string | null) ?? null,
+    inputSchema,
+    discoveredAt: String(row.discovered_at),
   };
 }
 
@@ -34,7 +30,7 @@ export class ToolDiscoveryRepository {
   findByServerId(serverId: string): ToolDiscoveryRow[] {
     return this.db
       .queryAll("SELECT * FROM tool_discoveries WHERE server_id = ?", [serverId])
-      .map(serializeToolDiscovery);
+      .map(toToolDiscovery);
   }
 
   replaceToolsForServer(
@@ -93,7 +89,7 @@ export class ToolDiscoveryRepository {
         serverName: String(row.server_name),
         disabledTools: parseJsonValue(row.disabled_tools, []) as string[],
         toolName: String(row.tool_name),
-        description: (row.description ?? null) as string | null,
+        description: (row.description as string | null) ?? null,
         inputSchema: parseJsonValue(row.input_schema, undefined),
       }));
   }

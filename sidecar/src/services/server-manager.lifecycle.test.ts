@@ -5,13 +5,15 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { closeDb, initDb, queryAll, queryOne, run, runMigrations } from "../db/index.js";
 import { profileService } from "./profiles.js";
+import { serverStore } from "./server-store.js";
 import {
   assertStdioCommandAvailable,
   buildStdioEnvironment,
   findExecutableOnPath,
 } from "./stdio-env.js";
 import { resolveHttpHeaders } from "./http-headers.js";
-import { type ManagedServer, ServerManager, serverManager } from "./server-manager.js";
+import { type ManagedServer, ServerRuntime, serverManager } from "./server-manager.js";
+import type { Server } from "@moor/types";
 
 const fixturePath = fileURLToPath(
   new URL("../test/fixtures/stdio-echo-server.mjs", import.meta.url),
@@ -19,19 +21,20 @@ const fixturePath = fileURLToPath(
 let dataDir: string;
 
 interface TestManager {
-  addServer: typeof serverManager.addServer;
   cacheTools: typeof serverManager.cacheTools;
   getToolDetails: typeof serverManager.getToolDetails;
   getToolCatalog: typeof serverManager.getToolCatalog;
   getServer: typeof serverManager.getServer;
   loadFromDb: typeof serverManager.loadFromDb;
-  removeServer: typeof serverManager.removeServer;
   startAutoStartServers: typeof serverManager.startAutoStartServers;
   startServer: typeof serverManager.startServer;
+  stopServer: typeof serverManager.stopServer;
   stopAll: typeof serverManager.stopAll;
+  registerServer: typeof serverManager.registerServer;
+  unregisterServer: typeof serverManager.unregisterServer;
 }
 
-type TestSessionFactory = NonNullable<ConstructorParameters<typeof ServerManager>[0]>;
+type TestSessionFactory = NonNullable<ConstructorParameters<typeof ServerRuntime>[0]>;
 type TestServerSession = Awaited<ReturnType<TestSessionFactory>>;
 
 function createFakeSession(
@@ -50,12 +53,12 @@ function createFakeSession(
 }
 
 function createTestManager(sessionFactory: TestSessionFactory): TestManager {
-  const manager = new ServerManager(sessionFactory);
+  const manager = new ServerRuntime(sessionFactory);
   manager.loadFromDb();
   return manager;
 }
 
-function addServerToActiveProfile(server: ManagedServer) {
+function addServerToActiveProfile(server: Server | ManagedServer) {
   const profile = queryOne("SELECT id FROM profiles WHERE is_active = 1", []);
   run(
     "INSERT INTO profile_servers (profile_id, server_id, enabled, disabled_tools) VALUES (?, ?, 1, '[]')",
@@ -64,14 +67,15 @@ function addServerToActiveProfile(server: ManagedServer) {
 }
 
 function addAutoStartServer(manager: TestManager, name: string): ManagedServer {
-  const server = manager.addServer({
+  const server = serverStore.add({
     name,
     connectionType: "stdio",
     command: process.execPath,
     autoStart: true,
   });
+  manager.registerServer(server.id);
   addServerToActiveProfile(server);
-  return server;
+  return manager.getServer(server.id)!;
 }
 
 function setAutoStartOrder(manager: TestManager, servers: ManagedServer[]) {
@@ -98,18 +102,19 @@ describe("ServerManager MCP lifecycle", () => {
   });
 
   it("initializes stdio servers, caches tools, and reuses the client for calls", async () => {
-    const managed = serverManager.addServer({
+    const server = serverStore.add({
       name: "Echo Fixture",
       connectionType: "stdio",
       command: process.execPath,
       args: [fixturePath],
     });
-    addServerToActiveProfile(managed);
+    serverManager.registerServer(server.id);
+    addServerToActiveProfile(server);
 
-    await serverManager.startServer(managed.id);
+    await serverManager.startServer(server.id);
 
     expect(
-      queryAll("SELECT tool_name FROM tool_discoveries WHERE server_id = ?", [managed.id]),
+      queryAll("SELECT tool_name FROM tool_discoveries WHERE server_id = ?", [server.id]),
     ).toEqual([{ tool_name: "echo" }]);
     await expect(
       serverManager.callToolByExposedName("echo", { message: "hello" }),
@@ -117,10 +122,10 @@ describe("ServerManager MCP lifecycle", () => {
       content: [{ type: "text", text: "hello" }],
     });
 
-    await serverManager.stopServer(managed.id);
+    await serverManager.stopServer(server.id);
 
     expect(
-      queryAll("SELECT tool_name FROM tool_discoveries WHERE server_id = ?", [managed.id]),
+      queryAll("SELECT tool_name FROM tool_discoveries WHERE server_id = ?", [server.id]),
     ).toEqual([{ tool_name: "echo" }]);
     expect(serverManager.getToolCatalog()).toEqual([]);
     expect(serverManager.findToolOwner("echo")).toBeNull();
@@ -154,7 +159,15 @@ describe("ServerManager MCP lifecycle", () => {
       await pendingStart;
       return createFakeSession();
     });
-    const managed = addAutoStartServer(manager, "Slow Fixture");
+    const server = serverStore.add({
+      name: "Slow Fixture",
+      connectionType: "stdio",
+      command: process.execPath,
+      autoStart: true,
+    });
+    manager.registerServer(server.id);
+    addServerToActiveProfile(server);
+    const managed = manager.getServer(server.id)!;
 
     const firstStart = manager.startServer(managed.id);
     expect(startCalls).toEqual(["Slow Fixture"]);
@@ -223,7 +236,9 @@ describe("ServerManager MCP lifecycle", () => {
     await manager.startServer(managed.id);
     expect(manager.getServer(managed.id)?.status).toBe("running");
 
-    await manager.removeServer(managed.id);
+    await manager.stopServer(managed.id);
+    serverStore.remove(managed.id);
+    manager.unregisterServer(managed.id);
 
     expect(closeCalls).toBe(1);
     expect(manager.getServer(managed.id)).toBeUndefined();

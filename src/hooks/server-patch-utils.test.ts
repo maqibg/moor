@@ -1,10 +1,36 @@
-import { describe, expect, it } from "vite-plus/test";
-import { applyServerAction, mergeServerStatusEvent, type ServerStateItem } from "./useServersState";
+import { QueryClient } from "@tanstack/react-query";
+import { describe, expect, it, vi } from "vite-plus/test";
+import {
+  applyServerAction,
+  mergeServerStatusEvent,
+  syncUpdatedServerCaches,
+  type ServerStateItem,
+} from "./server-patch-utils";
+import type { Server } from "@moor/types";
 
 const server = (overrides: Partial<ServerStateItem> = {}): ServerStateItem => ({
   id: "server-1",
   status: "stopped",
   errorMessage: null,
+  ...overrides,
+});
+
+const storedServer = (overrides: Partial<Server> = {}): Server => ({
+  id: "server-1",
+  name: "Old Server",
+  connectionType: "stdio",
+  status: "stopped",
+  autoStart: false,
+  command: "node",
+  args: [],
+  url: null,
+  env: {},
+  headers: null,
+  workingDir: null,
+  errorMessage: null,
+  sortOrder: 0,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
   ...overrides,
 });
 
@@ -59,5 +85,24 @@ describe("useServers state helpers", () => {
         status: "running",
       }),
     ).toEqual([server({ status: "running", errorMessage: null })]);
+  });
+
+  it("updates list cache and refreshes detail cache after server updates", async () => {
+    const queryClient = new QueryClient();
+    const invalidateQueries = vi
+      .spyOn(queryClient, "invalidateQueries")
+      .mockResolvedValue(undefined);
+    const updated = storedServer({
+      name: "Updated Server",
+      autoStart: true,
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    });
+
+    queryClient.setQueryData<Server[]>(["servers"], [storedServer()]);
+
+    await syncUpdatedServerCaches(queryClient, updated, updated.id);
+
+    expect(queryClient.getQueryData<Server[]>(["servers"])).toEqual([updated]);
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["servers", updated.id] });
   });
 });

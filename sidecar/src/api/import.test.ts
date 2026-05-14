@@ -16,6 +16,7 @@ import { importApi, selectImportCandidates } from "./import.js";
 import { eventBus } from "../services/event-bus.js";
 import { profileService } from "../services/profiles.js";
 import { serverManager } from "../services/server-manager.js";
+import { serverStore } from "../services/server-store.js";
 
 const originalHome = process.env.HOME;
 let tempHome: string | null = null;
@@ -75,11 +76,12 @@ describe("selectImportCandidates", () => {
 describe("import execute API", () => {
   it("reports skipped server names for existing and duplicate import entries", async () => {
     await initImportDb();
-    serverManager.addServer({
+    serverStore.add({
       name: "github",
       connectionType: "stdio",
       command: "npx",
     });
+    serverManager.loadFromDb();
 
     const response = await importApi.request("/execute", {
       method: "POST",
@@ -112,6 +114,9 @@ describe("import execute API", () => {
       { name: "github" },
       { name: "linear" },
     ]);
+    const importedServer = serverStore.findAll().find((server) => server.name === "linear");
+    expect(importedServer).toBeDefined();
+    expect(serverManager.getServer(importedServer!.id)?.name).toBe("linear");
   });
 });
 

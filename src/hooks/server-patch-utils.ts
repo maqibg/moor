@@ -1,4 +1,6 @@
-import type { ServerAction, ServerStatus } from "@moor/types";
+import type { QueryClient } from "@tanstack/react-query";
+import { isRecord } from "@/lib/utils";
+import type { Server, ServerAction, ServerStatus } from "@moor/types";
 
 export { ServerAction, ServerStatus };
 
@@ -16,10 +18,19 @@ export interface ServerStatusEventPayload {
 
 const serverStatuses = ["stopped", "starting", "running", "error"] satisfies ServerStatus[];
 
-import { isRecord } from "@/lib/utils";
-
 function isServerStatus(value: unknown): value is ServerStatus {
   return typeof value === "string" && serverStatuses.includes(value as ServerStatus);
+}
+
+export async function syncUpdatedServerCaches(
+  queryClient: QueryClient,
+  updated: Server,
+  id: string,
+): Promise<void> {
+  queryClient.setQueryData<Server[]>(["servers"], (prev) =>
+    prev?.map((server) => (server.id === id ? { ...server, ...updated } : server)),
+  );
+  await queryClient.invalidateQueries({ queryKey: ["servers", id] });
 }
 
 export function getServerStatusEventPayload(eventData: unknown): ServerStatusEventPayload | null {

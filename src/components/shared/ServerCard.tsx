@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import type { Server } from "@moor/types";
-import type { ServerAction } from "@/hooks/useServersState";
+import type { ServerAction } from "@/hooks/server-patch-utils";
 import { cn } from "@/lib/utils";
 import { getRemoveFeedback, type RemoveFeedback } from "./server-card-state";
 

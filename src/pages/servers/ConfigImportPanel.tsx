@@ -27,14 +27,12 @@ interface ConfigImportPanelProps {
   state: ImportState;
   showJsonImport: boolean;
   onCloseJsonImport: () => void;
-  onImportComplete: () => void;
 }
 
 export function ConfigImportPanel({
   state,
   showJsonImport,
   onCloseJsonImport,
-  onImportComplete,
 }: ConfigImportPanelProps) {
   const {
     scanCandidates,
@@ -230,10 +228,7 @@ export function ConfigImportPanel({
             ))}
             {scanCandidates.length > 0 && (
               <div className="flex justify-end pt-1">
-                <Button
-                  onClick={() => void executeImport(onImportComplete)}
-                  disabled={selectedImports.size === 0}
-                >
+                <Button onClick={() => void executeImport()} disabled={selectedImports.size === 0}>
                   Import Selected ({selectedImports.size})
                 </Button>
               </div>

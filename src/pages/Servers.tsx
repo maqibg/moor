@@ -178,7 +178,6 @@ export function Servers() {
         state={importState}
         showJsonImport={showJsonImport}
         onCloseJsonImport={() => setShowJsonImport(false)}
-        onImportComplete={refresh}
       />
 
       {/* Add Server Form */}

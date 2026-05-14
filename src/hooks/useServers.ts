@@ -8,54 +8,15 @@ import {
   applyServerAction,
   getServerStatusEventPayload,
   mergeServerStatusEvent,
+  syncUpdatedServerCaches,
   type ServerAction,
-} from "./useServersState";
+} from "./server-patch-utils";
 
 type ServerSetter = Dispatch<SetStateAction<Server[]>>;
-type SetServerAction = (id: string, action: ServerAction) => void;
-type ClearServerAction = (id: string) => void;
-
-interface RunServerMutationOptions {
-  id: string;
-  action: ServerAction;
-  path: string;
-  setData: ServerSetter;
-  setServerAction: SetServerAction;
-  clearServerAction: ClearServerAction;
-  refreshSilently: () => void;
-}
+type ServerMutationResult = "success" | "failed";
 
 function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : "Unknown server action error";
-}
-
-function applyServerError(setData: ServerSetter, id: string, err: unknown) {
-  setData((prev) =>
-    mergeServerStatusEvent(prev, {
-      serverId: id,
-      status: "error",
-      errorMessage: getErrorMessage(err),
-    }),
-  );
-}
-
-async function runServerMutation(options: RunServerMutationOptions) {
-  options.setServerAction(options.id, options.action);
-  options.setData((prev) => applyServerAction(prev, options.id, options.action));
-
-  let shouldRefresh = false;
-  try {
-    await apiPost(options.path, {});
-    shouldRefresh = true;
-  } catch (err) {
-    applyServerError(options.setData, options.id, err);
-  } finally {
-    try {
-      if (shouldRefresh) await options.refreshSilently();
-    } finally {
-      options.clearServerAction(options.id);
-    }
-  }
 }
 
 function useServerActionState(setData: ServerSetter) {
@@ -97,7 +58,7 @@ export function useServers() {
     error,
   } = useQuery<Server[]>({
     queryKey: ["servers"],
-    queryFn: () => api<Server[]>(routes.servers.list()),
+    queryFn: ({ signal }) => api<Server[]>(routes.servers.list(), { signal }),
   });
 
   const setData = useCallback(
@@ -113,12 +74,12 @@ export function useServers() {
   const { serverActions, setServerAction, clearServerAction, mergeStatusEvent } =
     useServerActionState(setData);
 
-  const refresh = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: ["servers"] });
-  }, [queryClient]);
-
   const refreshSilently = useCallback(async () => {
     await queryClient.refetchQueries({ queryKey: ["servers"] });
+  }, [queryClient]);
+
+  const refresh = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ["servers"] });
   }, [queryClient]);
 
   const addServer = useMutation({
@@ -139,45 +100,60 @@ export function useServers() {
     },
   });
 
-  const startServer = useCallback(
-    async (id: string) => {
-      await runServerMutation({
-        id,
-        action: "starting",
-        path: routes.servers.start(id),
-        setData,
-        setServerAction,
-        clearServerAction,
-        refreshSilently,
-      });
+  const startServer = useMutation<ServerMutationResult, Error, string>({
+    mutationFn: async (id: string) => {
+      setServerAction(id, "starting");
+      setData((prev) => applyServerAction(prev, id, "starting"));
+      try {
+        await apiPost(routes.servers.start(id), {});
+        return "success";
+      } catch (err) {
+        setData((prev) =>
+          mergeServerStatusEvent(prev, {
+            serverId: id,
+            status: "error",
+            errorMessage: getErrorMessage(err),
+          }),
+        );
+        return "failed";
+      }
     },
-    [clearServerAction, refreshSilently, setData, setServerAction],
-  );
+    onSettled: (result, _err, id) => {
+      clearServerAction(id);
+      if (result === "success") void refreshSilently();
+    },
+  });
 
-  const stopServer = useCallback(
-    async (id: string) => {
-      await runServerMutation({
-        id,
-        action: "stopping",
-        path: routes.servers.stop(id),
-        setData,
-        setServerAction,
-        clearServerAction,
-        refreshSilently,
-      });
+  const stopServer = useMutation<ServerMutationResult, Error, string>({
+    mutationFn: async (id: string) => {
+      setServerAction(id, "stopping");
+      setData((prev) => applyServerAction(prev, id, "stopping"));
+      try {
+        await apiPost(routes.servers.stop(id), {});
+        return "success";
+      } catch (err) {
+        setData((prev) =>
+          mergeServerStatusEvent(prev, {
+            serverId: id,
+            status: "error",
+            errorMessage: getErrorMessage(err),
+          }),
+        );
+        return "failed";
+      }
     },
-    [clearServerAction, refreshSilently, setData, setServerAction],
-  );
+    onSettled: (result, _err, id) => {
+      clearServerAction(id);
+      if (result === "success") void refreshSilently();
+    },
+  });
 
   const updateServer = useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: Record<string, unknown> }) => {
       return apiPut<Server>(routes.servers.update(id), updates);
     },
     onSuccess: (updated, { id }) => {
-      queryClient.setQueryData<Server[]>(["servers"], (prev) =>
-        prev?.map((s) => (s.id === id ? { ...s, ...updated } : s)),
-      );
-      queryClient.invalidateQueries({ queryKey: ["servers", id] });
+      return syncUpdatedServerCaches(queryClient, updated, id);
     },
   });
 
@@ -190,24 +166,28 @@ export function useServers() {
     },
   });
 
-  const reorderServers = useCallback(
-    async (nextServers: Server[]) => {
-      const previous = queryClient.getQueryData<Server[]>(["servers"]) ?? servers;
+  const reorderServers = useMutation({
+    mutationFn: async (nextServers: Server[]) => {
+      const ordered = await apiPut<Server[]>(routes.servers.order(), {
+        serverIds: nextServers.map((server) => server.id),
+      });
+      return ordered;
+    },
+    onMutate: async (nextServers) => {
+      await queryClient.cancelQueries({ queryKey: ["servers"] });
+      const previous = queryClient.getQueryData<Server[]>(["servers"]);
       queryClient.setQueryData<Server[]>(["servers"], nextServers);
-      try {
-        const ordered = await apiPut<Server[]>(routes.servers.order(), {
-          serverIds: nextServers.map((server) => server.id),
-        });
-        queryClient.setQueryData<Server[]>(["servers"], ordered);
-        return ordered;
-      } catch (err) {
-        queryClient.setQueryData<Server[]>(["servers"], previous);
-        await refreshSilently();
-        throw err;
+      return { previous };
+    },
+    onSuccess: (ordered) => {
+      queryClient.setQueryData<Server[]>(["servers"], ordered);
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData<Server[]>(["servers"], context.previous);
       }
     },
-    [queryClient, refreshSilently, servers],
-  );
+  });
 
   useSSEEvent("server:status", (data) => mergeStatusEvent(data));
   useSSEEvent("server:tools", () => void refreshSilently());
@@ -222,10 +202,14 @@ export function useServers() {
     mergeStatusEvent,
     addServer: addServer.mutateAsync,
     updateServer: updateServer.mutateAsync,
-    startServer,
-    stopServer,
+    startServer: async (id: string) => {
+      await startServer.mutateAsync(id);
+    },
+    stopServer: async (id: string) => {
+      await stopServer.mutateAsync(id);
+    },
     removeServer: removeServer.mutateAsync,
-    reorderServers,
+    reorderServers: reorderServers.mutateAsync,
   };
 }
 
@@ -238,7 +222,7 @@ export function useServer(id: string | undefined) {
     error,
   } = useQuery<ServerDetail>({
     queryKey: ["servers", id],
-    queryFn: () => api<ServerDetail>(routes.servers.detail(id!)),
+    queryFn: ({ signal }) => api<ServerDetail>(routes.servers.detail(id!), { signal }),
     enabled: !!id,
   });
 
@@ -257,7 +241,8 @@ export function useServerTools(serverId: string | undefined, profileId?: string)
 
   const { data: tools = [] } = useQuery<ToolDetail[]>({
     queryKey: ["servers", serverId, "tools", profileId],
-    queryFn: () => api<ToolDetail[]>(routes.servers.tools(serverId!, profileId)),
+    queryFn: ({ signal }) =>
+      api<ToolDetail[]>(routes.servers.tools(serverId!, profileId), { signal }),
     enabled: !!serverId,
   });
 

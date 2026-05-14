@@ -1,12 +1,28 @@
 import type { Database } from "./index.js";
 import { getDatabase } from "./index.js";
-import type { Server } from "@moor/types";
-import { serializeServer } from "./serializers.js";
+import type { Server, ServerStatus } from "@moor/types";
+import { parseJsonValue } from "./serializers.js";
 
 const FIND_BY_IDS_BATCH_SIZE = 500;
 
 function toServer(row: Record<string, unknown>): Server {
-  return serializeServer(row) as unknown as Server;
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    connectionType: row.connection_type as "stdio" | "http",
+    command: (row.command as string | null) ?? null,
+    args: (parseJsonValue(row.args, []) ?? []) as string[],
+    url: (row.url as string | null) ?? null,
+    env: (parseJsonValue(row.env, {}) ?? {}) as Record<string, string>,
+    headers: parseJsonValue(row.headers, null) as Record<string, string> | null,
+    workingDir: (row.working_dir as string | null) ?? null,
+    autoStart: Boolean(row.auto_start),
+    sortOrder: Number(row.sort_order ?? 0),
+    status: row.status as ServerStatus,
+    errorMessage: (row.error_message as string | null) ?? null,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
 }
 
 export class ServerRepository {
@@ -102,8 +118,42 @@ export class ServerRepository {
     return Number(row.min_sort_order) - 1;
   }
 
-  update(id: string, setClauses: string[], values: unknown[]): void {
-    this.db.run(`UPDATE mcp_servers SET ${setClauses.join(", ")} WHERE id = ?`, [...values, id]);
+  update(id: string, fields: Record<string, unknown>): void {
+    const columnMap: Record<string, string> = {
+      name: "name",
+      command: "command",
+      args: "args",
+      url: "url",
+      env: "env",
+      headers: "headers",
+      workingDir: "working_dir",
+      working_dir: "working_dir",
+      autoStart: "auto_start",
+    };
+
+    const setClauses: string[] = [];
+    const values: unknown[] = [];
+
+    for (const [field, col] of Object.entries(columnMap)) {
+      if (field in fields) {
+        setClauses.push(`${col} = ?`);
+        const val = fields[field];
+        if (col === "auto_start") {
+          values.push(val ? 1 : 0);
+        } else if (typeof val === "object" && val !== null) {
+          values.push(JSON.stringify(val));
+        } else {
+          values.push(val);
+        }
+      }
+    }
+
+    if (setClauses.length === 0) return;
+    setClauses.push("updated_at = ?");
+    values.push(new Date().toISOString());
+    values.push(id);
+
+    this.db.run(`UPDATE mcp_servers SET ${setClauses.join(", ")} WHERE id = ?`, values);
   }
 
   remove(id: string): void {

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { closeDb, initDb, runMigrations } from "../db/index.js";
 import { profileService } from "../services/profiles.js";
 import { serverManager } from "../services/server-manager.js";
+import { serverStore } from "../services/server-store.js";
 import { profiles } from "./profiles.js";
 
 let dataDir: string;
@@ -33,13 +34,13 @@ describe("profiles API detail payload", () => {
   });
 
   it("returns complete servers with profile state for bound and unbound servers", async () => {
-    const bound = serverManager.addServer({
+    const bound = serverStore.add({
       name: "bound",
       connectionType: "stdio",
       command: "node",
       args: ["server.js"],
     });
-    const unbound = serverManager.addServer({
+    const unbound = serverStore.add({
       name: "unbound",
       connectionType: "http",
       url: "https://mcp.example.com/mcp",
@@ -79,7 +80,7 @@ describe("profiles API detail payload", () => {
   });
 
   it("returns profile server state without undefined-derived fields after updates", async () => {
-    const server = serverManager.addServer({
+    const server = serverStore.add({
       name: "tools",
       connectionType: "stdio",
       command: "node",

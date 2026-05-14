@@ -146,20 +146,25 @@ async function parseApiResponse<T>(resp: Response): Promise<T> {
   return resp.json() as Promise<T>;
 }
 
+export interface RequestOptions extends RequestInit {
+  signal?: AbortSignal;
+}
+
 async function fetchWithRuntime(
   path: string,
-  options: RequestInit | undefined,
+  options: RequestOptions | undefined,
   runtime: SidecarInfo,
 ): Promise<Response> {
   return fetch(getApiUrlForRuntime(runtime, path), {
     ...options,
     headers: getApiHeadersForRuntime(runtime, options?.headers),
+    signal: options?.signal,
   });
 }
 
 async function retryWithFreshRuntime<T>(
   path: string,
-  options: RequestInit | undefined,
+  options: RequestOptions | undefined,
   originalError: unknown,
 ): Promise<T> {
   const runtime = await refreshApiRuntime();
@@ -177,17 +182,24 @@ async function retryWithFreshRuntime<T>(
   }
 }
 
-function shouldRetryNetworkError(options?: RequestInit): boolean {
+function shouldRetryNetworkError(options?: RequestOptions): boolean {
   const method = options?.method?.toUpperCase() ?? "GET";
   return method === "GET" || method === "HEAD";
 }
 
-export async function api<T>(path: string, options?: RequestInit): Promise<T> {
+function isAbortError(err: unknown, signal?: AbortSignal): boolean {
+  return signal?.aborted === true || (isRecord(err) && err.name === "AbortError");
+}
+
+export async function api<T>(path: string, options?: RequestOptions): Promise<T> {
   const runtime = await getApiRuntime();
   let resp: Response;
   try {
     resp = await fetchWithRuntime(path, options, runtime);
   } catch (err) {
+    if (isAbortError(err, options?.signal)) {
+      throw err;
+    }
     const networkError = createErrorWithCause(formatApiNetworkError(path, err, runtime), err);
     if (!shouldRetryNetworkError(options)) {
       throw networkError;

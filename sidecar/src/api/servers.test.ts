@@ -6,6 +6,7 @@ import { closeDb, initDb, queryAll, run, runMigrations } from "../db/index.js";
 import { eventBus } from "../services/event-bus.js";
 import { profileService } from "../services/profiles.js";
 import { serverManager } from "../services/server-manager.js";
+import { serverStore } from "../services/server-store.js";
 import { servers } from "./servers.js";
 
 let dataDir: string;
@@ -43,21 +44,24 @@ describe("servers API ordering", () => {
   });
 
   it("persists a complete server reorder and returns the sorted list", async () => {
-    const first = serverManager.addServer({
+    const first = serverStore.add({
       name: "first",
       connectionType: "stdio",
       command: "node",
     });
-    const second = serverManager.addServer({
+    serverManager.registerServer(first.id);
+    const second = serverStore.add({
       name: "second",
       connectionType: "stdio",
       command: "node",
     });
-    const third = serverManager.addServer({
+    serverManager.registerServer(second.id);
+    const third = serverStore.add({
       name: "third",
       connectionType: "stdio",
       command: "node",
     });
+    serverManager.registerServer(third.id);
 
     const response = await putOrder([second.id, first.id, third.id]);
 
@@ -71,16 +75,18 @@ describe("servers API ordering", () => {
   });
 
   it("rejects duplicate or incomplete server order payloads without partial writes", async () => {
-    const first = serverManager.addServer({
+    const first = serverStore.add({
       name: "first",
       connectionType: "stdio",
       command: "node",
     });
-    const second = serverManager.addServer({
+    serverManager.registerServer(first.id);
+    const second = serverStore.add({
       name: "second",
       connectionType: "stdio",
       command: "node",
     });
+    serverManager.registerServer(second.id);
     const original = serverIds();
 
     const duplicate = await putOrder([first.id, first.id]);
@@ -105,11 +111,12 @@ describe("servers API ordering", () => {
   });
 
   it("allows deleting a server that has profile, tool, and audit log references", async () => {
-    const server = serverManager.addServer({
+    const server = serverStore.add({
       name: "delete-me",
       connectionType: "stdio",
       command: "node",
     });
+    serverManager.registerServer(server.id);
     profileService.assignToActiveProfile([server.id]);
     serverManager.cacheTools(server.id, [{ name: "echo" }]);
     run(
@@ -136,11 +143,12 @@ describe("servers API ordering", () => {
   it("returns, stores, and emits public start errors without leaking searched PATH", async () => {
     const publicMessage =
       'Command "definitely-missing-moor-command" was not found. Configure an absolute command path or update this server environment.';
-    const server = serverManager.addServer({
+    const server = serverStore.add({
       name: "missing-command",
       connectionType: "stdio",
       command: "definitely-missing-moor-command",
     });
+    serverManager.registerServer(server.id);
     const emitted: unknown[] = [];
     const unsubscribe = eventBus.on("server:status", (_event, data) => emitted.push(data));
 

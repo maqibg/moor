@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { closeDb, initDb, runMigrations } from "../db/index.js";
 import { getServerRepository } from "../db/server-repository.js";
-import { serverManager } from "../services/server-manager.js";
+import { serverStore } from "../services/server-store.js";
 import { convertConfig } from "./converter.js";
 
 let dataDir: string;
@@ -14,18 +14,15 @@ describe("convertConfig Moor source", () => {
     dataDir = mkdtempSync(path.join(tmpdir(), "moor-converter-"));
     await initDb({ dataDir });
     runMigrations();
-    serverManager.resetForTest();
-    serverManager.loadFromDb();
   });
 
   afterEach(() => {
-    serverManager.resetForTest();
     closeDb();
     rmSync(dataDir, { recursive: true, force: true });
   });
 
   it("converts selected Moor servers in the requested order", () => {
-    const first = serverManager.addServer({
+    const first = serverStore.add({
       name: "first",
       connectionType: "stdio",
       command: "node",
@@ -33,7 +30,7 @@ describe("convertConfig Moor source", () => {
       env: { FIRST: "1" },
       workingDir: "/tmp/first",
     });
-    const second = serverManager.addServer({
+    const second = serverStore.add({
       name: "second",
       connectionType: "http",
       url: "https://mcp.example.com/mcp",
@@ -61,12 +58,12 @@ describe("convertConfig Moor source", () => {
   });
 
   it("loads selected Moor servers through a batch lookup preserving requested order", () => {
-    const first = serverManager.addServer({
+    const first = serverStore.add({
       name: "first",
       connectionType: "stdio",
       command: "node",
     });
-    const second = serverManager.addServer({
+    const second = serverStore.add({
       name: "second",
       connectionType: "stdio",
       command: "node",

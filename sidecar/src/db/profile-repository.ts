@@ -1,17 +1,9 @@
 import type { Database } from "./index.js";
 import { getDatabase } from "./index.js";
 import type { Profile, ProfileDetail, ProfileServerState } from "@moor/types";
-import { parseJsonValue, keysToCamelCase, serializeServer } from "./serializers.js";
+import { parseJsonValue } from "./serializers.js";
 
 type ProfileDetailServer = ProfileDetail["servers"][number];
-
-function serializeProfile(row: Record<string, unknown>): Profile {
-  return keysToCamelCase({
-    ...row,
-    is_active: Boolean(row.is_active),
-    server_count: Number(row.server_count ?? 0),
-  }) as unknown as Profile;
-}
 
 export interface ProfileServerRow {
   serverId: string;
@@ -28,32 +20,50 @@ function requireRow(row: Record<string, unknown> | null, message: string): Recor
   return row;
 }
 
-function serializeProfileServerState(row: Record<string, unknown>): ProfileServerRow {
-  const camel = keysToCamelCase({
-    ...row,
-    enabled: Boolean(row.enabled),
-    disabled_tools: parseDisabledTools(row.disabled_tools),
-  });
+function toProfile(row: Record<string, unknown>): Profile {
   return {
-    serverId: String(camel.serverId),
-    enabled: Boolean(camel.enabled),
-    disabledTools: (camel.disabledTools ?? []) as string[],
+    id: String(row.id),
+    name: String(row.name),
+    isActive: Boolean(row.is_active),
+    serverCount: Number(row.server_count ?? 0),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
   };
 }
 
-function serializeProfileDetailServer(row: Record<string, unknown>): ProfileDetailServer {
-  const { profile_enabled, profile_disabled_tools, ...serverRow } = row;
-  const server = serializeServer(serverRow) as unknown as Omit<
-    ProfileDetailServer,
-    "profileServer"
-  >;
+function toProfileDetailServer(row: Record<string, unknown>): ProfileDetailServer {
+  const server: Omit<ProfileDetailServer, "profileServer"> = {
+    id: String(row.id),
+    name: String(row.name),
+    connectionType: row.connection_type as "stdio" | "http",
+    command: (row.command as string | null) ?? null,
+    args: (parseJsonValue(row.args, []) ?? []) as string[],
+    url: (row.url as string | null) ?? null,
+    env: (parseJsonValue(row.env, {}) ?? {}) as Record<string, string>,
+    headers: parseJsonValue(row.headers, null) as Record<string, string> | null,
+    workingDir: (row.working_dir as string | null) ?? null,
+    autoStart: Boolean(row.auto_start),
+    sortOrder: Number(row.sort_order ?? 0),
+    status: row.status as ProfileDetailServer["status"],
+    errorMessage: (row.error_message as string | null) ?? null,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
 
   return {
     ...server,
     profileServer: {
-      enabled: profile_enabled == null ? false : Boolean(profile_enabled),
-      disabledTools: parseDisabledTools(profile_disabled_tools),
+      enabled: row.profile_enabled == null ? false : Boolean(row.profile_enabled),
+      disabledTools: parseDisabledTools(row.profile_disabled_tools),
     } satisfies ProfileServerState,
+  };
+}
+
+function toProfileServerState(row: Record<string, unknown>): ProfileServerRow {
+  return {
+    serverId: String(row.server_id),
+    enabled: Boolean(row.enabled),
+    disabledTools: parseJsonValue(row.disabled_tools, []) as string[],
   };
 }
 
@@ -69,7 +79,7 @@ export class ProfileRepository {
        ORDER BY p.created_at DESC`,
       [],
     );
-    return rows.map(serializeProfile);
+    return rows.map(toProfile);
   }
 
   findById(id: string): Profile | null {
@@ -81,7 +91,7 @@ export class ProfileRepository {
        GROUP BY p.id`,
       [id],
     );
-    return row ? serializeProfile(row) : null;
+    return row ? toProfile(row) : null;
   }
 
   findActiveId(): string | null {
@@ -97,7 +107,7 @@ export class ProfileRepository {
       [id, name, now, now],
     );
     const row = this.db.queryOne("SELECT * FROM profiles WHERE id = ?", [id]);
-    return serializeProfile(requireRow(row, "Created profile could not be reloaded"));
+    return toProfile(requireRow(row, "Created profile could not be reloaded"));
   }
 
   update(id: string, data: { name?: string }): Profile | null {
@@ -111,7 +121,7 @@ export class ProfileRepository {
       ]);
     }
     const row = this.db.queryOne("SELECT * FROM profiles WHERE id = ?", [id]);
-    return serializeProfile(requireRow(row, "Updated profile could not be reloaded"));
+    return toProfile(requireRow(row, "Updated profile could not be reloaded"));
   }
 
   activate(id: string): Profile | null {
@@ -125,7 +135,7 @@ export class ProfileRepository {
       ]);
     });
     const row = this.db.queryOne("SELECT * FROM profiles WHERE id = ?", [id]);
-    return serializeProfile(requireRow(row, "Activated profile could not be reloaded"));
+    return toProfile(requireRow(row, "Activated profile could not be reloaded"));
   }
 
   remove(id: string): { success: true } | { error: "not_found" | "active" } {
@@ -144,7 +154,7 @@ export class ProfileRepository {
        ORDER BY ms.name ASC`,
       [profileId],
     );
-    return rows.map(serializeProfileDetailServer);
+    return rows.map(toProfileDetailServer);
   }
 
   upsertProfileServer(
@@ -186,9 +196,7 @@ export class ProfileRepository {
       "SELECT * FROM profile_servers WHERE profile_id = ? AND server_id = ?",
       [profileId, serverId],
     );
-    return serializeProfileServerState(
-      requireRow(row, "Profile server state could not be reloaded"),
-    );
+    return toProfileServerState(requireRow(row, "Profile server state could not be reloaded"));
   }
 
   findActiveProfileServerIds(): string[] {

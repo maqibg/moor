@@ -1,12 +1,10 @@
-import { getServerRepository, ServerRepository } from "../db/server-repository.js";
+import { getServerRepository } from "../db/server-repository.js";
 import { getToolDiscoveryRepository } from "../db/tool-discovery-repository.js";
-import { getProfileRepository } from "../db/profile-repository.js";
-import { getDatabase } from "../db/index.js";
 import { toolCatalogService } from "./tool-catalog-service.js";
-import { profileService } from "./profiles.js";
+import { serverStore } from "./server-store.js";
 import { SessionManager } from "./session-manager.js";
 import type { StoredServerConfig, ServerSession, SessionFactory } from "./session-manager.js";
-import type { Server, ToolCatalogEntry } from "@moor/types";
+import type { ToolCatalogEntry } from "@moor/types";
 import { eventBus } from "./event-bus.js";
 
 export type { StoredServerConfig, ServerSession, SessionFactory };
@@ -36,7 +34,7 @@ export function getPublicServerStartErrorMessage(err: unknown): string {
   return "Server failed to start. Check logs for details.";
 }
 
-export class ServerManager {
+export class ServerRuntime {
   private servers: Map<string, ManagedServer> = new Map();
   private sessionManager: SessionManager;
 
@@ -46,21 +44,17 @@ export class ServerManager {
 
   loadFromDb() {
     this.servers.clear();
-    const db = getDatabase();
-    db.transaction(() => {
-      const serverRepo = new ServerRepository(db);
-      serverRepo.resetRunningStatuses();
-      const rows = serverRepo.loadAll();
-      for (const row of rows) {
-        this.servers.set(row.id, {
-          id: row.id,
-          name: row.name,
-          connectionType: row.connectionType,
-          status: row.status,
-          autoStart: row.autoStart,
-        });
-      }
-    });
+    serverStore.resetRunningStatuses();
+    const rows = serverStore.loadAll();
+    for (const row of rows) {
+      this.servers.set(row.id, {
+        id: row.id,
+        name: row.name,
+        connectionType: row.connectionType,
+        status: row.status,
+        autoStart: row.autoStart,
+      });
+    }
   }
 
   resetForTest() {
@@ -73,114 +67,27 @@ export class ServerManager {
   }
 
   getActiveProfileId(): string | null {
-    return profileService.getActiveProfileId();
+    return serverStore.getActiveProfileId();
   }
 
   listServers(): ManagedServer[] {
     return Array.from(this.servers.values());
   }
 
-  addServer(config: {
-    name: string;
-    connectionType: "stdio" | "http";
-    command?: string;
-    args?: string[];
-    url?: string;
-    env?: Record<string, string>;
-    headers?: Record<string, string>;
-    workingDir?: string;
-    autoStart?: boolean;
-  }): ManagedServer {
-    const id = crypto.randomUUID();
-    const now = new Date().toISOString();
-    const serverRepo = getServerRepository();
-    serverRepo.insert({
-      id,
-      name: config.name,
-      connectionType: config.connectionType,
-      command: config.command ?? null,
-      args: config.args ? JSON.stringify(config.args) : null,
-      url: config.url ?? null,
-      env: config.env ? JSON.stringify(config.env) : null,
-      headers: config.headers ? JSON.stringify(config.headers) : null,
-      workingDir: config.workingDir ?? null,
-      autoStart: config.autoStart ? 1 : 0,
-      sortOrder: serverRepo.nextTopSortOrder(),
-      createdAt: now,
-      updatedAt: now,
+  registerServer(id: string): void {
+    const row = serverStore.findById(id);
+    if (!row) return;
+    this.servers.set(id, {
+      id: row.id,
+      name: row.name,
+      connectionType: row.connectionType,
+      status: row.status,
+      autoStart: row.autoStart,
     });
-
-    const server: ManagedServer = {
-      id,
-      name: config.name,
-      connectionType: config.connectionType,
-      status: "stopped",
-      autoStart: config.autoStart ?? false,
-    };
-    this.servers.set(id, server);
-    return server;
   }
 
-  updateServer(id: string, updates: Record<string, unknown>): ManagedServer | null {
-    const server = this.servers.get(id);
-    if (!server) return null;
-
-    const allowedFields: Record<string, string> = {
-      name: "name",
-      command: "command",
-      args: "args",
-      url: "url",
-      env: "env",
-      headers: "headers",
-      workingDir: "working_dir",
-      working_dir: "working_dir",
-      autoStart: "auto_start",
-    };
-    const setClauses: string[] = [];
-    const values: unknown[] = [];
-
-    for (const [field, col] of Object.entries(allowedFields)) {
-      if (field in updates) {
-        setClauses.push(`${col} = ?`);
-        const val = updates[field];
-        if (field === "autoStart") {
-          values.push(val ? 1 : 0);
-        } else if (typeof val === "object" && val !== null) {
-          values.push(JSON.stringify(val));
-        } else {
-          values.push(val);
-        }
-      }
-    }
-
-    if (setClauses.length === 0) return server;
-    setClauses.push("updated_at = ?");
-    values.push(new Date().toISOString());
-
-    getServerRepository().update(id, setClauses, values);
-    if (updates.name) server.name = updates.name as string;
-    if ("autoStart" in updates) server.autoStart = Boolean(updates.autoStart);
-    return server;
-  }
-
-  async removeServer(id: string): Promise<boolean> {
-    const server = this.servers.get(id);
-    if (!server) return false;
-    if (server.status === "running") await this.stopServer(id);
-    getServerRepository().remove(id);
+  unregisterServer(id: string): void {
     this.servers.delete(id);
-    return true;
-  }
-
-  reorderServers(ids: string[]): Server[] | null {
-    if (new Set(ids).size !== ids.length) return null;
-    const serverRepo = getServerRepository();
-    const existingIds = serverRepo.findIds();
-    const existing = new Set(existingIds);
-    if (ids.length !== existingIds.length || ids.some((id) => !existing.has(id))) return null;
-
-    serverRepo.reorder(ids);
-    return serverRepo.findAll();
   }
 
   async startServer(id: string): Promise<void> {
@@ -279,10 +186,8 @@ export class ServerManager {
   }
 
   getActiveProfileServers() {
-    const activeProfileId = profileService.getActiveProfileId();
-    if (!activeProfileId) return [];
-    const serverIds = getProfileRepository().findActiveProfileServerIds();
-    return serverIds
+    const activeIds = serverStore.getActiveProfileServerIds();
+    return activeIds
       .map((serverId) => {
         const server = this.servers.get(serverId);
         if (!server) return null;
@@ -321,7 +226,7 @@ export class ServerManager {
   }
 
   private getStoredServerConfig(id: string): StoredServerConfig {
-    const row = getServerRepository().findById(id);
+    const row = serverStore.findById(id);
     if (!row) throw new Error(`Server ${id} not found`);
     return {
       id: row.id,
@@ -338,4 +243,4 @@ export class ServerManager {
   }
 }
 
-export const serverManager = new ServerManager();
+export const serverManager = new ServerRuntime();

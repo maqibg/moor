@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { getProfileRepository } from "../db/profile-repository.js";
 import { profileService } from "../services/profiles.js";
 import { createProfileSchema, updateProfileSchema, updateProfileServerSchema } from "./schemas.js";
 import { apiError, validate } from "./validate.js";
@@ -6,29 +7,31 @@ import { apiError, validate } from "./validate.js";
 const profiles = new Hono();
 
 profiles.get("/", (c) => {
-  return c.json(profileService.list());
+  return c.json(getProfileRepository().findAll());
 });
 
 profiles.post("/", async (c) => {
   const raw = await c.req.json();
   const body = validate(createProfileSchema, raw, c);
   if (body instanceof Response) return body;
-  return c.json(profileService.create(body.name), 201);
+  return c.json(getProfileRepository().create(body.name), 201);
 });
 
 profiles.get("/:id", (c) => {
-  const result = profileService.getById(c.req.param("id"));
-  if (!result) {
+  const profileRepo = getProfileRepository();
+  const profile = profileRepo.findById(c.req.param("id"));
+  if (!profile) {
     return c.json(apiError("NOT_FOUND", "Profile not found"), 404);
   }
-  return c.json(result);
+  const servers = profileRepo.findProfileServers(c.req.param("id"));
+  return c.json({ ...profile, servers });
 });
 
 profiles.put("/:id", async (c) => {
   const raw = await c.req.json();
   const body = validate(updateProfileSchema, raw, c);
   if (body instanceof Response) return body;
-  const result = profileService.update(c.req.param("id"), body);
+  const result = getProfileRepository().update(c.req.param("id"), body);
   if (!result) {
     return c.json(apiError("NOT_FOUND", "Profile not found"), 404);
   }
@@ -36,7 +39,7 @@ profiles.put("/:id", async (c) => {
 });
 
 profiles.delete("/:id", (c) => {
-  const result = profileService.remove(c.req.param("id"));
+  const result = getProfileRepository().remove(c.req.param("id"));
   if ("error" in result) {
     if (result.error === "not_found") {
       return c.json(apiError("NOT_FOUND", "Profile not found"), 404);

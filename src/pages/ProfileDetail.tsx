@@ -24,7 +24,7 @@ export function ProfileDetail() {
   }
 
   const toggleServer = async (serverId: string, enabled: boolean) => {
-    await updateProfileServer(id, serverId, { enabled });
+    await updateProfileServer({ profileId: id, serverId, updates: { enabled } });
     refresh();
   };
 

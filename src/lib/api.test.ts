@@ -64,6 +64,24 @@ describe("api runtime recovery", () => {
     );
   });
 
+  it("does not refresh runtime or retry aborted requests", async () => {
+    invokeMock.mockResolvedValueOnce(runtime(9223, "token"));
+    invokeMock.mockResolvedValueOnce(runtime(9225, "fresh-token"));
+    const controller = new AbortController();
+    controller.abort();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new DOMException("This operation was aborted", "AbortError"))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+
+    await expect(api("/api/settings", { signal: controller.signal })).rejects.toThrow(
+      "This operation was aborted",
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["POST", "PUT", "PATCH", "DELETE"])(
     "does not retry %s requests after a network failure",
     async (method) => {

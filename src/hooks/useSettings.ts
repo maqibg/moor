@@ -17,7 +17,7 @@ export function useSettings() {
     isFetched,
   } = useQuery<Settings>({
     queryKey: QUERY_KEY,
-    queryFn: () => api<Settings>(routes.settings.get()),
+    queryFn: ({ signal }) => api<Settings>(routes.settings.get(), { signal }),
   });
 
   const updateSettings = useMutation({

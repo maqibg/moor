@@ -1,28 +1,23 @@
 import type { Database } from "./index.js";
 import { getDatabase } from "./index.js";
-import { parseJsonValue, keysToCamelCase } from "./serializers.js";
+import { parseJsonValue } from "./serializers.js";
 import type { AuditLogEntry, LogStats } from "@moor/types";
 
 export type AuditLogRow = AuditLogEntry;
 export type { LogStats };
 
-function serializeAuditLog(row: Record<string, unknown>): AuditLogRow {
-  const camel = keysToCamelCase({
-    ...row,
+function toAuditLog(row: Record<string, unknown>): AuditLogRow {
+  return {
+    id: String(row.id),
+    timestamp: String(row.timestamp),
+    profileId: (row.profile_id as string | null) ?? null,
+    serverId: (row.server_id as string | null) ?? null,
+    toolName: String(row.tool_name),
     arguments: parseJsonValue(row.arguments, null),
     result: parseJsonValue(row.result, null),
-  });
-  return {
-    id: String(camel.id),
-    timestamp: String(camel.timestamp),
-    profileId: (camel.profileId ?? null) as string | null,
-    serverId: (camel.serverId ?? null) as string | null,
-    toolName: String(camel.toolName),
-    arguments: camel.arguments,
-    result: camel.result,
-    error: (camel.error ?? null) as string | null,
-    durationMs: (camel.durationMs ?? null) as number | null,
-    agentInfo: (camel.agentInfo ?? null) as string | null,
+    error: (row.error as string | null) ?? null,
+    durationMs: (row.duration_ms as number | null) ?? null,
+    agentInfo: (row.agent_info as string | null) ?? null,
   };
 }
 
@@ -62,7 +57,7 @@ export class AuditLogRepository {
     sql += " ORDER BY timestamp DESC LIMIT ? OFFSET ?";
     params.push(safeLimit, safeOffset);
 
-    return this.db.queryAll(sql, params).map(serializeAuditLog);
+    return this.db.queryAll(sql, params).map(toAuditLog);
   }
 
   topTools(): Array<{ toolName: string; count: number; avgDuration: number }> {
@@ -71,7 +66,11 @@ export class AuditLogRepository {
         "SELECT tool_name, COUNT(*) as count, AVG(duration_ms) as avg_duration FROM audit_logs GROUP BY tool_name ORDER BY count DESC LIMIT 10",
         [],
       )
-      .map(keysToCamelCase) as Array<{ toolName: string; count: number; avgDuration: number }>;
+      .map((row) => ({
+        toolName: String(row.tool_name),
+        count: Number(row.count),
+        avgDuration: Number(row.avg_duration),
+      }));
   }
 
   topServers(): Array<{ serverId: string; count: number }> {
@@ -80,7 +79,10 @@ export class AuditLogRepository {
         "SELECT server_id, COUNT(*) as count FROM audit_logs WHERE server_id IS NOT NULL GROUP BY server_id ORDER BY count DESC LIMIT 10",
         [],
       )
-      .map(keysToCamelCase) as Array<{ serverId: string; count: number }>;
+      .map((row) => ({
+        serverId: String(row.server_id),
+        count: Number(row.count),
+      }));
   }
 
   insert(entry: {

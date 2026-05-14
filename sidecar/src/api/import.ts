@@ -6,13 +6,14 @@ import { generateSnippets } from "../config/snippets.js";
 import { getClientById } from "../config/clients.js";
 import { convertConfig, type ConvertInput } from "../config/converter.js";
 import { serverManager } from "../services/server-manager.js";
+import { serverStore } from "../services/server-store.js";
 import { profileService } from "../services/profiles.js";
 import {
   getExistingNames,
   partitionImportCandidates,
   selectImportCandidates,
   buildImportPreview,
-} from "../services/import-service.js";
+} from "../config/import-utils.js";
 import { isRecord } from "../utils.js";
 import { apiError, formatZodError } from "./validate.js";
 import type { ScannedServer } from "@moor/types";
@@ -66,7 +67,7 @@ importApi.post("/execute", async (c) => {
   const importedIds: string[] = [];
 
   for (const serverConfig of servers) {
-    const server = serverManager.addServer({
+    const server = serverStore.add({
       name: serverConfig.name,
       connectionType: serverConfig.connectionType,
       command: serverConfig.command,
@@ -76,6 +77,7 @@ importApi.post("/execute", async (c) => {
       headers: serverConfig.headers,
       workingDir: serverConfig.workingDir,
     });
+    serverManager.registerServer(server.id);
     imported.push(serverConfig.name);
     importedIds.push(server.id);
   }

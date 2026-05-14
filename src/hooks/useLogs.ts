@@ -29,7 +29,7 @@ export function useLogs(filters?: {
     error,
   } = useQuery<AuditLogEntry[]>({
     queryKey: ["logs", filters],
-    queryFn: () => api<AuditLogEntry[]>(path),
+    queryFn: ({ signal }) => api<AuditLogEntry[]>(path, { signal }),
   });
 
   const refresh = useCallback(async () => {
@@ -48,7 +48,7 @@ export function useLogStats() {
     error,
   } = useQuery<LogStats>({
     queryKey: ["logs", "stats"],
-    queryFn: () => api<LogStats>(routes.logs.stats()),
+    queryFn: ({ signal }) => api<LogStats>(routes.logs.stats(), { signal }),
   });
 
   const refresh = useCallback(async () => {

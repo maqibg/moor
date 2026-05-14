@@ -1,33 +1,31 @@
 import { Hono } from "hono";
 import { getPublicServerStartErrorMessage, serverManager } from "../services/server-manager.js";
+import { serverStore } from "../services/server-store.js";
 import { profileService } from "../services/profiles.js";
-import { getServerRepository } from "../db/server-repository.js";
 import { createServerSchema, serverOrderSchema } from "./schemas.js";
 import { apiError, validate } from "./validate.js";
 
 const servers = new Hono();
 
 servers.get("/", (c) => {
-  const rows = getServerRepository().findAll();
-  return c.json(rows);
+  return c.json(serverStore.findAll());
 });
 
 servers.post("/", async (c) => {
   const raw = await c.req.json();
   const body = validate(createServerSchema, raw, c);
   if (body instanceof Response) return body;
-  const server = serverManager.addServer(body);
+  const server = serverStore.add(body);
+  serverManager.registerServer(server.id);
   profileService.assignToActiveProfile([server.id]);
-  const row = getServerRepository().findById(server.id);
-  if (!row) return c.json(apiError("INTERNAL_ERROR", "Created server could not be reloaded"), 500);
-  return c.json(row, 201);
+  return c.json(server, 201);
 });
 
 servers.put("/order", async (c) => {
   const raw = await c.req.json();
   const body = validate(serverOrderSchema, raw, c);
   if (body instanceof Response) return body;
-  const rows = serverManager.reorderServers(body.serverIds);
+  const rows = serverStore.reorder(body.serverIds);
   if (!rows) {
     return c.json(
       apiError("ORDER_INVALID", "Server order must include every existing server exactly once."),
@@ -38,31 +36,40 @@ servers.put("/order", async (c) => {
 });
 
 servers.get("/:id", (c) => {
-  const server = serverManager.getServer(c.req.param("id"));
-  if (!server) {
+  const row = serverStore.findById(c.req.param("id"));
+  if (!row) {
     return c.json(apiError("NOT_FOUND", "Server not found"), 404);
   }
-  const row = getServerRepository().findById(c.req.param("id"));
-  if (!row) return c.json(apiError("INTERNAL_ERROR", "Server row could not be reloaded"), 500);
-  return c.json({ ...row, runtime: server });
+  const runtime = serverManager.getServer(c.req.param("id"));
+  return c.json({ ...row, runtime });
 });
 
 servers.put("/:id", async (c) => {
   const body = await c.req.json<Record<string, unknown>>();
-  const server = serverManager.updateServer(c.req.param("id"), body);
+  const id = c.req.param("id");
+  const server = serverStore.update(id, body);
   if (!server) {
     return c.json(apiError("NOT_FOUND", "Server not found"), 404);
   }
-  const row = getServerRepository().findById(server.id);
-  if (!row) return c.json(apiError("INTERNAL_ERROR", "Updated server could not be reloaded"), 500);
-  return c.json(row);
+  const runtime = serverManager.getServer(id);
+  if (runtime) {
+    if (body.name) runtime.name = server.name;
+    if ("autoStart" in body) runtime.autoStart = server.autoStart;
+  }
+  return c.json(server);
 });
 
 servers.delete("/:id", async (c) => {
-  const removed = await serverManager.removeServer(c.req.param("id"));
+  const id = c.req.param("id");
+  const runtime = serverManager.getServer(id);
+  if (runtime?.status === "running") {
+    await serverManager.stopServer(id);
+  }
+  const removed = serverStore.remove(id);
   if (!removed) {
     return c.json(apiError("NOT_FOUND", "Server not found"), 404);
   }
+  serverManager.unregisterServer(id);
   return c.json({ success: true });
 });
 
