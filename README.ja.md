@@ -65,7 +65,7 @@
 
 ### macOS アプリ
 
-[Releases](https://github.com/yourusername/moor/releases) から `.dmg` をダウンロードし、Applications フォルダにドラッグするだけです。アプリには Node.js Sidecar がスタンドアロンバイナリとしてバンドルされているため、ランタイムの事前インストールは不要です。
+[Releases](https://github.com/yourusername/moor/releases) から `.dmg` をダウンロードし、Applications フォルダにドラッグするだけです。アプリには Rust インプロセス HTTP サーバーがバンドルされているため、Node.js ランタイムの事前インストールは不要です。
 
 ### ソースからビルド
 
@@ -193,15 +193,14 @@ Moor.app
 ├── UI Layer          React + Vite + TypeScript + Tailwind CSS v4 + shadcn/ui
 ├── Desktop Layer     Tauri 2 / Rust
 │   ├── Window management + tray icon
-│   ├── macOS Keychain access
-│   └── Sidecar process lifecycle management
-├── Gateway Daemon    Node.js / TypeScript Sidecar (bundled as SEA standalone binary)
-│   ├── MCP protocol gateway   POST /mcp — init, tools/list, tools/call
-│   ├── Server management      stdio spawn + HTTP/SSE client
-│   ├── Profile routing        Global active Profile, hot-swap
-│   ├── Audit logging          Async batch write (500ms / 50 entries)
-│   └── SSE push               Real-time status sync to WebView
-└── Storage           SQLite (node:sqlite)
+│   └── In-process HTTP server (Axum)
+│       ├── MCP protocol gateway   POST /mcp — init, tools/list, tools/call
+│       ├── Server management      stdio spawn + HTTP/SSE client
+│       ├── Profile routing        Global active Profile, hot-swap
+│       ├── Audit logging          Tool call recording
+│       └── SSE push               Real-time status sync to WebView
+├── Dev Sidecar      Node.js / TypeScript (Hono — 開発モード & SEA スタンドアロン)
+└── Storage           SQLite (rusqlite / node:sqlite)
     ├── servers (configs, status)
     ├── profiles (server groups + tool toggles)
     └── audit_logs (tool calls, params, results, errors)
@@ -214,12 +213,14 @@ Moor.app
 ```
 AI Agent ──HTTP──▶ POST /mcp ──▶ Moor Gateway ──stdio/HTTP──▶ MCP Servers
                               │
-WebView ──fetch──▶ /api/* ────┘
+WebView ──IPC──▶ get_sidecar_info ─┐
+WebView ──fetch──▶ /api/* ────────┘
 WebView ◀──SSE──── /api/events
 ```
 
-- **業務操作**: WebView → HTTP `fetch()` → Sidecar（Node.js）
-- **システム操作**: WebView → Tauri IPC → Rust（macOS Keychain、トレイ、ウィンドウ）
+- **ランタイム検出**: WebView → Tauri IPC (`get_sidecar_info`) → Rust（ポート、トークン）；ブラウザ開発モードでは `/api/runtime` にフォールバック
+- **業務操作**: WebView → HTTP `fetch()` → インプロセス Axum サーバー（Rust）
+- **システム操作**: WebView → Tauri IPC → Rust（トレイ、ウィンドウ、自動起動）
 
 <a id="development"></a>
 
@@ -308,6 +309,7 @@ vp test
 | `POST`   | `/api/servers/:id/start` | Server を起動          |
 | `POST`   | `/api/servers/:id/stop`  | Server を停止          |
 | `GET`    | `/api/servers/:id/tools` | 検出済みツールを取得   |
+| `PUT`    | `/api/servers/order`     | Server の並べ替え      |
 
 ### プロファイル管理
 
@@ -327,17 +329,26 @@ vp test
 | `GET`    | `/api/logs`       | ログをクエリ（フィルタ対応） |
 | `GET`    | `/api/logs/stats` | 集計統計                     |
 
+### 設定管理
+
+| メソッド | パス                  | 説明                 |
+| -------- | --------------------- | -------------------- |
+| `GET`    | `/api/settings`       | 設定を取得           |
+| `PATCH`  | `/api/settings`       | 設定を更新           |
+| `POST`   | `/api/settings/reset` | デフォルトにリセット |
+
 ### その他
 
-| メソッド | パス                  | 説明                                   |
-| -------- | --------------------- | -------------------------------------- |
-| `GET`    | `/api/health`         | ヘルスチェック                         |
-| `GET`    | `/api/runtime`        | ランタイム情報                         |
-| `GET`    | `/api/events`         | SSE リアルタイムイベントストリーム     |
-| `POST`   | `/api/import/scan`    | ローカルクライアント設定をスキャン     |
-| `POST`   | `/api/import/parse`   | 貼り付けた JSON インポートをプレビュー |
-| `POST`   | `/api/import/execute` | インポートを実行                       |
-| `POST`   | `/api/import/convert` | クライアント間で設定を変換             |
+| メソッド | パス                   | 説明                                   |
+| -------- | ---------------------- | -------------------------------------- |
+| `GET`    | `/api/health`          | ヘルスチェック                         |
+| `GET`    | `/api/runtime`         | ランタイム情報                         |
+| `GET`    | `/api/events`          | SSE リアルタイムイベントストリーム     |
+| `POST`   | `/api/import/scan`     | ローカルクライアント設定をスキャン     |
+| `POST`   | `/api/import/parse`    | 貼り付けた JSON インポートをプレビュー |
+| `POST`   | `/api/import/execute`  | インポートを実行                       |
+| `GET`    | `/api/import/snippets` | クライアント設定スニペットを生成       |
+| `POST`   | `/api/import/convert`  | クライアント間で設定を変換             |
 
 ## 技術スタック
 
@@ -347,8 +358,9 @@ vp test
 | UI プリミティブ   | Radix UI                                          |
 | UI コンポーネント | shadcn/ui (New York style)                        |
 | デスクトップ      | Tauri 2 (Rust)                                    |
-| Sidecar           | Node.js, TypeScript, Hono, @hono/node-server      |
-| データベース      | SQLite (node:sqlite)                              |
+| ゲートウェイ      | Rust, Axum, Tokio, rusqlite (インプロセス)        |
+| 開発 Sidecar      | Node.js, TypeScript, Hono, @hono/node-server      |
+| データベース      | SQLite (rusqlite / node:sqlite)                   |
 | MCP プロトコル    | @modelcontextprotocol/sdk (stdio + HTTP/SSE)      |
 | アイコン          | Lucide React                                      |
 | ツールチェーン    | Vite+ (vp CLI), Oxlint, Oxfmt, Vitest             |

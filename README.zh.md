@@ -63,7 +63,7 @@
 
 ### macOS 应用
 
-从 [Releases](https://github.com/yourusername/moor/releases) 下载 `.dmg`，拖拽到 Applications 文件夹即可。应用已将 Node.js Sidecar 打包为独立二进制——无需预装运行时。
+从 [Releases](https://github.com/yourusername/moor/releases) 下载 `.dmg`，拖拽到 Applications 文件夹即可。应用内嵌 Rust HTTP 服务器——无需预装 Node.js 运行时。
 
 ### 从源码构建
 
@@ -185,15 +185,14 @@ Moor.app
 ├── UI Layer          React + Vite + TypeScript + Tailwind CSS v4 + shadcn/ui
 ├── Desktop Layer     Tauri 2 / Rust
 │   ├── Window management + tray icon
-│   ├── macOS Keychain access
-│   └── Sidecar process lifecycle management
-├── Gateway Daemon    Node.js / TypeScript Sidecar (bundled as SEA standalone binary)
-│   ├── MCP protocol gateway   POST /mcp — init, tools/list, tools/call
-│   ├── Server management      stdio spawn + HTTP/SSE client
-│   ├── Profile routing        Global active Profile, hot-swap
-│   ├── Audit logging          Async batch write (500ms / 50 entries)
-│   └── SSE push               Real-time status sync to WebView
-└── Storage           SQLite (node:sqlite)
+│   └── In-process HTTP server (Axum)
+│       ├── MCP protocol gateway   POST /mcp — init, tools/list, tools/call
+│       ├── Server management      stdio spawn + HTTP/SSE client
+│       ├── Profile routing        Global active Profile, hot-swap
+│       ├── Audit logging          Tool call recording
+│       └── SSE push               Real-time status sync to WebView
+├── Dev Sidecar      Node.js / TypeScript (Hono — 开发模式 & SEA 独立运行)
+└── Storage           SQLite (rusqlite / node:sqlite)
     ├── servers (configs, status)
     ├── profiles (server groups + tool toggles)
     └── audit_logs (tool calls, params, results, errors)
@@ -206,12 +205,14 @@ Moor.app
 ```
 AI Agent ──HTTP──▶ POST /mcp ──▶ Moor Gateway ──stdio/HTTP──▶ MCP Servers
                               │
-WebView ──fetch──▶ /api/* ────┘
+WebView ──IPC──▶ get_sidecar_info ─┐
+WebView ──fetch──▶ /api/* ────────┘
 WebView ◀──SSE──── /api/events
 ```
 
-- **业务操作**: WebView → HTTP `fetch()` → Sidecar（Node.js）
-- **系统操作**: WebView → Tauri IPC → Rust（macOS Keychain、托盘、窗口）
+- **运行时发现**: WebView → Tauri IPC (`get_sidecar_info`) → Rust（端口、token）；浏览器开发模式回退到 `/api/runtime`
+- **业务操作**: WebView → HTTP `fetch()` → 进程内 Axum 服务器（Rust）
+- **系统操作**: WebView → Tauri IPC → Rust（托盘、窗口、自启动）
 
 ## 开发
 
@@ -296,6 +297,7 @@ vp test
 | `POST`   | `/api/servers/:id/start` | 启动 Server      |
 | `POST`   | `/api/servers/:id/stop`  | 停止 Server      |
 | `GET`    | `/api/servers/:id/tools` | 获取已发现工具   |
+| `PUT`    | `/api/servers/order`     | 重新排序 Server  |
 
 ### Profile 管理
 
@@ -315,17 +317,26 @@ vp test
 | `GET` | `/api/logs`       | 查询日志（支持筛选） |
 | `GET` | `/api/logs/stats` | 聚合统计             |
 
+### Settings 管理
+
+| 方法    | 路径                  | 说明         |
+| ------- | --------------------- | ------------ |
+| `GET`   | `/api/settings`       | 获取设置     |
+| `PATCH` | `/api/settings`       | 更新设置     |
+| `POST`  | `/api/settings/reset` | 重置为默认值 |
+
 ### 其他
 
-| 方法   | 路径                  | 说明                 |
-| ------ | --------------------- | -------------------- |
-| `GET`  | `/api/health`         | 健康检查             |
-| `GET`  | `/api/runtime`        | 运行时信息           |
-| `GET`  | `/api/events`         | SSE 实时事件流       |
-| `POST` | `/api/import/scan`    | 扫描本地客户端配置   |
-| `POST` | `/api/import/parse`   | 预览粘贴的 JSON 导入 |
-| `POST` | `/api/import/execute` | 执行导入             |
-| `POST` | `/api/import/convert` | 客户端配置互转       |
+| 方法   | 路径                   | 说明                 |
+| ------ | ---------------------- | -------------------- |
+| `GET`  | `/api/health`          | 健康检查             |
+| `GET`  | `/api/runtime`         | 运行时信息           |
+| `GET`  | `/api/events`          | SSE 实时事件流       |
+| `POST` | `/api/import/scan`     | 扫描本地客户端配置   |
+| `POST` | `/api/import/parse`    | 预览粘贴的 JSON 导入 |
+| `POST` | `/api/import/execute`  | 执行导入             |
+| `GET`  | `/api/import/snippets` | 生成客户端配置片段   |
+| `POST` | `/api/import/convert`  | 客户端配置互转       |
 
 ## 技术栈
 
@@ -335,8 +346,9 @@ vp test
 | UI 基础  | Radix UI                                          |
 | UI 组件  | shadcn/ui (New York style)                        |
 | 桌面框架 | Tauri 2 (Rust)                                    |
-| Sidecar  | Node.js, TypeScript, Hono, @hono/node-server      |
-| 数据库   | SQLite (node:sqlite)                              |
+| 网关     | Rust, Axum, Tokio, rusqlite (进程内)              |
+| 开发侧车 | Node.js, TypeScript, Hono, @hono/node-server      |
+| 数据库   | SQLite (rusqlite / node:sqlite)                   |
 | MCP 协议 | @modelcontextprotocol/sdk (stdio + HTTP/SSE)      |
 | 图标     | Lucide React                                      |
 | 工具链   | Vite+ (vp CLI), Oxlint, Oxfmt, Vitest             |

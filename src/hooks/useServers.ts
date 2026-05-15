@@ -14,12 +14,29 @@ import {
 
 type ServerSetter = Dispatch<SetStateAction<Server[]>>;
 type ServerMutationResult = "success" | "failed";
+interface ServerActionsDeps {
+  setServerAction?: (id: string, action: ServerAction) => void;
+  clearServerAction?: (id: string) => void;
+  setData?: ServerSetter;
+  refreshSilently?: () => Promise<void>;
+}
 
 function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : "Unknown server action error";
 }
 
-function useServerActionState(setData: ServerSetter) {
+export function useServerList() {
+  const queryClient = useQueryClient();
+
+  const {
+    data: servers = [],
+    isLoading: loading,
+    error,
+  } = useQuery<Server[]>({
+    queryKey: ["servers"],
+    queryFn: ({ signal }) => api<Server[]>(routes.servers.list(), { signal }),
+  });
+
   const [serverActions, setServerActions] = useState<Record<string, ServerAction>>({});
 
   const setServerAction = useCallback((id: string, action: ServerAction) => {
@@ -34,6 +51,16 @@ function useServerActionState(setData: ServerSetter) {
     });
   }, []);
 
+  const setData = useCallback(
+    (updater: SetStateAction<Server[]>) => {
+      queryClient.setQueryData<Server[]>(["servers"], (old) => {
+        const prev = old ?? [];
+        return typeof updater === "function" ? updater(prev) : updater;
+      });
+    },
+    [queryClient],
+  );
+
   const mergeStatusEvent = useCallback(
     (eventData: unknown) => {
       const payload = getServerStatusEventPayload(eventData);
@@ -46,34 +73,6 @@ function useServerActionState(setData: ServerSetter) {
     [clearServerAction, setData],
   );
 
-  return { serverActions, setServerAction, clearServerAction, mergeStatusEvent };
-}
-
-export function useServers() {
-  const queryClient = useQueryClient();
-
-  const {
-    data: servers = [],
-    isLoading: loading,
-    error,
-  } = useQuery<Server[]>({
-    queryKey: ["servers"],
-    queryFn: ({ signal }) => api<Server[]>(routes.servers.list(), { signal }),
-  });
-
-  const setData = useCallback(
-    (updater: SetStateAction<Server[]>) => {
-      queryClient.setQueryData<Server[]>(["servers"], (old) => {
-        const prev = old ?? [];
-        return typeof updater === "function" ? updater(prev) : updater;
-      });
-    },
-    [queryClient],
-  );
-
-  const { serverActions, setServerAction, clearServerAction, mergeStatusEvent } =
-    useServerActionState(setData);
-
   const refreshSilently = useCallback(async () => {
     await queryClient.refetchQueries({ queryKey: ["servers"] });
   }, [queryClient]);
@@ -81,6 +80,61 @@ export function useServers() {
   const refresh = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ["servers"] });
   }, [queryClient]);
+
+  useSSEEvent("server:status", (data) => mergeStatusEvent(data));
+  useSSEEvent("server:tools", () => void refreshSilently());
+
+  return {
+    servers,
+    loading,
+    error: error?.message ?? null,
+    refresh,
+    refreshSilently,
+    serverActions,
+    setServerAction,
+    clearServerAction,
+    setData,
+  };
+}
+
+export function useServerActions(deps: ServerActionsDeps = {}) {
+  const queryClient = useQueryClient();
+  const { setServerAction, clearServerAction, setData, refreshSilently } = deps;
+
+  const setServersData = useCallback(
+    (updater: SetStateAction<Server[]>) => {
+      if (setData) {
+        setData(updater);
+        return;
+      }
+      queryClient.setQueryData<Server[]>(["servers"], (old) => {
+        const prev = old ?? [];
+        return typeof updater === "function" ? updater(prev) : updater;
+      });
+    },
+    [queryClient, setData],
+  );
+
+  const setServerDetailPatch = useCallback(
+    (id: string, patch: Partial<ServerDetail>) => {
+      queryClient.setQueryData<ServerDetail>(["servers", id], (prev) =>
+        prev ? { ...prev, ...patch } : prev,
+      );
+    },
+    [queryClient],
+  );
+
+  const refreshAfterServerMutation = useCallback(
+    async (id: string) => {
+      if (refreshSilently) {
+        await refreshSilently();
+      } else {
+        await queryClient.invalidateQueries({ queryKey: ["servers"] });
+      }
+      await queryClient.invalidateQueries({ queryKey: ["servers", id] });
+    },
+    [queryClient, refreshSilently],
+  );
 
   const addServer = useMutation({
     mutationFn: async (config: {
@@ -102,49 +156,55 @@ export function useServers() {
 
   const startServer = useMutation<ServerMutationResult, Error, string>({
     mutationFn: async (id: string) => {
-      setServerAction(id, "starting");
-      setData((prev) => applyServerAction(prev, id, "starting"));
+      setServerAction?.(id, "starting");
+      setServersData((prev) => applyServerAction(prev, id, "starting"));
+      setServerDetailPatch(id, { status: "starting", errorMessage: null });
       try {
         await apiPost(routes.servers.start(id), {});
         return "success";
       } catch (err) {
-        setData((prev) =>
+        const errorMessage = getErrorMessage(err);
+        setServersData((prev) =>
           mergeServerStatusEvent(prev, {
             serverId: id,
             status: "error",
-            errorMessage: getErrorMessage(err),
+            errorMessage,
           }),
         );
+        setServerDetailPatch(id, { status: "error", errorMessage });
         return "failed";
       }
     },
     onSettled: (result, _err, id) => {
-      clearServerAction(id);
-      if (result === "success") void refreshSilently();
+      clearServerAction?.(id);
+      if (result === "success") void refreshAfterServerMutation(id);
     },
   });
 
   const stopServer = useMutation<ServerMutationResult, Error, string>({
     mutationFn: async (id: string) => {
-      setServerAction(id, "stopping");
-      setData((prev) => applyServerAction(prev, id, "stopping"));
+      setServerAction?.(id, "stopping");
+      setServersData((prev) => applyServerAction(prev, id, "stopping"));
+      setServerDetailPatch(id, { errorMessage: null });
       try {
         await apiPost(routes.servers.stop(id), {});
         return "success";
       } catch (err) {
-        setData((prev) =>
+        const errorMessage = getErrorMessage(err);
+        setServersData((prev) =>
           mergeServerStatusEvent(prev, {
             serverId: id,
             status: "error",
-            errorMessage: getErrorMessage(err),
+            errorMessage,
           }),
         );
+        setServerDetailPatch(id, { status: "error", errorMessage });
         return "failed";
       }
     },
     onSettled: (result, _err, id) => {
-      clearServerAction(id);
-      if (result === "success") void refreshSilently();
+      clearServerAction?.(id);
+      if (result === "success") void refreshAfterServerMutation(id);
     },
   });
 
@@ -189,17 +249,7 @@ export function useServers() {
     },
   });
 
-  useSSEEvent("server:status", (data) => mergeStatusEvent(data));
-  useSSEEvent("server:tools", () => void refreshSilently());
-
   return {
-    servers,
-    loading,
-    error: error?.message ?? null,
-    refresh,
-    refreshSilently,
-    serverActions,
-    mergeStatusEvent,
     addServer: addServer.mutateAsync,
     updateServer: updateServer.mutateAsync,
     startServer: async (id: string) => {
@@ -210,6 +260,26 @@ export function useServers() {
     },
     removeServer: removeServer.mutateAsync,
     reorderServers: reorderServers.mutateAsync,
+  };
+}
+
+export function useServers() {
+  const list = useServerList();
+  const actions = useServerActions({
+    setServerAction: list.setServerAction,
+    clearServerAction: list.clearServerAction,
+    setData: list.setData,
+    refreshSilently: list.refreshSilently,
+  });
+
+  return {
+    servers: list.servers,
+    loading: list.loading,
+    error: list.error,
+    refresh: list.refresh,
+    refreshSilently: list.refreshSilently,
+    serverActions: list.serverActions,
+    ...actions,
   };
 }
 
@@ -252,3 +322,5 @@ export function useServerTools(serverId: string | undefined, profileId?: string)
 
   return { tools, refresh };
 }
+
+export type { ServerAction };

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useServers } from "@/hooks/useServers";
+import { useServerList } from "@/hooks/useServers";
 import { useProfiles } from "@/hooks/useProfiles";
 import { useLogs } from "@/hooks/useLogs";
 import { getMcpEndpoint } from "@/lib/api";
@@ -26,7 +26,7 @@ import { useNavigate } from "react-router-dom";
 
 export function Dashboard() {
   const navigate = useNavigate();
-  const { servers } = useServers();
+  const { servers } = useServerList();
   const { profiles } = useProfiles();
   const { logs } = useLogs();
   const [mcpEndpoint, setMcpEndpoint] = useState("http://127.0.0.1:9223/mcp");

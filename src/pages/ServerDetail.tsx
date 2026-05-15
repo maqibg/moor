@@ -10,13 +10,13 @@ import { CopyButton } from "@/components/shared/CopyButton";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Play, Square, RefreshCw, Terminal } from "lucide-react";
 import { useProfiles } from "@/hooks/useProfiles";
-import { useServers, useServer, useServerTools } from "@/hooks/useServers";
+import { useServerActions, useServer, useServerTools } from "@/hooks/useServers";
 import { cn } from "@/lib/utils";
 
 export function ServerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { startServer, stopServer, updateServer } = useServers();
+  const { startServer, stopServer, updateServer } = useServerActions();
   const { profiles, updateProfileServer } = useProfiles();
   const activeProfile = profiles.find((profile) => profile.isActive);
 

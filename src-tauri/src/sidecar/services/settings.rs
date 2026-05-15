@@ -1,6 +1,7 @@
+use crate::sidecar::db::Database;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::{fs, path::Path};
+use serde_json::{Map, Value};
+use std::{collections::HashMap, fs, path::Path};
 
 const SETTINGS_FILE: &str = "settings.json";
 
@@ -104,23 +105,131 @@ pub fn read_settings_file(data_dir: &Path) -> Settings {
     .unwrap_or_else(|_| default_settings())
 }
 
-pub fn write_settings_file(data_dir: &Path, settings: &Settings) -> Result<(), String> {
-    fs::create_dir_all(data_dir).map_err(|e| e.to_string())?;
-    let content = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
-    fs::write(settings_path(data_dir), format!("{content}\n")).map_err(|e| e.to_string())
+fn settings_to_db_entries(settings: &Settings) -> Result<Vec<(&'static str, String)>, String> {
+    Ok(vec![
+        (
+            "general.autoStartOnLogin",
+            serde_json::to_string(&settings.general.auto_start_on_login)
+                .map_err(|e| e.to_string())?,
+        ),
+        (
+            "general.autoStartServersOnLaunch",
+            serde_json::to_string(&settings.general.auto_start_servers_on_launch)
+                .map_err(|e| e.to_string())?,
+        ),
+        (
+            "general.minimizeToTrayOnClose",
+            serde_json::to_string(&settings.general.minimize_to_tray_on_close)
+                .map_err(|e| e.to_string())?,
+        ),
+        (
+            "general.showWindowOnLaunch",
+            serde_json::to_string(&settings.general.show_window_on_launch)
+                .map_err(|e| e.to_string())?,
+        ),
+        (
+            "appearance.theme",
+            serde_json::to_string(&settings.appearance.theme).map_err(|e| e.to_string())?,
+        ),
+        (
+            "advanced.logRetentionDays",
+            serde_json::to_string(&settings.advanced.log_retention_days)
+                .map_err(|e| e.to_string())?,
+        ),
+        (
+            "advanced.enableAuditLogging",
+            serde_json::to_string(&settings.advanced.enable_audit_logging)
+                .map_err(|e| e.to_string())?,
+        ),
+        (
+            "advanced.sidecarPort",
+            serde_json::to_string(&settings.advanced.sidecar_port).map_err(|e| e.to_string())?,
+        ),
+    ])
 }
 
-pub fn update_settings_file(data_dir: &Path, patch: Value) -> Result<Settings, String> {
-    let current = read_settings_file(data_dir);
+fn insert_nested_setting(root: &mut Map<String, Value>, key: &str, value: Value) {
+    let parts = key.split('.').collect::<Vec<_>>();
+    if parts.is_empty() {
+        return;
+    }
+
+    let mut current = root;
+    for part in &parts[..parts.len() - 1] {
+        let entry = current
+            .entry((*part).to_string())
+            .or_insert_with(|| Value::Object(Map::new()));
+        if !entry.is_object() {
+            *entry = Value::Object(Map::new());
+        }
+        current = entry.as_object_mut().expect("entry was normalized to object");
+    }
+
+    current.insert(parts[parts.len() - 1].to_string(), value);
+}
+
+fn db_entries_to_settings(entries: HashMap<String, String>) -> Settings {
+    let mut raw = Map::new();
+    for (key, value) in entries {
+        let parsed = serde_json::from_str(&value).unwrap_or(Value::String(value));
+        insert_nested_setting(&mut raw, &key, parsed);
+    }
+    merge_settings_value(default_settings(), Value::Object(raw))
+        .unwrap_or_else(|_| default_settings())
+}
+
+fn load_db_entries(db: &Database) -> Result<HashMap<String, String>, String> {
+    let rows = db.query_all("SELECT key, value FROM settings", &[], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    Ok(rows.into_iter().collect())
+}
+
+fn persist_settings(db: &Database, settings: &Settings) -> Result<(), String> {
+    let entries = settings_to_db_entries(settings)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    db.transaction(|conn| {
+        for (key, value) in entries {
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?1, ?2, ?3)",
+                rusqlite::params![key, value, &now],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    })
+}
+
+pub fn init_settings(db: &Database, data_dir: &Path) -> Result<Settings, String> {
+    let entries = load_db_entries(db)?;
+    if !entries.is_empty() {
+        return Ok(db_entries_to_settings(entries));
+    }
+
+    let settings = read_settings_file(data_dir);
+    persist_settings(db, &settings)?;
+    Ok(settings)
+}
+
+pub fn get_settings(db: &Database) -> Result<Settings, String> {
+    let entries = load_db_entries(db)?;
+    if entries.is_empty() {
+        return Ok(default_settings());
+    }
+    Ok(db_entries_to_settings(entries))
+}
+
+pub fn update_settings(db: &Database, patch: Value) -> Result<Settings, String> {
+    let current = get_settings(db)?;
     let updated = merge_settings_value(current, patch)?;
     validate_settings(&updated)?;
-    write_settings_file(data_dir, &updated)?;
+    persist_settings(db, &updated)?;
     Ok(updated)
 }
 
-pub fn reset_settings_file(data_dir: &Path) -> Result<Settings, String> {
+pub fn reset_settings(db: &Database) -> Result<Settings, String> {
     let settings = default_settings();
-    write_settings_file(data_dir, &settings)?;
+    persist_settings(db, &settings)?;
     Ok(settings)
 }
 
@@ -186,13 +295,16 @@ fn validate_settings(settings: &Settings) -> Result<(), String> {
     Ok(())
 }
 
-pub fn audit_logging_enabled(data_dir: &Path) -> bool {
-    read_settings_file(data_dir).advanced.enable_audit_logging
+pub fn audit_logging_enabled(db: &Database) -> bool {
+    get_settings(db)
+        .map(|settings| settings.advanced.enable_audit_logging)
+        .unwrap_or_else(|_| default_settings().advanced.enable_audit_logging)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sidecar::db::Database;
     use std::time::SystemTime;
 
     fn temp_data_dir(test_name: &str) -> std::path::PathBuf {
@@ -203,40 +315,88 @@ mod tests {
         std::env::temp_dir().join(format!("moor-settings-{test_name}-{timestamp}"))
     }
 
-    #[test]
-    fn fresh_store_returns_defaults() {
-        let data_dir = temp_data_dir("fresh");
-        let settings = read_settings_file(&data_dir);
-        assert_eq!(settings, default_settings());
+    fn test_db(data_dir: &Path) -> Database {
+        fs::create_dir_all(data_dir).expect("failed to create temp settings dir");
+        let db = Database::open(&data_dir.join("moor.db")).expect("failed to open settings db");
+        db.run_migrations().expect("failed to migrate settings db");
+        db
     }
 
     #[test]
-    fn patch_deep_merges_and_writes_settings_json() {
+    fn fresh_store_returns_defaults() {
+        let data_dir = temp_data_dir("fresh");
+        let db = test_db(&data_dir);
+
+        let settings = init_settings(&db, &data_dir).expect("settings should initialize");
+
+        assert_eq!(settings, default_settings());
+        assert_eq!(get_settings(&db).expect("settings should load"), default_settings());
+        let _ = fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn migrates_settings_json_once_and_keeps_database_as_source_of_truth() {
         let data_dir = temp_data_dir("patch");
-        let updated = update_settings_file(
-            &data_dir,
+        fs::create_dir_all(&data_dir).expect("failed to create temp settings dir");
+        fs::write(
+            settings_path(&data_dir),
+            r#"{
+              "general": { "minimizeToTrayOnClose": false },
+              "advanced": { "sidecarPort": 9333 }
+            }"#,
+        )
+        .expect("failed to write migration source");
+        let db = test_db(&data_dir);
+
+        let migrated = init_settings(&db, &data_dir).expect("settings should migrate");
+        let updated = update_settings(
+            &db,
             serde_json::json!({
-                "general": { "minimizeToTrayOnClose": false },
-                "advanced": { "sidecarPort": 9333 }
+                "general": { "minimizeToTrayOnClose": true },
+                "advanced": { "sidecarPort": 9444 }
             }),
         )
         .expect("settings update should succeed");
 
-        assert!(!updated.general.minimize_to_tray_on_close);
+        assert!(!migrated.general.minimize_to_tray_on_close);
+        assert_eq!(migrated.advanced.sidecar_port, 9333);
+        assert!(updated.general.minimize_to_tray_on_close);
         assert!(updated.general.show_window_on_launch);
-        assert_eq!(updated.advanced.sidecar_port, 9333);
-        assert_eq!(read_settings_file(&data_dir), updated);
+        assert_eq!(updated.advanced.sidecar_port, 9444);
+        assert!(!read_settings_file(&data_dir).general.minimize_to_tray_on_close);
+        assert_eq!(read_settings_file(&data_dir).advanced.sidecar_port, 9333);
+        assert_eq!(get_settings(&db).expect("settings should load"), updated);
         let _ = fs::remove_dir_all(data_dir);
     }
 
     #[test]
     fn rejects_invalid_port_updates() {
         let data_dir = temp_data_dir("invalid-port");
-        let err = update_settings_file(
-            &data_dir,
+        let db = test_db(&data_dir);
+        init_settings(&db, &data_dir).expect("settings should initialize");
+
+        let err = update_settings(
+            &db,
             serde_json::json!({ "advanced": { "sidecarPort": 80 } }),
         )
         .expect_err("invalid port should fail");
         assert!(err.contains("advanced.sidecarPort"));
+        let _ = fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn audit_logging_enabled_reads_database_settings() {
+        let data_dir = temp_data_dir("audit");
+        let db = test_db(&data_dir);
+        init_settings(&db, &data_dir).expect("settings should initialize");
+
+        update_settings(
+            &db,
+            serde_json::json!({ "advanced": { "enableAuditLogging": false } }),
+        )
+        .expect("settings update should succeed");
+
+        assert!(!audit_logging_enabled(&db));
+        let _ = fs::remove_dir_all(data_dir);
     }
 }

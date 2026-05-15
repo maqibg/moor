@@ -146,7 +146,7 @@ fn record_audit(
     duration_ms: i64,
     agent_info: Option<&str>,
 ) {
-    if !audit_logging_enabled(&state.data_dir) {
+    if !audit_logging_enabled(state.db.as_ref()) {
         return;
     }
 
@@ -224,15 +224,12 @@ process.stdin.on("data", (chunk) => {
     async fn tools_call_routes_to_running_server_and_records_audit() {
         let data_dir = temp_data_dir("tools-call");
         std::fs::create_dir_all(&data_dir).expect("failed to create temp data dir");
-        crate::sidecar::services::settings::write_settings_file(
-            &data_dir,
-            &crate::sidecar::services::settings::default_settings(),
-        )
-        .expect("failed to write settings");
         let script = write_fake_mcp_server(&data_dir);
 
         let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
         db.run_migrations().expect("failed to migrate");
+        crate::sidecar::services::settings::init_settings(db.as_ref(), &data_dir)
+            .expect("failed to initialize settings");
         let profile_repo = ProfileRepository::new(&db);
         profile_repo.seed_default().expect("failed to seed profile");
 
@@ -275,7 +272,6 @@ process.stdin.on("data", (chunk) => {
             api_token: "test-token".to_string(),
             version: "test".to_string(),
             port: 19323,
-            data_dir: data_dir.clone(),
             event_bus,
             server_manager,
         });

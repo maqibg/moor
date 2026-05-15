@@ -16,7 +16,6 @@ import { importApi, selectImportCandidates } from "./import.js";
 import { eventBus } from "../services/event-bus.js";
 import { profileService } from "../services/profiles.js";
 import { serverManager } from "../services/server-manager.js";
-import { serverStore } from "../services/server-store.js";
 
 const originalHome = process.env.HOME;
 let tempHome: string | null = null;
@@ -76,7 +75,7 @@ describe("selectImportCandidates", () => {
 describe("import execute API", () => {
   it("reports skipped server names for existing and duplicate import entries", async () => {
     await initImportDb();
-    serverStore.add({
+    serverManager.addServer({
       name: "github",
       connectionType: "stdio",
       command: "npx",
@@ -114,9 +113,9 @@ describe("import execute API", () => {
       { name: "github" },
       { name: "linear" },
     ]);
-    const importedServer = serverStore.findAll().find((server) => server.name === "linear");
+    const importedServer = queryAll("SELECT * FROM mcp_servers WHERE name = 'linear'")[0];
     expect(importedServer).toBeDefined();
-    expect(serverManager.getServer(importedServer!.id)?.name).toBe("linear");
+    expect(serverManager.getServer(String(importedServer!.id))?.name).toBe("linear");
   });
 });
 

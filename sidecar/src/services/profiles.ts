@@ -2,6 +2,12 @@ import { getProfileRepository, type ProfileServerRow } from "../db/profile-repos
 import { eventBus } from "./event-bus.js";
 import type { Profile } from "@moor/types";
 
+export interface ActiveProfileServer {
+  serverId: string;
+  connectionType: "stdio" | "http";
+  name: string;
+}
+
 class ProfileService {
   activate(id: string): Profile | null {
     const result = getProfileRepository().activate(id);
@@ -15,7 +21,7 @@ class ProfileService {
     return getProfileRepository().findActiveId();
   }
 
-  getActiveProfileServers() {
+  getActiveProfileServers(): ActiveProfileServer[] {
     const repo = getProfileRepository();
     const activeProfileId = repo.findActiveId();
     if (!activeProfileId) return [];

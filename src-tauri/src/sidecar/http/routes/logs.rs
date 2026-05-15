@@ -87,7 +87,6 @@ mod tests {
             api_token: "test-token".to_string(),
             version: "test".to_string(),
             port: 19323,
-            data_dir,
             event_bus: event_bus.clone(),
             server_manager: Arc::new(ServerManager::new(db, event_bus)),
         })

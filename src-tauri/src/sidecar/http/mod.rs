@@ -6,7 +6,7 @@ use crate::sidecar::services::event_bus::EventBus;
 use crate::sidecar::services::server_manager::ServerManager;
 use axum::{http::StatusCode, middleware, response::IntoResponse, Json, Router};
 use serde_json::json;
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 use tokio::net::TcpListener;
 
 pub struct AppState {
@@ -14,7 +14,6 @@ pub struct AppState {
     pub api_token: String,
     pub version: String,
     pub port: u16,
-    pub data_dir: PathBuf,
     pub event_bus: Arc<EventBus>,
     pub server_manager: Arc<ServerManager>,
 }

@@ -1,23 +1,20 @@
 import { Hono } from "hono";
 import { getPublicServerStartErrorMessage, serverManager } from "../services/server-manager.js";
-import { serverStore } from "../services/server-store.js";
-import { profileService } from "../services/profiles.js";
+import { getServerRepository } from "../db/server-repository.js";
 import { createServerSchema, serverOrderSchema } from "./schemas.js";
 import { apiError, validate } from "./validate.js";
 
 const servers = new Hono();
 
 servers.get("/", (c) => {
-  return c.json(serverStore.findAll());
+  return c.json(getServerRepository().findAll());
 });
 
 servers.post("/", async (c) => {
   const raw = await c.req.json();
   const body = validate(createServerSchema, raw, c);
   if (body instanceof Response) return body;
-  const server = serverStore.add(body);
-  serverManager.registerServer(server.id);
-  profileService.assignToActiveProfile([server.id]);
+  const server = serverManager.addServer(body);
   return c.json(server, 201);
 });
 
@@ -25,18 +22,25 @@ servers.put("/order", async (c) => {
   const raw = await c.req.json();
   const body = validate(serverOrderSchema, raw, c);
   if (body instanceof Response) return body;
-  const rows = serverStore.reorder(body.serverIds);
-  if (!rows) {
+  const repo = getServerRepository();
+  const existingIds = repo.findIds();
+  const existing = new Set(existingIds);
+  if (
+    new Set(body.serverIds).size !== body.serverIds.length ||
+    body.serverIds.length !== existingIds.length ||
+    body.serverIds.some((id) => !existing.has(id))
+  ) {
     return c.json(
       apiError("ORDER_INVALID", "Server order must include every existing server exactly once."),
       400,
     );
   }
-  return c.json(rows);
+  repo.reorder(body.serverIds);
+  return c.json(repo.findAll());
 });
 
 servers.get("/:id", (c) => {
-  const row = serverStore.findById(c.req.param("id"));
+  const row = getServerRepository().findById(c.req.param("id"));
   if (!row) {
     return c.json(apiError("NOT_FOUND", "Server not found"), 404);
   }
@@ -47,16 +51,19 @@ servers.get("/:id", (c) => {
 servers.put("/:id", async (c) => {
   const body = await c.req.json<Record<string, unknown>>();
   const id = c.req.param("id");
-  const server = serverStore.update(id, body);
+  const repo = getServerRepository();
+  const server = repo.findById(id);
   if (!server) {
     return c.json(apiError("NOT_FOUND", "Server not found"), 404);
   }
+  repo.update(id, body);
+  const updated = repo.findById(id);
   const runtime = serverManager.getServer(id);
   if (runtime) {
-    if (body.name) runtime.name = server.name;
-    if ("autoStart" in body) runtime.autoStart = server.autoStart;
+    if (body.name) runtime.name = updated!.name;
+    if ("autoStart" in body) runtime.autoStart = updated!.autoStart;
   }
-  return c.json(server);
+  return c.json(updated);
 });
 
 servers.delete("/:id", async (c) => {
@@ -65,10 +72,12 @@ servers.delete("/:id", async (c) => {
   if (runtime?.status === "running") {
     await serverManager.stopServer(id);
   }
-  const removed = serverStore.remove(id);
-  if (!removed) {
+  const repo = getServerRepository();
+  const existing = repo.findById(id);
+  if (!existing) {
     return c.json(apiError("NOT_FOUND", "Server not found"), 404);
   }
+  repo.remove(id);
   serverManager.unregisterServer(id);
   return c.json({ success: true });
 });

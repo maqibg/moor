@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
@@ -71,15 +71,16 @@ describe("SettingsService", () => {
     });
   });
 
-  it("writes settings.json before updateSettings returns", () => {
+  it("persists settings to the database before updateSettings returns", () => {
     const updated = settingsService.updateSettings({
       general: { minimizeToTrayOnClose: false },
     });
 
-    const persisted = JSON.parse(readFileSync(path.join(dataDir, "settings.json"), "utf-8"));
-
-    expect(persisted).toMatchObject(updated);
-    expect(persisted.general.minimizeToTrayOnClose).toBe(false);
+    const rows = queryAll(
+      "SELECT key, value FROM settings WHERE key = 'general.minimizeToTrayOnClose'",
+    );
+    expect(rows).toEqual([{ key: "general.minimizeToTrayOnClose", value: "false" }]);
+    expect(updated.general.minimizeToTrayOnClose).toBe(false);
   });
 
   it("keeps audit logs when retention is unlimited", () => {

@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { closeDb, initDb, runMigrations } from "../db/index.js";
 import { getServerRepository } from "../db/server-repository.js";
-import { serverStore } from "../services/server-store.js";
+import { serverManager } from "../services/server-manager.js";
 import { convertConfig } from "./converter.js";
 
 let dataDir: string;
@@ -22,7 +22,7 @@ describe("convertConfig Moor source", () => {
   });
 
   it("converts selected Moor servers in the requested order", () => {
-    const first = serverStore.add({
+    const first = serverManager.addServer({
       name: "first",
       connectionType: "stdio",
       command: "node",
@@ -30,7 +30,7 @@ describe("convertConfig Moor source", () => {
       env: { FIRST: "1" },
       workingDir: "/tmp/first",
     });
-    const second = serverStore.add({
+    const second = serverManager.addServer({
       name: "second",
       connectionType: "http",
       url: "https://mcp.example.com/mcp",
@@ -58,12 +58,12 @@ describe("convertConfig Moor source", () => {
   });
 
   it("loads selected Moor servers through a batch lookup preserving requested order", () => {
-    const first = serverStore.add({
+    const first = serverManager.addServer({
       name: "first",
       connectionType: "stdio",
       command: "node",
     });
-    const second = serverStore.add({
+    const second = serverManager.addServer({
       name: "second",
       connectionType: "stdio",
       command: "node",

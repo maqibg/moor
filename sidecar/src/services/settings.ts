@@ -143,8 +143,6 @@ class SettingsService {
       this.cache = settings;
       repo.setMany(settingsToDbEntries(settings));
     }
-
-    this.writeJsonBackup(this.cache);
   }
 
   getSettings(): Settings {
@@ -191,15 +189,9 @@ class SettingsService {
   }
 
   private persist(settings: Settings) {
-    this.writeJsonBackup(settings);
     getSettingsRepository().setMany(settingsToDbEntries(settings));
     this.cache = settings;
     eventBus.emit("settings:changed", settings);
-  }
-
-  private writeJsonBackup(settings: Settings) {
-    fs.mkdirSync(this.dataDir, { recursive: true });
-    fs.writeFileSync(this.filePath, JSON.stringify(settings, null, 2) + "\n");
   }
 }
 

@@ -16,7 +16,7 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 async fn get_settings(State(state): State<Arc<AppState>>) -> ApiResult<Value> {
-    let settings = settings_store::read_settings_file(&state.data_dir);
+    let settings = settings_store::get_settings(&state.db).map_err(internal_error)?;
     Ok(Json(
         serde_json::to_value(settings).unwrap_or_else(|_| json!({})),
     ))
@@ -26,8 +26,7 @@ async fn update_settings(
     State(state): State<Arc<AppState>>,
     axum::Json(body): axum::Json<Value>,
 ) -> ApiResult<Value> {
-    let settings =
-        settings_store::update_settings_file(&state.data_dir, body).map_err(validation_error)?;
+    let settings = settings_store::update_settings(&state.db, body).map_err(validation_error)?;
     let settings_value = serde_json::to_value(&settings).unwrap_or_else(|_| json!({}));
 
     state
@@ -37,7 +36,7 @@ async fn update_settings(
 }
 
 async fn reset_settings(State(state): State<Arc<AppState>>) -> ApiResult<Value> {
-    let defaults = settings_store::reset_settings_file(&state.data_dir).map_err(internal_error)?;
+    let defaults = settings_store::reset_settings(&state.db).map_err(internal_error)?;
     let defaults_value = serde_json::to_value(&defaults).unwrap_or_else(|_| json!({}));
     state
         .event_bus
@@ -65,13 +64,15 @@ mod tests {
     fn test_state(data_dir: std::path::PathBuf) -> Arc<AppState> {
         std::fs::create_dir_all(&data_dir).expect("failed to create temp data dir");
         let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
+        db.run_migrations().expect("failed to migrate db");
+        settings_store::init_settings(db.as_ref(), &data_dir)
+            .expect("failed to initialize settings");
         let event_bus = Arc::new(EventBus::new(16));
         Arc::new(AppState {
             db: db.clone(),
             api_token: "test-token".to_string(),
             version: "test".to_string(),
             port: 19323,
-            data_dir,
             event_bus: event_bus.clone(),
             server_manager: Arc::new(ServerManager::new(db, event_bus)),
         })
@@ -89,25 +90,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reset_settings_returns_defaults_and_writes_file() {
+    async fn reset_settings_returns_defaults_without_writing_json() {
         let data_dir = temp_data_dir("reset");
         let state = test_state(data_dir.clone());
+        std::fs::write(
+            settings_store::settings_path(&data_dir),
+            r#"{"advanced":{"sidecarPort":9333}}"#,
+        )
+        .expect("failed to write stale json");
         let _ = update_settings(
             State(state.clone()),
-            axum::Json(serde_json::json!({ "advanced": { "sidecarPort": 9333 } })),
+            axum::Json(serde_json::json!({ "advanced": { "sidecarPort": 9444 } })),
         )
         .await
         .expect("settings update should succeed");
 
-        let Json(value) = reset_settings(State(state))
+        let Json(value) = reset_settings(State(state.clone()))
             .await
             .expect("settings reset should succeed");
         assert_eq!(value["advanced"]["sidecarPort"], 9223);
         assert_eq!(
-            settings_store::read_settings_file(&data_dir)
+            settings_store::get_settings(&state.db)
+                .expect("settings should load")
                 .advanced
                 .sidecar_port,
             9223
+        );
+        assert_eq!(
+            settings_store::read_settings_file(&data_dir)
+                .advanced
+                .sidecar_port,
+            9333
         );
         let _ = std::fs::remove_dir_all(data_dir);
     }

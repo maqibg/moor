@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -33,10 +33,6 @@ fn should_show_main_window_on_launch(
     !minimize_to_tray_on_close || show_window_on_launch
 }
 
-fn read_settings_file(data_dir: &Path) -> sidecar::services::settings::Settings {
-    sidecar::services::settings::read_settings_file(data_dir)
-}
-
 fn should_start_auto_start_servers_on_launch(
     settings: &sidecar::services::settings::Settings,
 ) -> bool {
@@ -57,7 +53,7 @@ struct MoorState {
 struct MoorInner {
     port: u16,
     api_token: String,
-    data_dir: PathBuf,
+    db: Arc<sidecar::db::Database>,
     minimize_to_tray: AtomicBool,
 }
 
@@ -100,8 +96,11 @@ fn apply_autostart_setting(app: &tauri::AppHandle, enabled: bool) -> Result<(), 
     }
 }
 
-fn sync_runtime_settings_from_file(state: &MoorState, data_dir: &Path) -> Result<(), String> {
-    let settings = read_settings_file(data_dir);
+fn sync_runtime_settings_from_db(
+    state: &MoorState,
+    db: &sidecar::db::Database,
+) -> Result<(), String> {
+    let settings = sidecar::services::settings::get_settings(db)?;
     let minimize_to_tray = settings.general.minimize_to_tray_on_close;
     state.set_minimize_to_tray(minimize_to_tray);
     Ok(())
@@ -109,7 +108,7 @@ fn sync_runtime_settings_from_file(state: &MoorState, data_dir: &Path) -> Result
 
 #[tauri::command]
 fn sync_runtime_settings(state: State<'_, MoorState>) -> Result<(), String> {
-    sync_runtime_settings_from_file(&state, &state.inner.data_dir)
+    sync_runtime_settings_from_db(&state, state.inner.db.as_ref())
 }
 
 #[tauri::command]
@@ -187,17 +186,6 @@ pub fn run() {
             // Legacy data migration
             migrate_legacy_data_dir(&data_dir, legacy_data_dir.as_ref());
 
-            // Read settings after migration so the runtime and HTTP API share settings.json.
-            let settings = read_settings_file(&data_dir);
-            sidecar::services::settings::write_settings_file(&data_dir, &settings)
-                .map_err(|e| format!("Failed to initialize settings: {e}"))?;
-            let configured_port = settings.advanced.sidecar_port;
-            let minimize_to_tray = settings.general.minimize_to_tray_on_close;
-            let show_window_on_launch = settings.general.show_window_on_launch;
-            let should_show_window =
-                should_show_main_window_on_launch(minimize_to_tray, show_window_on_launch);
-            let auto_start = settings.general.auto_start_on_login;
-
             // Init database
             fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
             let db_path = data_dir.join("moor.db");
@@ -205,6 +193,16 @@ pub fn run() {
                 .map_err(|e| format!("Failed to open database: {e}"))?;
             db.run_migrations()
                 .map_err(|e| format!("Failed to run migrations: {e}"))?;
+
+            // Read settings after migration so the runtime and HTTP API share SQLite settings.
+            let settings = sidecar::services::settings::init_settings(&db, &data_dir)
+                .map_err(|e| format!("Failed to initialize settings: {e}"))?;
+            let configured_port = settings.advanced.sidecar_port;
+            let minimize_to_tray = settings.general.minimize_to_tray_on_close;
+            let show_window_on_launch = settings.general.show_window_on_launch;
+            let should_show_window =
+                should_show_main_window_on_launch(minimize_to_tray, show_window_on_launch);
+            let auto_start = settings.general.auto_start_on_login;
 
             // Seed default profile
             let profile_repo = sidecar::db::profile_repo::ProfileRepository::new(&db);
@@ -238,11 +236,10 @@ pub fn run() {
                 event_bus.clone(),
             ));
             let app_state = Arc::new(sidecar::http::AppState {
-                db: db_arc,
+                db: db_arc.clone(),
                 api_token: api_token.clone(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 port,
-                data_dir: data_dir.clone(),
                 event_bus: event_bus.clone(),
                 server_manager: server_manager.clone(),
             });
@@ -251,7 +248,7 @@ pub fn run() {
                 inner: Arc::new(MoorInner {
                     port,
                     api_token,
-                    data_dir: data_dir.clone(),
+                    db: db_arc.clone(),
                     minimize_to_tray: AtomicBool::new(minimize_to_tray),
                 }),
             };
@@ -367,7 +364,10 @@ mod tests {
             inner: Arc::new(MoorInner {
                 port: 9223,
                 api_token: "token".to_string(),
-                data_dir: PathBuf::from("."),
+                db: Arc::new(
+                    sidecar::db::Database::open(std::path::Path::new(":memory:"))
+                        .expect("failed to open temp db"),
+                ),
                 minimize_to_tray: AtomicBool::new(true),
             }),
         };
@@ -376,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_runtime_settings_only_updates_window_runtime_state() {
+    fn sync_runtime_settings_only_updates_window_runtime_state_from_database() {
         let data_dir = temp_data_dir("runtime-settings");
         fs::create_dir_all(&data_dir).expect("failed to create temp settings dir");
         fs::write(
@@ -389,18 +389,32 @@ mod tests {
             }"#,
         )
         .expect("failed to write temp settings file");
+        let db = sidecar::db::Database::open(&data_dir.join("moor.db"))
+            .expect("failed to open settings db");
+        db.run_migrations().expect("failed to migrate settings db");
+        sidecar::services::settings::init_settings(&db, &data_dir)
+            .expect("settings should initialize");
+        sidecar::services::settings::update_settings(
+            &db,
+            serde_json::json!({ "general": { "minimizeToTrayOnClose": true } }),
+        )
+        .expect("settings update should succeed");
 
         let state = MoorState {
             inner: Arc::new(MoorInner {
                 port: 9223,
                 api_token: "token".to_string(),
-                data_dir: data_dir.clone(),
+                db: Arc::new(db),
                 minimize_to_tray: AtomicBool::new(true),
             }),
         };
 
-        sync_runtime_settings_from_file(&state, &data_dir).expect("runtime settings sync failed");
-        assert!(!state.get_minimize_to_tray());
+        sync_runtime_settings_from_db(&state, state.inner.db.as_ref())
+            .expect("runtime settings sync failed");
+        assert!(state.get_minimize_to_tray());
+        assert!(!sidecar::services::settings::read_settings_file(&data_dir)
+            .general
+            .minimize_to_tray_on_close);
         fs::remove_dir_all(data_dir).expect("failed to remove temp settings dir");
     }
 

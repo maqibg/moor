@@ -63,7 +63,7 @@
 
 ### macOS App
 
-Download the `.dmg` from [Releases](https://github.com/yourusername/moor/releases), drag to Applications, done. The app bundles the Node.js sidecar as a standalone binary — no pre-installed runtime required.
+Download the `.dmg` from [Releases](https://github.com/yourusername/moor/releases), drag to Applications, done. The app bundles the HTTP server as an in-process Rust binary — no pre-installed Node.js runtime required.
 
 ### Build from Source
 
@@ -185,15 +185,14 @@ Moor.app
 ├── UI Layer          React + Vite + TypeScript + Tailwind CSS v4 + shadcn/ui
 ├── Desktop Layer     Tauri 2 / Rust
 │   ├── Window management + tray icon
-│   ├── macOS Keychain access
-│   └── Sidecar process lifecycle management
-├── Gateway Daemon    Node.js / TypeScript Sidecar (bundled as SEA standalone binary)
-│   ├── MCP protocol gateway   POST /mcp — init, tools/list, tools/call
-│   ├── Server management      stdio spawn + HTTP/SSE client
-│   ├── Profile routing        Global active Profile, hot-swap
-│   ├── Audit logging          Async batch write (500ms / 50 entries)
-│   └── SSE push               Real-time status sync to WebView
-└── Storage           SQLite (node:sqlite)
+│   └── In-process HTTP server (Axum)
+│       ├── MCP protocol gateway   POST /mcp — init, tools/list, tools/call
+│       ├── Server management      stdio spawn + HTTP/SSE client
+│       ├── Profile routing        Global active Profile, hot-swap
+│       ├── Audit logging          Tool call recording
+│       └── SSE push               Real-time status sync to WebView
+├── Dev Sidecar      Node.js / TypeScript (Hono — dev mode & SEA standalone)
+└── Storage           SQLite (rusqlite / node:sqlite)
     ├── servers (configs, status)
     ├── profiles (server groups + tool toggles)
     └── audit_logs (tool calls, params, results, errors)
@@ -206,12 +205,14 @@ Moor.app
 ```
 AI Agent ──HTTP──▶ POST /mcp ──▶ Moor Gateway ──stdio/HTTP──▶ MCP Servers
                               │
-WebView ──fetch──▶ /api/* ────┘
+WebView ──IPC──▶ get_sidecar_info ─┐
+WebView ──fetch──▶ /api/* ────────┘
 WebView ◀──SSE──── /api/events
 ```
 
-- **Business operations**: WebView → HTTP `fetch()` → Sidecar (Node.js)
-- **System operations**: WebView → Tauri IPC → Rust (macOS Keychain, tray, window)
+- **Runtime discovery**: WebView → Tauri IPC (`get_sidecar_info`) → Rust (port, token); falls back to `/api/runtime` in browser dev mode
+- **Business operations**: WebView → HTTP `fetch()` → In-process Axum server (Rust)
+- **System operations**: WebView → Tauri IPC → Rust (tray, window, auto-start)
 
 ## Development
 
@@ -296,6 +297,7 @@ vp test
 | `POST`   | `/api/servers/:id/start` | Start server         |
 | `POST`   | `/api/servers/:id/stop`  | Stop server          |
 | `GET`    | `/api/servers/:id/tools` | Get discovered tools |
+| `PUT`    | `/api/servers/order`     | Reorder servers      |
 
 ### Profile Management
 
@@ -315,17 +317,26 @@ vp test
 | `GET`  | `/api/logs`       | Query logs (with filters) |
 | `GET`  | `/api/logs/stats` | Aggregate statistics      |
 
+### Settings Management
+
+| Method  | Path                  | Description       |
+| ------- | --------------------- | ----------------- |
+| `GET`   | `/api/settings`       | Get settings      |
+| `PATCH` | `/api/settings`       | Update settings   |
+| `POST`  | `/api/settings/reset` | Reset to defaults |
+
 ### Other
 
-| Method | Path                  | Description                     |
-| ------ | --------------------- | ------------------------------- |
-| `GET`  | `/api/health`         | Health check                    |
-| `GET`  | `/api/runtime`        | Runtime info (port, URL)        |
-| `GET`  | `/api/events`         | SSE real-time event stream      |
-| `POST` | `/api/import/scan`    | Scan local client configs       |
-| `POST` | `/api/import/parse`   | Preview pasted JSON import      |
-| `POST` | `/api/import/execute` | Execute import                  |
-| `POST` | `/api/import/convert` | Convert configs between clients |
+| Method | Path                   | Description                     |
+| ------ | ---------------------- | ------------------------------- |
+| `GET`  | `/api/health`          | Health check                    |
+| `GET`  | `/api/runtime`         | Runtime info (port, URL)        |
+| `GET`  | `/api/events`          | SSE real-time event stream      |
+| `POST` | `/api/import/scan`     | Scan local client configs       |
+| `POST` | `/api/import/parse`    | Preview pasted JSON import      |
+| `POST` | `/api/import/execute`  | Execute import                  |
+| `GET`  | `/api/import/snippets` | Generate client config snippets |
+| `POST` | `/api/import/convert`  | Convert configs between clients |
 
 ## Tech Stack
 
@@ -335,8 +346,9 @@ vp test
 | UI Primitives | Radix UI                                          |
 | UI Components | shadcn/ui (New York style)                        |
 | Desktop       | Tauri 2 (Rust)                                    |
-| Sidecar       | Node.js, TypeScript, Hono, @hono/node-server      |
-| Database      | SQLite (node:sqlite)                              |
+| Gateway       | Rust, Axum, Tokio, rusqlite (in-process)          |
+| Dev Sidecar   | Node.js, TypeScript, Hono, @hono/node-server      |
+| Database      | SQLite (rusqlite / node:sqlite)                   |
 | MCP Protocol  | @modelcontextprotocol/sdk (stdio + HTTP/SSE)      |
 | Icons         | Lucide React                                      |
 | Tooling       | Vite+ (vp CLI), Oxlint, Oxfmt, Vitest             |

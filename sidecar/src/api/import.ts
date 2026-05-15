@@ -6,8 +6,6 @@ import { generateSnippets } from "../config/snippets.js";
 import { getClientById } from "../config/clients.js";
 import { convertConfig, type ConvertInput } from "../config/converter.js";
 import { serverManager } from "../services/server-manager.js";
-import { serverStore } from "../services/server-store.js";
-import { profileService } from "../services/profiles.js";
 import {
   getExistingNames,
   partitionImportCandidates,
@@ -64,10 +62,9 @@ importApi.post("/execute", async (c) => {
   const scannedServers = body.servers?.length ? body.servers : scanAllConfigs().servers;
   const { candidates: servers, skipped } = partitionImportCandidates(scannedServers, existingNames);
   const imported: string[] = [];
-  const importedIds: string[] = [];
 
   for (const serverConfig of servers) {
-    const server = serverStore.add({
+    serverManager.addServer({
       name: serverConfig.name,
       connectionType: serverConfig.connectionType,
       command: serverConfig.command,
@@ -77,13 +74,7 @@ importApi.post("/execute", async (c) => {
       headers: serverConfig.headers,
       workingDir: serverConfig.workingDir,
     });
-    serverManager.registerServer(server.id);
     imported.push(serverConfig.name);
-    importedIds.push(server.id);
-  }
-
-  if (imported.length > 0) {
-    profileService.assignToActiveProfile(importedIds);
   }
 
   return c.json({ imported, skipped });

@@ -1,13 +1,26 @@
 import { getServerRepository } from "../db/server-repository.js";
 import { getToolDiscoveryRepository } from "../db/tool-discovery-repository.js";
 import { toolCatalogService } from "./tool-catalog-service.js";
-import { serverStore } from "./server-store.js";
 import { SessionManager } from "./session-manager.js";
 import type { StoredServerConfig, ServerSession, SessionFactory } from "./session-manager.js";
-import type { ToolCatalogEntry } from "@moor/types";
+import type { Server, ToolCatalogEntry } from "@moor/types";
 import { eventBus } from "./event-bus.js";
+import { profileService } from "./profiles.js";
+import { getDatabase } from "../db/index.js";
 
 export type { StoredServerConfig, ServerSession, SessionFactory };
+
+export interface ServerConfig {
+  name: string;
+  connectionType: "stdio" | "http";
+  command?: string;
+  args?: string[];
+  url?: string;
+  env?: Record<string, string>;
+  headers?: Record<string, string>;
+  workingDir?: string;
+  autoStart?: boolean;
+}
 
 export interface ManagedServer {
   id: string;
@@ -42,10 +55,39 @@ export class ServerRuntime {
     this.sessionManager = new SessionManager(sessionFactory);
   }
 
+  addServer(config: ServerConfig): Server {
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const repo = getServerRepository();
+    repo.insert({
+      id,
+      name: config.name,
+      connectionType: config.connectionType,
+      command: config.command ?? null,
+      args: config.args ? JSON.stringify(config.args) : null,
+      url: config.url ?? null,
+      env: config.env ? JSON.stringify(config.env) : null,
+      headers: config.headers ? JSON.stringify(config.headers) : null,
+      workingDir: config.workingDir ?? null,
+      autoStart: config.autoStart ? 1 : 0,
+      sortOrder: repo.nextTopSortOrder(),
+      createdAt: now,
+      updatedAt: now,
+    });
+    this.registerServer(id);
+    profileService.assignToActiveProfile([id]);
+    return repo.findById(id)!;
+  }
+
   loadFromDb() {
     this.servers.clear();
-    serverStore.resetRunningStatuses();
-    const rows = serverStore.loadAll();
+    const db = getDatabase();
+    db.transaction(() => {
+      db.run(
+        "UPDATE mcp_servers SET status = 'stopped', error_message = NULL WHERE status IN ('running', 'starting')",
+      );
+    });
+    const rows = getServerRepository().findAll();
     for (const row of rows) {
       this.servers.set(row.id, {
         id: row.id,
@@ -67,7 +109,7 @@ export class ServerRuntime {
   }
 
   getActiveProfileId(): string | null {
-    return serverStore.getActiveProfileId();
+    return profileService.getActiveProfileId();
   }
 
   listServers(): ManagedServer[] {
@@ -75,7 +117,7 @@ export class ServerRuntime {
   }
 
   registerServer(id: string): void {
-    const row = serverStore.findById(id);
+    const row = getServerRepository().findById(id);
     if (!row) return;
     this.servers.set(id, {
       id: row.id,
@@ -185,8 +227,8 @@ export class ServerRuntime {
     return ids;
   }
 
-  getActiveProfileServers() {
-    const activeIds = serverStore.getActiveProfileServerIds();
+  getActiveProfileServers(): Array<{ serverId: string; server: ManagedServer }> {
+    const activeIds = profileService.getActiveProfileServers().map((server) => server.serverId);
     return activeIds
       .map((serverId) => {
         const server = this.servers.get(serverId);
@@ -226,7 +268,7 @@ export class ServerRuntime {
   }
 
   private getStoredServerConfig(id: string): StoredServerConfig {
-    const row = serverStore.findById(id);
+    const row = getServerRepository().findById(id);
     if (!row) throw new Error(`Server ${id} not found`);
     return {
       id: row.id,

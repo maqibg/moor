@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import { closeDb, initDb, queryAll, queryOne, run, runMigrations } from "../db/index.js";
 import { profileService } from "./profiles.js";
-import { serverStore } from "./server-store.js";
+import { getServerRepository } from "../db/server-repository.js";
 import {
   assertStdioCommandAvailable,
   buildStdioEnvironment,
@@ -61,21 +61,34 @@ function createTestManager(sessionFactory: TestSessionFactory): TestManager {
 function addServerToActiveProfile(server: Server | ManagedServer) {
   const profile = queryOne("SELECT id FROM profiles WHERE is_active = 1", []);
   run(
-    "INSERT INTO profile_servers (profile_id, server_id, enabled, disabled_tools) VALUES (?, ?, 1, '[]')",
+    "INSERT OR IGNORE INTO profile_servers (profile_id, server_id, enabled, disabled_tools) VALUES (?, ?, 1, '[]')",
     [profile?.id, server.id],
   );
 }
 
 function addAutoStartServer(manager: TestManager, name: string): ManagedServer {
-  const server = serverStore.add({
+  const repo = getServerRepository();
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  repo.insert({
+    id,
     name,
     connectionType: "stdio",
     command: process.execPath,
-    autoStart: true,
+    args: null,
+    url: null,
+    env: null,
+    headers: null,
+    workingDir: null,
+    autoStart: 1,
+    sortOrder: 0,
+    createdAt: now,
+    updatedAt: now,
   });
-  manager.registerServer(server.id);
-  addServerToActiveProfile(server);
-  return manager.getServer(server.id)!;
+  const created = repo.findById(id)!;
+  manager.registerServer(id);
+  addServerToActiveProfile(created);
+  return manager.getServer(id)!;
 }
 
 function setAutoStartOrder(manager: TestManager, servers: ManagedServer[]) {
@@ -102,7 +115,7 @@ describe("ServerManager MCP lifecycle", () => {
   });
 
   it("initializes stdio servers, caches tools, and reuses the client for calls", async () => {
-    const server = serverStore.add({
+    const server = serverManager.addServer({
       name: "Echo Fixture",
       connectionType: "stdio",
       command: process.execPath,
@@ -159,7 +172,7 @@ describe("ServerManager MCP lifecycle", () => {
       await pendingStart;
       return createFakeSession();
     });
-    const server = serverStore.add({
+    const server = serverManager.addServer({
       name: "Slow Fixture",
       connectionType: "stdio",
       command: process.execPath,
@@ -237,7 +250,7 @@ describe("ServerManager MCP lifecycle", () => {
     expect(manager.getServer(managed.id)?.status).toBe("running");
 
     await manager.stopServer(managed.id);
-    serverStore.remove(managed.id);
+    getServerRepository().remove(managed.id);
     manager.unregisterServer(managed.id);
 
     expect(closeCalls).toBe(1);
