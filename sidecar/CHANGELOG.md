@@ -1,5 +1,13 @@
 # moor-sidecar
 
+## 0.5.1
+
+### Patch Changes
+
+- Refactor settings management to use database instead of file system, and enhance Rust toolchain setup in release workflow
+- Updated dependencies
+  - @moor/types@0.5.1
+
 ## 0.5.0
 
 ### Minor Changes

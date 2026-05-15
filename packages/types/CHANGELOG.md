@@ -1,5 +1,11 @@
 # @moor/types
 
+## 0.5.1
+
+### Patch Changes
+
+- Refactor settings management to use database instead of file system, and enhance Rust toolchain setup in release workflow
+
 ## 0.4.0
 
 ### Minor Changes
