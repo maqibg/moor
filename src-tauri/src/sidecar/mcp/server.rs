@@ -52,6 +52,7 @@ async fn handle_tools_list(id: jsonrpc::Id, state: Arc<AppState>) -> serde_json:
                     .input_schema
                     .clone()
                     .unwrap_or_else(|| serde_json::json!({"type": "object"})),
+                "_meta": { "serverName": tool.server_name },
             })
         })
         .collect();
@@ -276,11 +277,27 @@ process.stdin.on("data", (chunk) => {
             server_manager,
         });
 
+        let tools_response = handle_request(
+            jsonrpc::Id::Number(0),
+            "tools/list",
+            None,
+            app_state.clone(),
+            Some("test-agent"),
+        )
+        .await;
+        assert_eq!(
+            tools_response["result"]["tools"][0]["_meta"]["serverName"],
+            "fake"
+        );
+        assert!(tools_response["result"]["tools"][0]
+            .get("annotations")
+            .is_none());
+
         let response = handle_request(
             jsonrpc::Id::Number(1),
             "tools/call",
             Some(serde_json::json!({
-                "name": "echo",
+                "name": "fake__echo",
                 "arguments": { "token": "secret", "value": "ok" }
             })),
             app_state,
@@ -296,7 +313,7 @@ process.stdin.on("data", (chunk) => {
 
         let audit_repo = AuditLogRepository::new(&db);
         let logs = audit_repo
-            .query_logs(None, Some("echo"), None, None, Some(10), None)
+            .query_logs(None, Some("fake__echo"), None, None, Some(10), None)
             .expect("failed to query audit logs");
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].server_id.as_deref(), Some(server_id.as_str()));

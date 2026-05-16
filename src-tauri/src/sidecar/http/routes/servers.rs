@@ -446,7 +446,7 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0]["toolName"], "search");
         assert_eq!(list[0]["disabled"], true);
-        assert_eq!(list[0]["exposedName"], "search");
+        assert_eq!(list[0]["exposedName"], "alpha__search");
 
         let _ = std::fs::remove_dir_all(data_dir);
     }

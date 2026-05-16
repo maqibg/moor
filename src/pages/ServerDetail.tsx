@@ -246,7 +246,7 @@ export function ServerDetail() {
                       <span className="font-mono text-[13px] font-medium text-cursor-dark">
                         {tool.exposedName}
                       </span>
-                      <ToolCategoryBadge name={tool.exposedName} />
+                      <ToolCategoryBadge name={tool.toolName} />
                     </div>
                     {tool.description && (
                       <p className="font-body text-xs text-[var(--fg-50)] truncate">

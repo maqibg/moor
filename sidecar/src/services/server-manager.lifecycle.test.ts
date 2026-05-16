@@ -130,7 +130,7 @@ describe("ServerManager MCP lifecycle", () => {
       queryAll("SELECT tool_name FROM tool_discoveries WHERE server_id = ?", [server.id]),
     ).toEqual([{ tool_name: "echo" }]);
     await expect(
-      serverManager.callToolByExposedName("echo", { message: "hello" }),
+      serverManager.callToolByExposedName("echo_fixture__echo", { message: "hello" }),
     ).resolves.toMatchObject({
       content: [{ type: "text", text: "hello" }],
     });
@@ -141,10 +141,10 @@ describe("ServerManager MCP lifecycle", () => {
       queryAll("SELECT tool_name FROM tool_discoveries WHERE server_id = ?", [server.id]),
     ).toEqual([{ tool_name: "echo" }]);
     expect(serverManager.getToolCatalog()).toEqual([]);
-    expect(serverManager.findToolOwner("echo")).toBeNull();
+    expect(serverManager.findToolOwner("echo_fixture__echo")).toBeNull();
   });
 
-  it("ignores stopped servers before computing duplicate exposed tool names", async () => {
+  it("ignores stopped servers before computing exposed tool names", async () => {
     const manager = createTestManager(async () =>
       createFakeSession(() => undefined, [{ name: "search" }]),
     );
@@ -156,9 +156,24 @@ describe("ServerManager MCP lifecycle", () => {
 
     expect(manager.getServer(running.id)?.status).toBe("running");
     expect(manager.getServer(stopped.id)?.status).toBe("stopped");
-    expect(manager.getToolCatalog().map((tool) => tool.exposedName)).toEqual(["search"]);
-    expect(manager.getToolDetails(running.id).map((tool) => tool.exposedName)).toEqual(["search"]);
-    expect(manager.getToolDetails(stopped.id).map((tool) => tool.exposedName)).toEqual(["search"]);
+    expect(manager.getToolCatalog().map((tool) => tool.exposedName)).toEqual(["visible__search"]);
+    expect(manager.getToolDetails(running.id).map((tool) => tool.exposedName)).toEqual([
+      "visible__search",
+    ]);
+    expect(manager.getToolDetails(stopped.id).map((tool) => tool.exposedName)).toEqual([
+      "hidden__search",
+    ]);
+  });
+
+  it("keeps the server slug for disabled server tool details", () => {
+    const manager = createTestManager(async () => createFakeSession());
+    const disabled = addAutoStartServer(manager, "Hidden");
+    manager.cacheTools(disabled.id, [{ name: "search" }]);
+    run("UPDATE profile_servers SET enabled = 0 WHERE server_id = ?", [disabled.id]);
+
+    expect(manager.getToolDetails(disabled.id).map((tool) => tool.exposedName)).toEqual([
+      "hidden__search",
+    ]);
   });
 
   it("reuses the in-flight start when a server is already starting", async () => {

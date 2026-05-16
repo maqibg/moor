@@ -25,6 +25,7 @@ export function createGatewayServer(agentInfo: string | null = null) {
       name: tool.exposedName,
       description: tool.description,
       inputSchema: tool.inputSchema ?? { type: "object" },
+      _meta: { serverName: tool.serverName },
     })),
   }));
 

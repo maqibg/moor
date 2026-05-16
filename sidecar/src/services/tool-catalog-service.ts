@@ -1,6 +1,11 @@
 import { getToolDiscoveryRepository } from "../db/tool-discovery-repository.js";
 import { getProfileRepository } from "../db/profile-repository.js";
-import { buildToolCatalogFromRows, type ToolCatalogRow } from "../db/tool-catalog.js";
+import { getServerRepository } from "../db/server-repository.js";
+import {
+  buildToolCatalogFromRows,
+  normalizeServerName,
+  type ToolCatalogRow,
+} from "../db/tool-catalog.js";
 import type { ToolCatalogEntry } from "@moor/types";
 
 interface ToolCatalogOptions {
@@ -41,18 +46,20 @@ export class ToolCatalogService {
   }
 
   getToolDetails(serverId: string, profileId?: string, options: ToolCatalogOptions = {}) {
+    const serverName = getServerRepository().findById(serverId)?.name;
     const catalog = this.getToolCatalog(profileId, options);
     const disabledForServer = getToolDiscoveryRepository().findDisabledToolsForServer(
       profileId,
       serverId,
     );
+    const slug = normalizeServerName(serverName ?? "server");
     return this.getDiscoveredTools(serverId).map((row) => {
       const catalogEntry = catalog.find(
         (tool) => tool.serverId === serverId && tool.toolName === row.toolName,
       );
       return {
         ...row,
-        exposedName: catalogEntry?.exposedName ?? row.toolName,
+        exposedName: catalogEntry?.exposedName ?? `${slug}__${row.toolName}`,
         disabled: disabledForServer.has(row.toolName),
       };
     });
