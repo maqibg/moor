@@ -188,3 +188,152 @@ jobs:
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg
             src-tauri/target/release/bundle/dmg
+
+  build-windows:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: "windows-latest"
+            target: "x86_64-pc-windows-msvc"
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Resolve release metadata
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            release_tag="${{ inputs.tag }}"
+          else
+            release_tag="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ ! "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tag must be a semantic version prefixed with v, got: $release_tag"
+            exit 1
+          fi
+
+          version="${release_tag#v}"
+          package_version="$(node -p "require('./package.json').version")"
+          if [[ "$package_version" != "$version" ]]; then
+            echo "::error::Release tag $release_tag does not match package.json version $package_version"
+            exit 1
+          fi
+
+          prerelease=false
+          if [[ "$version" == *-* ]]; then
+            prerelease=true
+          fi
+
+          {
+            echo "tag=$release_tag"
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate version consistency
+        run: node scripts/sync-version.mjs --check
+
+      - name: Extract changelog for release
+        id: changelog
+        shell: bash
+        run: |
+          {
+            echo "body<<EOF"
+            node scripts/extract-changelog.mjs
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          cache: true
+          cache-workspaces: "src-tauri -> target"
+          cache-key: ${{ matrix.target }}-no-cargo-bin-v1
+          cache-bin: false
+          rustflags: ""
+
+      - name: Build Tauri App
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ steps.release.outputs.tag }}
+          releaseName: "Moor ${{ steps.release.outputs.tag }}"
+          releaseBody: ${{ steps.changelog.outputs.body }}
+          releaseDraft: true
+          prerelease: ${{ steps.release.outputs.prerelease }}
+          args: "--target ${{ matrix.target }}"
+
+      - name: Collect bundle diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Host runtime:"
+          node -p "JSON.stringify({execPath:process.execPath,version:process.version,platform:process.platform,arch:process.arch})"
+
+          echo "Rust toolchain:"
+          command -v rustup || true
+          command -v rustc || true
+          command -v cargo || true
+          if command -v cargo >/dev/null 2>&1; then
+            cargo --version || true
+          fi
+          rustup show active-toolchain || true
+          rustup target list --installed || true
+
+          echo "Bundle directory:"
+          find src-tauri/target -path "*/release/bundle/nsis/*" -print || true
+          find src-tauri/target -path "*/release/bundle/msi/*" -print || true
+
+      - name: Upload Windows diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-diagnostics-${{ matrix.target }}
+          if-no-files-found: ignore
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis
+            src-tauri/target/release/bundle/nsis

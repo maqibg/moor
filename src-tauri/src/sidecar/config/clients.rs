@@ -20,9 +20,7 @@ pub fn resolve_config_paths(client: &ClientMeta) -> Vec<PathBuf> {
 }
 
 fn dirs_home() -> PathBuf {
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/"))
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
 }
 
 pub const ALL_CLIENTS: &[ClientMeta] = &[

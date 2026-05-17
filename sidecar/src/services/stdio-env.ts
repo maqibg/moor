@@ -4,7 +4,7 @@ import path from "node:path";
 
 // macOS GUI apps do not inherit interactive shell PATH values, so Moor appends common
 // local CLI install locations before spawning stdio MCP servers.
-const STDIO_PATH_CANDIDATES = [
+const STDIO_PATH_CANDIDATES_UNIX = [
   "~/.local/share/mise/shims",
   "~/.local/bin",
   "~/Library/pnpm",
@@ -23,6 +23,18 @@ const STDIO_PATH_CANDIDATES = [
   "/sbin",
 ];
 
+const STDIO_PATH_CANDIDATES_WIN32 = [
+  "~/AppData/Local/pnpm",
+  "~/.cargo/bin",
+  "~/AppData/Local/Programs",
+  "~/AppData/Local/Microsoft/WinGet/Links",
+  "~/scoop/shims",
+  "~/AppData/Roaming/npm",
+];
+
+const STDIO_PATH_CANDIDATES =
+  process.platform === "win32" ? STDIO_PATH_CANDIDATES_WIN32 : STDIO_PATH_CANDIDATES_UNIX;
+
 function cleanEnv(env?: Record<string, unknown> | null): Record<string, string> {
   if (!env) return {};
   return Object.fromEntries(
@@ -37,6 +49,11 @@ function splitPathList(value: string | undefined): string[] {
         .map((entry) => entry.trim())
         .filter(Boolean)
     : [];
+}
+
+function getPathValue(env: Record<string, string>): string | undefined {
+  if (process.platform !== "win32") return env.PATH;
+  return env.PATH ?? Object.entries(env).find(([key]) => key.toUpperCase() === "PATH")?.[1];
 }
 
 function uniquePathEntries(entries: string[]): string[] {
@@ -67,8 +84,8 @@ export function buildStdioEnvironment(
   const env = { ...parent, ...server };
   const home = server.HOME ?? parent.HOME ?? os.homedir();
   env.PATH = uniquePathEntries([
-    ...splitPathList(server.PATH),
-    ...splitPathList(parent.PATH),
+    ...splitPathList(getPathValue(server)),
+    ...splitPathList(getPathValue(parent)),
     ...getDefaultStdioPathEntries(home),
   ]).join(path.delimiter);
   return env;

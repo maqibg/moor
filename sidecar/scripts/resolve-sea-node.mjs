@@ -4,10 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { resolveTargetTriple } from "./build-sidecar-target.mjs";
+import { buildPowerShellExpandArchiveInvocation } from "./resolve-sea-node-utils.mjs";
 
 const NODE_TARGETS = new Map([
   ["aarch64-apple-darwin", { platform: "darwin", arch: "arm64", dist: "darwin-arm64" }],
   ["x86_64-apple-darwin", { platform: "darwin", arch: "x64", dist: "darwin-x64" }],
+  ["x86_64-pc-windows-msvc", { platform: "win32", arch: "x64", dist: "win-x64" }],
 ]);
 
 function parseArg(name) {
@@ -62,8 +64,8 @@ function download(url, outputPath) {
   });
 }
 
-function run(command, args) {
-  const result = spawnSync(command, args, { stdio: "inherit" });
+function run(command, args, options = {}) {
+  const result = spawnSync(command, args, { stdio: "inherit", ...options });
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status}`);
   }
@@ -72,7 +74,7 @@ function run(command, args) {
 async function ensureNodeRuntime(target) {
   const nodeTarget = NODE_TARGETS.get(target);
   if (!nodeTarget) {
-    throw new Error(`SEA Node resolver only supports macOS targets, got ${target}`);
+    throw new Error(`SEA Node resolver only supports configured targets, got ${target}`);
   }
 
   if (process.platform === nodeTarget.platform && process.arch === nodeTarget.arch) {
@@ -83,22 +85,49 @@ async function ensureNodeRuntime(target) {
   const versionWithoutPrefix = version.replace(/^v/, "");
   const cacheRoot = path.join(process.env.RUNNER_TEMP || os.tmpdir(), "moor-sea-node");
   const runtimeRoot = path.join(cacheRoot, version, nodeTarget.dist);
-  const execPath = path.join(runtimeRoot, "bin", "node");
+
+  const isWindows = nodeTarget.platform === "win32";
+  const execPath = isWindows
+    ? path.join(runtimeRoot, "node.exe")
+    : path.join(runtimeRoot, "bin", "node");
+
   if (existsSync(execPath)) {
     return execPath;
   }
 
   mkdirSync(runtimeRoot, { recursive: true });
-  const tarballName = `node-v${versionWithoutPrefix}-${nodeTarget.dist}.tar.gz`;
-  const tarballPath = path.join(cacheRoot, tarballName);
-  const url = `https://nodejs.org/dist/${version}/${tarballName}`;
 
-  console.log(`Downloading SEA Node runtime: ${url}`);
-  await download(url, tarballPath);
+  if (isWindows) {
+    const zipName = `node-v${versionWithoutPrefix}-${nodeTarget.dist}.zip`;
+    const zipPath = path.join(cacheRoot, zipName);
+    const url = `https://nodejs.org/dist/${version}/${zipName}`;
 
-  rmSync(runtimeRoot, { recursive: true, force: true });
-  mkdirSync(runtimeRoot, { recursive: true });
-  run("tar", ["-xzf", tarballPath, "-C", runtimeRoot, "--strip-components=1"]);
+    console.log(`Downloading SEA Node runtime: ${url}`);
+    await download(url, zipPath);
+
+    rmSync(runtimeRoot, { recursive: true, force: true });
+    mkdirSync(runtimeRoot, { recursive: true });
+
+    if (process.platform === "win32") {
+      const invocation = buildPowerShellExpandArchiveInvocation(zipPath, runtimeRoot);
+      run("powershell", invocation.args, {
+        env: { ...process.env, ...invocation.env },
+      });
+    } else {
+      run("tar", ["-xf", zipPath, "-C", runtimeRoot, "--strip-components=1"]);
+    }
+  } else {
+    const tarballName = `node-v${versionWithoutPrefix}-${nodeTarget.dist}.tar.gz`;
+    const tarballPath = path.join(cacheRoot, tarballName);
+    const url = `https://nodejs.org/dist/${version}/${tarballName}`;
+
+    console.log(`Downloading SEA Node runtime: ${url}`);
+    await download(url, tarballPath);
+
+    rmSync(runtimeRoot, { recursive: true, force: true });
+    mkdirSync(runtimeRoot, { recursive: true });
+    run("tar", ["-xzf", tarballPath, "-C", runtimeRoot, "--strip-components=1"]);
+  }
 
   return execPath;
 }

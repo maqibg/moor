@@ -197,6 +197,7 @@ pub fn build_stdio_environment(
     parent_env: &HashMap<String, String>,
     server_env: Option<&HashMap<String, String>>,
 ) -> HashMap<String, String> {
+    let is_windows = cfg!(windows);
     let mut env = parent_env.clone();
     if let Some(server_env) = server_env {
         env.extend(server_env.iter().map(|(k, v)| (k.clone(), v.clone())));
@@ -206,9 +207,12 @@ pub fn build_stdio_environment(
         .get("HOME")
         .cloned()
         .or_else(|| std::env::var("HOME").ok())
+        .or_else(|| std::env::var("USERPROFILE").ok())
+        .or_else(|| dirs::home_dir().map(|p| p.to_string_lossy().into_owned()))
         .unwrap_or_else(|| "/".to_string());
 
-    let path_candidates = [
+    #[cfg(unix)]
+    let default_candidates: &[&str] = &[
         "~/.local/share/mise/shims",
         "~/.local/bin",
         "~/Library/pnpm",
@@ -227,16 +231,28 @@ pub fn build_stdio_environment(
         "/sbin",
     ];
 
-    let default_entries: Vec<String> = path_candidates
+    #[cfg(windows)]
+    let default_candidates: &[&str] = &[
+        "~/AppData/Local/pnpm",
+        "~/.cargo/bin",
+        "~/AppData/Local/Programs",
+        "~/AppData/Local/Microsoft/WinGet/Links",
+        "~/scoop/shims",
+        "~/AppData/Roaming/npm",
+    ];
+
+    let default_entries: Vec<String> = default_candidates
         .iter()
         .map(|p| expand_home(p, &home))
         .collect();
 
     let mut all_entries = Vec::new();
-    if let Some(server_path) = env.get("PATH") {
+    if let Some(server_path) =
+        server_env.and_then(|server_env| path_value_for_platform(server_env, is_windows))
+    {
         all_entries.extend(split_path(server_path));
     }
-    if let Some(parent_path) = parent_env.get("PATH") {
+    if let Some(parent_path) = path_value_for_platform(parent_env, is_windows) {
         all_entries.extend(split_path(parent_path));
     }
     all_entries.extend(default_entries);
@@ -247,7 +263,8 @@ pub fn build_stdio_environment(
         .filter(|e| seen.insert(e.clone()))
         .collect();
 
-    env.insert("PATH".to_string(), unique.join(":"));
+    let separator = if is_windows { ";" } else { ":" };
+    env.insert("PATH".to_string(), unique.join(separator));
     env
 }
 
@@ -256,16 +273,79 @@ fn expand_home(path: &str, home: &str) -> String {
         return home.to_string();
     }
     if let Some(rest) = path.strip_prefix("~/") {
-        return format!("{home}/{rest}");
+        return std::path::PathBuf::from(home)
+            .join(rest)
+            .to_string_lossy()
+            .into_owned();
     }
     path.to_string()
 }
 
+#[cfg(unix)]
 fn split_path(value: &str) -> Vec<String> {
     value
         .split(':')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
+        .collect()
+}
+
+#[cfg(windows)]
+fn split_path(value: &str) -> Vec<String> {
+    value
+        .split(';')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn split_windows_path(value: &str) -> Vec<String> {
+    value
+        .split(';')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn env_value_for_platform<'a>(
+    env: &'a HashMap<String, String>,
+    key: &str,
+    is_windows: bool,
+) -> Option<&'a String> {
+    env.get(key).or_else(|| {
+        is_windows
+            .then(|| {
+                env.iter()
+                    .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
+                    .map(|(_, value)| value)
+            })
+            .flatten()
+    })
+}
+
+fn path_value_for_platform(env: &HashMap<String, String>, is_windows: bool) -> Option<&String> {
+    env_value_for_platform(env, "PATH", is_windows)
+}
+
+fn executable_names_for_platform(
+    command: &str,
+    env: &HashMap<String, String>,
+    is_windows: bool,
+) -> Vec<String> {
+    if !is_windows || std::path::Path::new(command).extension().is_some() {
+        return vec![command.to_string()];
+    }
+
+    let extensions = env_value_for_platform(env, "PATHEXT", is_windows)
+        .map(|value| split_windows_path(value))
+        .unwrap_or_else(|| split_windows_path(".EXE;.CMD;.BAT;.COM"));
+
+    std::iter::once(command.to_string())
+        .chain(
+            extensions
+                .into_iter()
+                .map(|extension| format!("{command}{}", extension.to_ascii_lowercase())),
+        )
         .collect()
 }
 
@@ -283,21 +363,80 @@ pub fn find_executable_on_path(command: &str, env: &HashMap<String, String>) -> 
         return None;
     }
 
-    let path_var = env.get("PATH")?;
-    for dir in path_var.split(':') {
-        let candidate = format!("{dir}/{command}");
-        if is_executable(&candidate) {
-            return Some(candidate);
+    let is_windows = cfg!(windows);
+    let path_var = path_value_for_platform(env, is_windows)?;
+    let separator = if is_windows { ';' } else { ':' };
+    let candidate_names = executable_names_for_platform(command, env, is_windows);
+    for dir in path_var.split(separator) {
+        for name in &candidate_names {
+            let candidate = std::path::PathBuf::from(dir).join(name);
+            if is_executable(&candidate.to_string_lossy()) {
+                return Some(candidate.to_string_lossy().into_owned());
+            }
         }
     }
     None
 }
 
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
+#[cfg(unix)]
 fn is_executable(path: &str) -> bool {
     std::fs::metadata(path)
         .ok()
         .map(|m| m.permissions().mode() & 0o111 != 0)
         .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn is_executable(path: &str) -> bool {
+    let metadata = match std::fs::metadata(path) {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    matches!(ext.as_str(), "exe" | "cmd" | "bat" | "com")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_path_lookup_accepts_path_alias() {
+        let env = HashMap::from([("Path".to_string(), r"C:\Tools".to_string())]);
+
+        assert_eq!(
+            path_value_for_platform(&env, true).map(String::as_str),
+            Some(r"C:\Tools")
+        );
+    }
+
+    #[test]
+    fn windows_executable_names_expand_pathext_for_extensionless_commands() {
+        let env = HashMap::from([("PATHEXT".to_string(), ".EXE;.CMD;.BAT;.COM".to_string())]);
+
+        assert_eq!(
+            executable_names_for_platform("npx", &env, true),
+            vec!["npx", "npx.exe", "npx.cmd", "npx.bat", "npx.com"]
+        );
+    }
+
+    #[test]
+    fn windows_executable_names_keep_explicit_extension() {
+        let env = HashMap::from([("PATHEXT".to_string(), ".EXE;.CMD;.BAT;.COM".to_string())]);
+
+        assert_eq!(
+            executable_names_for_platform("npx.cmd", &env, true),
+            vec!["npx.cmd"]
+        );
+    }
 }

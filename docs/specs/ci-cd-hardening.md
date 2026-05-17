@@ -25,18 +25,15 @@ The Moor project's GitHub Actions Release workflow has the following issues:
 
 **Trade-off**: The x86_64 job runs via Rosetta emulation, which is expected to increase build time by 10-20%.
 
-### 2.2 Sidecar Cross-Compilation
+### 2.2 Build Architecture
 
-**Decision**: Install x86_64 Node.js using the `architecture: x64` parameter of `setup-node`.
+**Decision**: Production builds use Rust in-process Axum HTTP server. No Node SEA cross-compilation is required.
 
 **Technical Principle**:
 
-- `setup-node@v4` natively supports installing x86_64 Node on ARM64 macOS (runs transparently through Rosetta).
-- Node SEA builds rely on `process.execPath` to copy the current Node binary.
-- x86_64 Node → `process.execPath` returns x86_64 binary → sidecar is correctly x86_64.
-- `process.arch` returns `'x64'` → `targetTriple()` correctly generates `x86_64-apple-darwin`.
-
-**Zero modifications to build scripts**: All architecture detection logic in `build-sidecar.mjs` automatically works correctly in the Rosetta environment.
+- The Tauri app bundles a Rust in-process HTTP server (`src-tauri/src/sidecar/http/`).
+- `cargo build --target x86_64-apple-darwin` produces the x86_64 binary directly.
+- No Node.js runtime or SEA packaging is involved in the production build chain.
 
 ### 2.3 Changelog Strategy
 
@@ -55,7 +52,7 @@ The Moor project's GitHub Actions Release workflow has the following issues:
 | Cache Target | Key Structure                            | Isolation Strategy                                                |
 | ------------ | ---------------------------------------- | ----------------------------------------------------------------- |
 | pnpm store   | `{runner.os}-pnpm-store-{lockfile hash}` | Shared (tarballs are architecture-independent)                    |
-| Rust target/ | `{target}`                               | Isolated by target (compiled artifacts are architecture-specific) |
+| Rust target/ | `{target}-no-cargo-bin-v1`               | Isolated by target (compiled artifacts are architecture-specific) |
 
 ### 2.5 macOS Signing
 
@@ -81,44 +78,47 @@ matrix:
   include:
     - platform: "macos-latest"
       target: "aarch64-apple-darwin"
-      node_arch: "arm64"
     - platform: "macos-latest"
       target: "x86_64-apple-darwin"
-      node_arch: "x64"
+    - platform: "windows-latest"
+      target: "x86_64-pc-windows-msvc"
 ```
 
 ### 3.3 Build Steps
 
-| Step              | Description                             | Key Parameters                           |
-| ----------------- | --------------------------------------- | ---------------------------------------- |
-| Checkout          | `actions/checkout@v4`                   | -                                        |
-| Setup Node        | `actions/setup-node@v4`                 | `architecture: ${{ matrix.node_arch }}`  |
-| Install pnpm      | `pnpm/action-setup@v4`                  | `version: 10.33.2`                       |
-| pnpm cache        | `actions/cache@v4`                      | key: `{os}-pnpm-store-{lockfile hash}`   |
-| Install deps      | `pnpm install --frozen-lockfile`        | -                                        |
-| Version check     | `node scripts/sync-version.mjs --check` | -                                        |
-| Extract changelog | `node scripts/extract-changelog.mjs`    | Output to `steps.changelog.outputs.body` |
-| Install Rust      | `dtolnay/rust-toolchain@stable`         | `targets: ${{ matrix.target }}`          |
-| Rust cache        | `Swatinem/rust-cache@v2`                | `key: ${{ matrix.target }}`              |
-| Build             | `tauri-apps/tauri-action@v0`            | `args: "--target ${{ matrix.target }}"`  |
+| Step              | Description                                         | Key Parameters                                    |
+| ----------------- | --------------------------------------------------- | ------------------------------------------------- |
+| Checkout          | `actions/checkout@v4`                               | -                                                 |
+| Setup Node        | `actions/setup-node@v4`                             | `node-version: 24`                                |
+| Install pnpm      | `pnpm/action-setup@v4`                              | -                                                 |
+| pnpm cache        | `actions/cache@v4`                                  | key: `{os}-pnpm-store-{lockfile hash}`            |
+| Install deps      | `pnpm install --frozen-lockfile`                    | -                                                 |
+| Version check     | `node scripts/sync-version.mjs --check`             | -                                                 |
+| Extract changelog | `node scripts/extract-changelog.mjs`                | Output to `steps.changelog.outputs.body`          |
+| Install Rust      | `actions-rust-lang/setup-rust-toolchain@v1`         | `target: ${{ matrix.target }}`                    |
+| Rust cache        | Built-in (`actions-rust-lang/setup-rust-toolchain`) | `cache-key: ${{ matrix.target }}-no-cargo-bin-v1` |
+| Build             | `tauri-apps/tauri-action@v0`                        | `args: "--target ${{ matrix.target }}"`           |
 
 ## 4. Build Chain Verification
 
-Complete build chain for x86_64 job under Rosetta:
+Complete build chains:
 
 ```
-setup-node (x64) → pnpm install → tauri-action
-                                    └─ beforeBuildCommand: pnpm build
-                                       ├─ pnpm --filter moor-sidecar build
-                                       │  ├─ esbuild bundle (architecture-independent)
-                                       │  ├─ Node SEA config + blob
-                                       │  ├─ copy process.execPath (x86_64 Node)
-                                       │  ├─ postject inject blob
-                                       │  └─ codesign
-                                       ├─ tsc -b
-                                       └─ vp build (Vite)
-                                    └─ cargo build --target x86_64-apple-darwin
-                                       └─ bundles .dmg with sidecar
+macOS x86_64:
+setup-node → pnpm install → tauri-action
+                              └─ beforeBuildCommand: pnpm version:sync && pnpm build:frontend
+                                 ├─ tsc -b
+                                 └─ vp build (Vite)
+                              └─ cargo build --target x86_64-apple-darwin
+                                 └─ bundles .dmg with in-process Rust HTTP server
+
+Windows x64:
+setup-node → pnpm install → tauri-action
+                              └─ beforeBuildCommand: pnpm version:sync && pnpm build:frontend
+                                 ├─ tsc -b
+                                 └─ vp build (Vite)
+                              └─ cargo build --target x86_64-pc-windows-msvc
+                                 └─ bundles Windows installers with in-process Rust HTTP server
 ```
 
 ## 5. Version Management Architecture
@@ -148,20 +148,22 @@ pnpm version:sync
 
 ## 6. File Change List
 
-| File                            | Action  | Description                                     |
-| ------------------------------- | ------- | ----------------------------------------------- |
-| `.github/workflows/release.yml` | Rewrite | Standardize macos-latest + Rosetta matrix       |
-| `.changeset/initial-release.md` | New     | Initial changeset, solves CHANGELOG cold start  |
-| `.changeset/config.json`        | Modify  | Remove `fixed` option                           |
-| `scripts/sync-version.mjs`      | Modify  | Source of truth changed to sidecar/package.json |
+| File                            | Action  | Description                                       |
+| ------------------------------- | ------- | ------------------------------------------------- |
+| `.github/workflows/release.yml` | Rewrite | Standardize macos-latest matrix + Windows x64 job |
+| `.changeset/initial-release.md` | New     | Initial changeset, solves CHANGELOG cold start    |
+| `.changeset/config.json`        | Modify  | Remove `fixed` option                             |
+| `scripts/sync-version.mjs`      | Modify  | Source of truth changed to sidecar/package.json   |
 
 ## 7. Verification Checklist
 
 - [ ] YAML syntax is correct, CI can parse it normally.
-- [ ] Both jobs launch on macos-latest without queuing.
-- [ ] x86_64 job uses Rosetta Node, sidecar binary is x86_64.
+- [ ] Both macOS jobs launch on macos-latest without queuing.
+- [ ] x86_64 job produces x86_64 Rust binary.
+- [ ] Windows job launches on windows-latest and produces x86_64-pc-windows-msvc Rust binary.
 - [ ] Rust cache keys are isolated by target, no conflicts.
-- [ ] pnpm cache is shared between the two jobs.
+- [ ] pnpm cache is shared within each runner OS family.
 - [ ] Release page contains complete changelog content.
 - [ ] Generates both `_aarch64.dmg` and `_x86_64.dmg` artifacts.
+- [ ] Generates Windows installer artifacts for x64 releases.
 - [ ] `pnpm release` correctly generates CHANGELOG.md.

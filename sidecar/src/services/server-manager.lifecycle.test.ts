@@ -329,6 +329,22 @@ describe("ServerManager MCP lifecycle", () => {
     expect(env.IGNORED_FLAG).toBeUndefined();
   });
 
+  it("keeps Windows Path aliases when building a stdio environment", () => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { value: "win32" });
+
+    try {
+      const env = buildStdioEnvironment({
+        HOME: "/Users/tester",
+        Path: ["/custom/bin", "/usr/bin"].join(path.delimiter),
+      });
+
+      expect(env.PATH.split(path.delimiter).slice(0, 2)).toEqual(["/custom/bin", "/usr/bin"]);
+    } finally {
+      Object.defineProperty(process, "platform", originalPlatform!);
+    }
+  });
+
   it("finds executable commands on the constructed PATH", () => {
     const binDir = mkdtempSync(path.join(tmpdir(), "moor-bin-"));
     try {

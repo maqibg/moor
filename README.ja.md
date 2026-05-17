@@ -15,6 +15,7 @@
   <img src="https://img.shields.io/badge/Tauri-2-24C8D8?logo=tauri" alt="Tauri 2">
   <img src="https://img.shields.io/badge/Node.js-22+-339933?logo=nodedotjs" alt="Node.js 22+">
   <img src="https://img.shields.io/badge/platform-macOS-black?logo=apple" alt="macOS">
+  <img src="https://img.shields.io/badge/platform-Windows-0078D4?logo=windows" alt="Windows">
   <img src="https://img.shields.io/badge/pnpm-10+-F69220?logo=pnpm" alt="pnpm">
 </p>
 
@@ -65,14 +66,18 @@
 
 ### macOS アプリ
 
-[Releases](https://github.com/yourusername/moor/releases) から `.dmg` をダウンロードし、Applications フォルダにドラッグするだけです。アプリには Rust インプロセス HTTP サーバーがバンドルされているため、Node.js ランタイムの事前インストールは不要です。
+[Releases](https://github.com/varandrew/moor/releases) から `.dmg` をダウンロードし、Applications フォルダにドラッグするだけです。アプリには Rust インプロセス HTTP サーバーがバンドルされているため、Node.js ランタイムの事前インストールは不要です。
+
+### Windows アプリ
+
+[Releases](https://github.com/varandrew/moor/releases) から Windows インストーラーをダウンロードして実行します。アプリには Rust インプロセス HTTP サーバーがバンドルされているため、Node.js ランタイムの事前インストールは不要です。
 
 ### ソースからビルド
 
-macOS（Apple Silicon / Intel）、Node.js >= 22、pnpm >= 10、Rust >= 1.77 が必要です。
+macOS（Apple Silicon / Intel）または Windows x64、Node.js >= 22、pnpm >= 10、Rust >= 1.77 が必要です。
 
 ```bash
-git clone https://github.com/yourusername/moor.git
+git clone https://github.com/varandrew/moor.git
 cd moor
 vp install
 ```
@@ -175,7 +180,7 @@ Claude Code、Codex、OpenCode、Cursor 向けにコピーするだけで使え�
 
 ### システムトレイ
 
-ウィンドウを閉じても — Moor は macOS メニューバーで実行を続けます。ゲートウェイはアクティブなままなので、Agent は接続を失いません。
+ウィンドウを閉じても — Moor は macOS メニューバーまたは Windows システムトレイで実行を続けます。ゲートウェイはアクティブなままなので、Agent は接続を失いません。
 
 ### リアルタイムステータス
 
@@ -228,11 +233,11 @@ WebView ◀──SSE──── /api/events
 
 ### 前提条件
 
-- macOS（Apple Silicon / Intel）
+- macOS（Apple Silicon / Intel）または Windows x64
 - [Node.js](https://nodejs.org) >= 22
 - [pnpm](https://pnpm.io) >= 10
 - [Rust](https://rustup.rs) >= 1.77
-- [Xcode Command Line Tools](https://developer.apple.com/xcode/resources/)
+- macOS では [Xcode Command Line Tools](https://developer.apple.com/xcode/resources/) も必要です
 
 ### 依存関係のインストール
 

@@ -15,6 +15,7 @@
   <img src="https://img.shields.io/badge/Tauri-2-24C8D8?logo=tauri" alt="Tauri 2">
   <img src="https://img.shields.io/badge/Node.js-22+-339933?logo=nodedotjs" alt="Node.js 22+">
   <img src="https://img.shields.io/badge/platform-macOS-black?logo=apple" alt="macOS">
+  <img src="https://img.shields.io/badge/platform-Windows-0078D4?logo=windows" alt="Windows">
   <img src="https://img.shields.io/badge/pnpm-10+-F69220?logo=pnpm" alt="pnpm">
 </p>
 
@@ -63,14 +64,18 @@
 
 ### macOS 应用
 
-从 [Releases](https://github.com/yourusername/moor/releases) 下载 `.dmg`，拖拽到 Applications 文件夹即可。应用内嵌 Rust HTTP 服务器——无需预装 Node.js 运行时。
+从 [Releases](https://github.com/varandrew/moor/releases) 下载 `.dmg`，拖拽到 Applications 文件夹即可。应用内嵌 Rust HTTP 服务器——无需预装 Node.js 运行时。
+
+### Windows 应用
+
+从 [Releases](https://github.com/varandrew/moor/releases) 下载 Windows 安装包并运行即可。应用内嵌 Rust HTTP 服务器——无需预装 Node.js 运行时。
 
 ### 从源码构建
 
-需要 macOS（Apple Silicon / Intel）、Node.js >= 22、pnpm >= 10 和 Rust >= 1.77。
+需要 macOS（Apple Silicon / Intel）或 Windows x64、Node.js >= 22、pnpm >= 10 和 Rust >= 1.77。
 
 ```bash
-git clone https://github.com/yourusername/moor.git
+git clone https://github.com/varandrew/moor.git
 cd moor
 vp install
 ```
@@ -169,7 +174,7 @@ Moor 会处理剩下的一切——聚合 `tools/list`、路由 `tools/call`、�
 
 ### 系统托盘
 
-关闭窗口——Moor 继续在 macOS 菜单栏中运行。网关保持活跃，Agent 永远不会断开连接。
+关闭窗口——Moor 会继续在 macOS 菜单栏或 Windows 系统托盘中运行。网关保持活跃，Agent 永远不会断开连接。
 
 ### 实时状态
 
@@ -218,11 +223,11 @@ WebView ◀──SSE──── /api/events
 
 ### 前置要求
 
-- macOS（Apple Silicon / Intel）
+- macOS（Apple Silicon / Intel）或 Windows x64
 - [Node.js](https://nodejs.org) >= 22
 - [pnpm](https://pnpm.io) >= 10
 - [Rust](https://rustup.rs) >= 1.77
-- [Xcode Command Line Tools](https://developer.apple.com/xcode/resources/)
+- macOS 还需要 [Xcode Command Line Tools](https://developer.apple.com/xcode/resources/)
 
 ### 安装依赖
 

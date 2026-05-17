@@ -15,6 +15,7 @@
   <img src="https://img.shields.io/badge/Tauri-2-24C8D8?logo=tauri" alt="Tauri 2">
   <img src="https://img.shields.io/badge/Node.js-22+-339933?logo=nodedotjs" alt="Node.js 22+">
   <img src="https://img.shields.io/badge/platform-macOS-black?logo=apple" alt="macOS">
+  <img src="https://img.shields.io/badge/platform-Windows-0078D4?logo=windows" alt="Windows">
   <img src="https://img.shields.io/badge/pnpm-10+-F69220?logo=pnpm" alt="pnpm">
 </p>
 
@@ -63,14 +64,18 @@
 
 ### macOS App
 
-Download the `.dmg` from [Releases](https://github.com/yourusername/moor/releases), drag to Applications, done. The app bundles the HTTP server as an in-process Rust binary — no pre-installed Node.js runtime required.
+Download the `.dmg` from [Releases](https://github.com/varandrew/moor/releases), drag to Applications, done. The app bundles the HTTP server as an in-process Rust binary — no pre-installed Node.js runtime required.
+
+### Windows App
+
+Download the Windows installer from [Releases](https://github.com/varandrew/moor/releases) and run it. The app bundles the HTTP server as an in-process Rust binary — no pre-installed Node.js runtime required.
 
 ### Build from Source
 
-Requires macOS (Apple Silicon / Intel), Node.js >= 22, pnpm >= 10, and Rust >= 1.77.
+Requires macOS (Apple Silicon / Intel) or Windows x64, Node.js >= 22, pnpm >= 10, and Rust >= 1.77.
 
 ```bash
-git clone https://github.com/yourusername/moor.git
+git clone https://github.com/varandrew/moor.git
 cd moor
 vp install
 ```
@@ -169,7 +174,7 @@ Filter by time range, server, or tool. View aggregate statistics on the Dashboar
 
 ### System Tray
 
-Close the window — Moor keeps running in the macOS menu bar. The gateway stays alive, so your Agents never lose connection.
+Close the window — Moor keeps running in the macOS menu bar or Windows system tray. The gateway stays alive, so your Agents never lose connection.
 
 ### Real-Time Status
 
@@ -218,11 +223,11 @@ WebView ◀──SSE──── /api/events
 
 ### Prerequisites
 
-- macOS (Apple Silicon / Intel)
+- macOS (Apple Silicon / Intel) or Windows x64
 - [Node.js](https://nodejs.org) >= 22
 - [pnpm](https://pnpm.io) >= 10
 - [Rust](https://rustup.rs) >= 1.77
-- [Xcode Command Line Tools](https://developer.apple.com/xcode/resources/)
+- [Xcode Command Line Tools](https://developer.apple.com/xcode/resources/) on macOS
 
 ### Install Dependencies
 
@@ -287,17 +292,17 @@ vp test
 
 ### Server Management
 
-| Method   | Path                     | Description          |
-| -------- | ------------------------ | -------------------- |
-| `GET`    | `/api/servers`           | List all servers     |
-| `POST`   | `/api/servers`           | Add server           |
-| `GET`    | `/api/servers/:id`       | Server detail        |
-| `PUT`    | `/api/servers/:id`       | Update server config |
-| `DELETE` | `/api/servers/:id`       | Remove server        |
-| `POST`   | `/api/servers/:id/start` | Start server         |
-| `POST`   | `/api/servers/:id/stop`  | Stop server          |
-| `GET`    | `/api/servers/:id/tools` | Get discovered tools |
-| `PUT`    | `/api/servers/order`     | Reorder servers      |
+| Method   | Path                     | Description                                                |
+| -------- | ------------------------ | ---------------------------------------------------------- |
+| `GET`    | `/api/servers`           | List all servers                                           |
+| `POST`   | `/api/servers`           | Add server                                                 |
+| `GET`    | `/api/servers/:id`       | Server detail                                              |
+| `PUT`    | `/api/servers/:id`       | Update server config                                       |
+| `DELETE` | `/api/servers/:id`       | Remove server                                              |
+| `POST`   | `/api/servers/:id/start` | Start server                                               |
+| `POST`   | `/api/servers/:id/stop`  | Stop server                                                |
+| `GET`    | `/api/servers/:id/tools` | Get discovered tools (optionally filter by `?profile_id=`) |
+| `PUT`    | `/api/servers/order`     | Reorder servers                                            |
 
 ### Profile Management
 
@@ -351,7 +356,7 @@ vp test
 | Database      | SQLite (rusqlite / node:sqlite)                   |
 | MCP Protocol  | @modelcontextprotocol/sdk (stdio + HTTP/SSE)      |
 | Icons         | Lucide React                                      |
-| Tooling       | Vite+ (vp CLI), Oxlint, Oxfmt, Vitest             |
+| Tooling       | vite-plus (vp CLI), Oxlint, Oxfmt, Vitest         |
 
 ## Acknowledgements
 

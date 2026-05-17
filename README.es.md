@@ -15,6 +15,7 @@
   <img src="https://img.shields.io/badge/Tauri-2-24C8D8?logo=tauri" alt="Tauri 2">
   <img src="https://img.shields.io/badge/Node.js-22+-339933?logo=nodedotjs" alt="Node.js 22+">
   <img src="https://img.shields.io/badge/platform-macOS-black?logo=apple" alt="macOS">
+  <img src="https://img.shields.io/badge/platform-Windows-0078D4?logo=windows" alt="Windows">
   <img src="https://img.shields.io/badge/pnpm-10+-F69220?logo=pnpm" alt="pnpm">
 </p>
 
@@ -65,14 +66,18 @@
 
 ### Aplicación macOS
 
-Descarga el `.dmg` desde [Releases](https://github.com/yourusername/moor/releases), arrástralo a Applications, listo. La aplicación incluye el servidor HTTP Rust en proceso — no se requiere Node.js preinstalado.
+Descarga el `.dmg` desde [Releases](https://github.com/varandrew/moor/releases), arrástralo a Applications, listo. La aplicación incluye el servidor HTTP Rust en proceso — no se requiere Node.js preinstalado.
+
+### Aplicación Windows
+
+Descarga el instalador de Windows desde [Releases](https://github.com/varandrew/moor/releases) y ejecútalo. La aplicación incluye el servidor HTTP Rust en proceso — no se requiere Node.js preinstalado.
 
 ### Compilar desde el código fuente
 
-Requiere macOS (Apple Silicon / Intel), Node.js >= 22, pnpm >= 10 y Rust >= 1.77.
+Requiere macOS (Apple Silicon / Intel) o Windows x64, Node.js >= 22, pnpm >= 10 y Rust >= 1.77.
 
 ```bash
-git clone https://github.com/yourusername/moor.git
+git clone https://github.com/varandrew/moor.git
 cd moor
 vp install
 ```
@@ -175,7 +180,7 @@ Filtra por rango de tiempo, servidor o herramienta. Visualiza estadísticas agre
 
 ### Bandeja del sistema
 
-Cierra la ventana — Moor sigue ejecutándose en la barra de menús de macOS. El gateway permanece activo, así que tus Agentes nunca pierden conexión.
+Cierra la ventana — Moor sigue ejecutándose en la barra de menús de macOS o en la bandeja del sistema de Windows. El gateway permanece activo, así que tus Agentes nunca pierden conexión.
 
 ### Estado en tiempo real
 
@@ -228,11 +233,11 @@ WebView ◀──SSE──── /api/events
 
 ### Requisitos previos
 
-- macOS (Apple Silicon / Intel)
+- macOS (Apple Silicon / Intel) o Windows x64
 - [Node.js](https://nodejs.org) >= 22
 - [pnpm](https://pnpm.io) >= 10
 - [Rust](https://rustup.rs) >= 1.77
-- [Xcode Command Line Tools](https://developer.apple.com/xcode/resources/)
+- [Xcode Command Line Tools](https://developer.apple.com/xcode/resources/) en macOS
 
 ### Instalar dependencias
 

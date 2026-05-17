@@ -278,25 +278,39 @@ pub fn run() {
             let quit = MenuItem::with_id(app, "quit", "Quit Moor", true, None::<&str>)?;
             let show = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
-            let _tray = TrayIconBuilder::new()
-                .icon(tauri::include_image!("./icons/tray-template.png"))
-                .icon_as_template(true)
-                .menu(&menu)
-                .show_menu_on_left_click(false)
-                .tooltip("Moor - MCP Manager")
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "quit" => {
-                        app.exit(0);
-                    }
-                    "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
+            let _tray = {
+                let builder = TrayIconBuilder::new()
+                    .menu(&menu)
+                    .show_menu_on_left_click(false)
+                    .tooltip("Moor - MCP Manager")
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "quit" => {
+                            app.exit(0);
                         }
-                    }
-                    _ => {}
-                })
-                .build(app)?;
+                        "show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        _ => {}
+                    });
+
+                #[cfg(target_os = "macos")]
+                {
+                    builder
+                        .icon(tauri::include_image!("./icons/tray-template.png"))
+                        .icon_as_template(true)
+                        .build(app)?
+                }
+
+                #[cfg(not(target_os = "macos"))]
+                {
+                    builder
+                        .icon(tauri::include_image!("./icons/32x32.png"))
+                        .build(app)?
+                }
+            };
 
             if should_show_window {
                 if let Some(window) = app.get_webview_window("main") {

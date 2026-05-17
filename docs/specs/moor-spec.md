@@ -168,7 +168,9 @@ MCPServer
 ├─ headers: Record<string, string>? (for http)
 ├─ working_dir: string?
 ├─ auto_start: boolean
+├─ sort_order: integer (display order, default 0)
 ├─ status: "stopped" | "starting" | "running" | "error"
+├─ error_message: string? (human-readable error when status is "error")
 ├─ created_at: timestamp
 └─ updated_at: timestamp
 
@@ -180,7 +182,8 @@ ProfileServer (join table)
 
 ToolDiscovery (cached)
 ├─ server_id: uuid → MCPServer
-├─ tool_name: string
+├─ tool_name: string (internal name from the MCP server)
+├─ exposed_name: string (name exposed to AI Agents via the gateway)
 ├─ description: string
 ├─ input_schema: JSON
 └─ discovered_at: timestamp
