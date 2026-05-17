@@ -4,13 +4,13 @@
 
 ### Patch Changes
 
-- 新增 Windows 平台支持与工具暴露名称策略优化
-  - 新增 Windows x64 CI/CD 构建（安装器产物）
-  - stdio 环境变量处理适配 Windows（PATH 大小写不敏感、分号分隔符、PATHEXT 扩展名）
-  - 系统托盘图标按平台条件编译（macOS 模板图标 / Windows 普通图标）
-  - 工具暴露名称统一使用 `{serverSlug}__{toolName}` 格式，多服务器 slug 冲突时自动添加最短唯一 server ID 前缀
-  - MCP gateway tools/list 响应添加 `_meta.serverName` 字段
-  - 主目录解析改用 `dirs::home_dir()`，兼容 Windows
+- Add Windows platform support and improve tool exposed name strategy
+  - Add Windows x64 CI/CD build job producing installers
+  - Adapt stdio environment handling for Windows (case-insensitive PATH, semicolon separator, PATHEXT resolution)
+  - Conditionally compile tray icons per platform (macOS template icon / Windows regular icon)
+  - Unify tool exposed names to `{serverSlug}__{toolName}` format, with shortest unique server ID prefix for slug collisions
+  - Add `_meta.serverName` field to MCP gateway tools/list response
+  - Switch home directory resolution to `dirs::home_dir()` for Windows compatibility
 
 - Updated dependencies
   - @moor/types@0.5.2
