@@ -27,7 +27,7 @@ function cargoLockPackagePattern() {
 }
 
 function isCargoLockPackage(section, packageName) {
-  return section.split("\n").some((line) => line === `name = "${packageName}"`);
+  return section.split(/\r?\n/).some((line) => line === `name = "${packageName}"`);
 }
 
 function readCargoLockPackageVersion(filePath, packageName) {
@@ -47,6 +47,7 @@ function readCargoLockPackageVersion(filePath, packageName) {
 function writeCargoLockPackageVersion(filePath, packageName, version) {
   const content = readFileSync(filePath, "utf8");
   let updatedPackage = false;
+  let updatedVersion = false;
 
   const updated = content.replace(cargoLockPackagePattern(), (section) => {
     if (!isCargoLockPackage(section, packageName)) {
@@ -54,11 +55,19 @@ function writeCargoLockPackageVersion(filePath, packageName, version) {
     }
 
     updatedPackage = true;
+    if (!/^version = "[^"]+"/m.test(section)) {
+      return section;
+    }
+
+    updatedVersion = true;
     return section.replace(/^version = "[^"]+"/m, `version = "${version}"`);
   });
 
   if (!updatedPackage) {
     throw new Error(`Cargo.lock package "${packageName}" was not found`);
+  }
+  if (!updatedVersion) {
+    throw new Error(`Cargo.lock package "${packageName}" has no readable version`);
   }
 
   writeFileSync(filePath, updated);
@@ -104,6 +113,10 @@ export function syncVersions({
       path: path.join(root, "src-tauri", "Cargo.lock"),
       read: (filePath) => readCargoLockPackageVersion(filePath, "moor"),
       write: (filePath, version) => writeCargoLockPackageVersion(filePath, "moor", version),
+      describeMismatch: (current, expected) =>
+        current === null
+          ? '  [invalid] Cargo.lock: package "moor" section was not found or has no readable version'
+          : `  [mismatch] Cargo.lock: ${current} (expected ${expected})`,
     },
   ];
 
@@ -118,7 +131,10 @@ export function syncVersions({
 
     hasMismatch = true;
     if (checkOnly) {
-      error(`  [mismatch] ${target.name}: ${current} (expected ${expected})`);
+      error(
+        target.describeMismatch?.(current, expected) ??
+          `  [mismatch] ${target.name}: ${current} (expected ${expected})`,
+      );
     } else {
       target.write(target.path, expected);
       log(`  [synced] ${target.name}: ${current} -> ${expected}`);
