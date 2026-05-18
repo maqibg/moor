@@ -15,8 +15,31 @@ import {
 import { useNavigate } from "react-router-dom";
 import type { Server } from "@moor/types";
 import type { ServerAction } from "@/hooks/server-patch-utils";
-import { cn } from "@/lib/utils";
-import { getRemoveFeedback, type RemoveFeedback } from "./server-card-state";
+import { cn, getErrorMessage } from "@/lib/utils";
+
+type RemoveFeedback =
+  | { kind: "confirm"; message: string }
+  | { kind: "removing"; message: string }
+  | { kind: "error"; message: string }
+  | null;
+
+function getRemoveFeedback({
+  serverName,
+  confirmingRemove,
+  isRemoving,
+  removeError,
+}: {
+  serverName: string;
+  confirmingRemove: boolean;
+  isRemoving: boolean;
+  removeError: string | null;
+}): RemoveFeedback {
+  if (isRemoving) return { kind: "removing", message: `Removing ${serverName}...` };
+  if (removeError) return { kind: "error", message: removeError };
+  if (confirmingRemove)
+    return { kind: "confirm", message: `Remove "${serverName}"? This cannot be undone.` };
+  return null;
+}
 
 interface ServerCardProps {
   server: Server;
@@ -185,10 +208,6 @@ function ServerControls({
   );
 }
 
-function getErrorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : "Unable to remove server";
-}
-
 function RemoveFeedbackRow({
   feedback,
   onCancel,
@@ -293,7 +312,7 @@ export function ServerCard({
       await onRemove(server.id);
       setConfirmingRemove(false);
     } catch (err) {
-      setRemoveError(getErrorMessage(err));
+      setRemoveError(getErrorMessage(err, "Unable to remove server"));
     } finally {
       setIsRemoving(false);
     }

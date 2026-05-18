@@ -162,7 +162,9 @@ fn insert_nested_setting(root: &mut Map<String, Value>, key: &str, value: Value)
         if !entry.is_object() {
             *entry = Value::Object(Map::new());
         }
-        current = entry.as_object_mut().expect("entry was normalized to object");
+        current = entry
+            .as_object_mut()
+            .expect("entry was normalized to object");
     }
 
     current.insert(parts[parts.len() - 1].to_string(), value);
@@ -330,7 +332,10 @@ mod tests {
         let settings = init_settings(&db, &data_dir).expect("settings should initialize");
 
         assert_eq!(settings, default_settings());
-        assert_eq!(get_settings(&db).expect("settings should load"), default_settings());
+        assert_eq!(
+            get_settings(&db).expect("settings should load"),
+            default_settings()
+        );
         let _ = fs::remove_dir_all(data_dir);
     }
 
@@ -363,7 +368,11 @@ mod tests {
         assert!(updated.general.minimize_to_tray_on_close);
         assert!(updated.general.show_window_on_launch);
         assert_eq!(updated.advanced.sidecar_port, 9444);
-        assert!(!read_settings_file(&data_dir).general.minimize_to_tray_on_close);
+        assert!(
+            !read_settings_file(&data_dir)
+                .general
+                .minimize_to_tray_on_close
+        );
         assert_eq!(read_settings_file(&data_dir).advanced.sidecar_port, 9333);
         assert_eq!(get_settings(&db).expect("settings should load"), updated);
         let _ = fs::remove_dir_all(data_dir);

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, apiPost } from "@/lib/api";
+import { api, apiPost } from "@/lib/api/client";
 import { routes } from "@/lib/api-routes";
 import { useSSEEvent } from "@/contexts/SSEContext";
 import { createDefaultSettings, type Settings, type SettingsUpdatePayload } from "@moor/types";

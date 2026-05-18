@@ -1,9 +1,10 @@
-import { useCallback, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useState, type SetStateAction } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, apiPost, apiPut, apiDelete } from "@/lib/api";
+import { api, apiPost, apiPut, apiDelete } from "@/lib/api/client";
 import { routes } from "@/lib/api-routes";
 import { useSSEEvent } from "@/contexts/SSEContext";
 import type { Server, ServerDetail, ToolDetail } from "@moor/types";
+import { getErrorMessage } from "@/lib/utils";
 import {
   applyServerAction,
   getServerStatusEventPayload,
@@ -12,18 +13,7 @@ import {
   type ServerAction,
 } from "./server-patch-utils";
 
-type ServerSetter = Dispatch<SetStateAction<Server[]>>;
 type ServerMutationResult = "success" | "failed";
-interface ServerActionsDeps {
-  setServerAction?: (id: string, action: ServerAction) => void;
-  clearServerAction?: (id: string) => void;
-  setData?: ServerSetter;
-  refreshSilently?: () => Promise<void>;
-}
-
-function getErrorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : "Unknown server action error";
-}
 
 export function useServerList() {
   const queryClient = useQueryClient();
@@ -97,22 +87,21 @@ export function useServerList() {
   };
 }
 
-export function useServerActions(deps: ServerActionsDeps = {}) {
+export function useServerActions(callbacks?: {
+  setServerAction?: (id: string, action: ServerAction) => void;
+  clearServerAction?: (id: string) => void;
+}) {
   const queryClient = useQueryClient();
-  const { setServerAction, clearServerAction, setData, refreshSilently } = deps;
+  const { setServerAction, clearServerAction } = callbacks ?? {};
 
   const setServersData = useCallback(
     (updater: SetStateAction<Server[]>) => {
-      if (setData) {
-        setData(updater);
-        return;
-      }
       queryClient.setQueryData<Server[]>(["servers"], (old) => {
         const prev = old ?? [];
         return typeof updater === "function" ? updater(prev) : updater;
       });
     },
-    [queryClient, setData],
+    [queryClient],
   );
 
   const setServerDetailPatch = useCallback(
@@ -126,14 +115,10 @@ export function useServerActions(deps: ServerActionsDeps = {}) {
 
   const refreshAfterServerMutation = useCallback(
     async (id: string) => {
-      if (refreshSilently) {
-        await refreshSilently();
-      } else {
-        await queryClient.invalidateQueries({ queryKey: ["servers"] });
-      }
+      await queryClient.refetchQueries({ queryKey: ["servers"] });
       await queryClient.invalidateQueries({ queryKey: ["servers", id] });
     },
-    [queryClient, refreshSilently],
+    [queryClient],
   );
 
   const addServer = useMutation({
@@ -268,8 +253,6 @@ export function useServers() {
   const actions = useServerActions({
     setServerAction: list.setServerAction,
     clearServerAction: list.clearServerAction,
-    setData: list.setData,
-    refreshSilently: list.refreshSilently,
   });
 
   return {

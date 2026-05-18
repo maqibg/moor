@@ -1,18 +1,27 @@
 use serde_json::Value;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::{oneshot, Mutex as AsyncMutex};
+use tokio::sync::{oneshot, watch, Mutex as AsyncMutex};
 
 type PendingMap = Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>;
+type StderrLines = Arc<Mutex<VecDeque<String>>>;
+
+#[cfg(any(windows, test))]
+const WINDOWS_CREATE_NO_WINDOW: u32 = 0x08000000;
+const STDERR_SUMMARY_MAX_LINES: usize = 3;
+const STDERR_SUMMARY_MAX_CHARS: usize = 240;
+const STDERR_REDACTED: &str = "[REDACTED]";
 
 pub struct StdioClientTransport {
     child: Option<Child>,
     stdin_handle: Arc<AsyncMutex<Option<tokio::process::ChildStdin>>>,
     pending: PendingMap,
+    stderr_lines: StderrLines,
     next_id: Arc<Mutex<i64>>,
     reader_handle: Option<tokio::task::JoinHandle<()>>,
+    alive_rx: watch::Receiver<bool>,
 }
 
 impl StdioClientTransport {
@@ -33,6 +42,11 @@ impl StdioClientTransport {
             cmd.current_dir(cwd);
         }
 
+        #[cfg(windows)]
+        if let Some(flags) = stdio_creation_flags_for_platform(true) {
+            cmd.creation_flags(flags);
+        }
+
         let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn: {e}"))?;
         let stdin = child.stdin.take().ok_or("Failed to open stdin")?;
         let stdout = child.stdout.take().ok_or("Failed to open stdout")?;
@@ -40,6 +54,8 @@ impl StdioClientTransport {
 
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
         let stdin_handle = Arc::new(AsyncMutex::new(Some(stdin)));
+        let stderr_lines = Arc::new(Mutex::new(VecDeque::new()));
+        let (alive_tx, alive_rx) = watch::channel(true);
 
         // stdout reader task
         let pending_clone = pending.clone();
@@ -71,13 +87,19 @@ impl StdioClientTransport {
                     Err(_) => break,
                 }
             }
+            let _ = alive_tx.send(false);
         });
 
         // stderr reader task
+        let stderr_lines_clone = stderr_lines.clone();
         tokio::spawn(async move {
             let reader = BufReader::new(stderr);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                {
+                    let mut stderr_lines = stderr_lines_clone.lock().unwrap();
+                    record_stderr_line(&mut stderr_lines, &line);
+                }
                 tracing::warn!(target: "mcp::stdio::stderr", "{}", line);
             }
         });
@@ -86,9 +108,18 @@ impl StdioClientTransport {
             child: Some(child),
             stdin_handle,
             pending,
+            stderr_lines,
             next_id: Arc::new(Mutex::new(1)),
             reader_handle: Some(reader_handle),
+            alive_rx,
         })
+    }
+
+    pub fn with_startup_stderr_summary(&self, err: String) -> String {
+        match self.stderr_summary() {
+            Some(summary) => format!("{err}. stdio stderr: {summary}"),
+            None => err,
+        }
     }
 
     pub async fn send_request(&self, method: &str, params: Option<Value>) -> Result<Value, String> {
@@ -190,6 +221,76 @@ impl StdioClientTransport {
         }
         Ok(())
     }
+
+    pub fn stderr_summary(&self) -> Option<String> {
+        let lines = self.stderr_lines.lock().unwrap();
+        stderr_summary(&lines)
+    }
+
+    pub fn alive_receiver(&self) -> watch::Receiver<bool> {
+        self.alive_rx.clone()
+    }
+}
+
+#[cfg(any(windows, test))]
+fn stdio_creation_flags_for_platform(is_windows: bool) -> Option<u32> {
+    is_windows.then_some(WINDOWS_CREATE_NO_WINDOW)
+}
+
+fn record_stderr_line(lines: &mut VecDeque<String>, line: &str) {
+    let line = summarize_stderr_line(line);
+    if line.is_empty() {
+        return;
+    }
+    if lines.len() == STDERR_SUMMARY_MAX_LINES {
+        lines.pop_front();
+    }
+    lines.push_back(line);
+}
+
+fn summarize_stderr_line(line: &str) -> String {
+    let redacted = redact_sensitive_stderr_values(line);
+    let mut chars = redacted.trim().chars();
+    let summary: String = chars.by_ref().take(STDERR_SUMMARY_MAX_CHARS).collect();
+    if chars.next().is_some() {
+        format!("{summary}…")
+    } else {
+        summary
+    }
+}
+
+fn stderr_summary(lines: &VecDeque<String>) -> Option<String> {
+    (!lines.is_empty()).then(|| lines.iter().cloned().collect::<Vec<_>>().join(" | "))
+}
+
+fn redact_sensitive_stderr_values(line: &str) -> String {
+    let redacted =
+        sensitive_stderr_key_regex().replace_all(line, |caps: &regex_lite::Captures<'_>| {
+            format!("{}{}{}", &caps[1], &caps[2], STDERR_REDACTED)
+        });
+    authorization_stderr_regex()
+        .replace_all(&redacted, |caps: &regex_lite::Captures<'_>| {
+            format!("{}{}{}", &caps[1], &caps[2], STDERR_REDACTED)
+        })
+        .to_string()
+}
+
+fn sensitive_stderr_key_regex() -> &'static regex_lite::Regex {
+    static REGEX: OnceLock<regex_lite::Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        regex_lite::Regex::new(
+            r"(?i)\b([A-Za-z0-9_-]*(?:token|password|secret|api[_-]?(?:key|token)|cookie)[A-Za-z0-9_-]*)\b(\s*[:=]\s*)([^\s,;]+)",
+        )
+        .expect("sensitive stderr key regex should compile")
+    })
+}
+
+fn authorization_stderr_regex() -> &'static regex_lite::Regex {
+    static REGEX: OnceLock<regex_lite::Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        regex_lite::Regex::new(r"(?i)\b(authorization)\b(\s*[:=]\s*)([^,;]+)")
+            .expect("authorization stderr regex should compile")
+    })
 }
 
 /// Build the environment for stdio MCP server processes.
@@ -437,6 +538,51 @@ mod tests {
         assert_eq!(
             executable_names_for_platform("npx.cmd", &env, true),
             vec!["npx.cmd"]
+        );
+    }
+
+    #[test]
+    fn windows_stdio_processes_hide_console_window() {
+        assert_eq!(
+            stdio_creation_flags_for_platform(true),
+            Some(WINDOWS_CREATE_NO_WINDOW)
+        );
+    }
+
+    #[test]
+    fn non_windows_stdio_processes_do_not_set_creation_flags() {
+        assert_eq!(stdio_creation_flags_for_platform(false), None);
+    }
+
+    #[test]
+    fn stderr_summary_keeps_recent_bounded_lines() {
+        let mut lines = VecDeque::new();
+
+        record_stderr_line(&mut lines, "first");
+        record_stderr_line(&mut lines, "second");
+        record_stderr_line(&mut lines, "third");
+        record_stderr_line(&mut lines, "fourth");
+
+        assert_eq!(
+            stderr_summary(&lines).as_deref(),
+            Some("second | third | fourth")
+        );
+    }
+
+    #[test]
+    fn stderr_summary_redacts_sensitive_values() {
+        let mut lines = VecDeque::new();
+
+        record_stderr_line(
+            &mut lines,
+            "token=abc password: hunter2 apiKey=secret authorization: Bearer abc123; cookie=session",
+        );
+
+        assert_eq!(
+            stderr_summary(&lines).as_deref(),
+            Some(
+                "token=[REDACTED] password: [REDACTED] apiKey=[REDACTED] authorization: [REDACTED]; cookie=[REDACTED]"
+            )
         );
     }
 }

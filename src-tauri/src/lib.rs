@@ -426,9 +426,11 @@ mod tests {
         sync_runtime_settings_from_db(&state, state.inner.db.as_ref())
             .expect("runtime settings sync failed");
         assert!(state.get_minimize_to_tray());
-        assert!(!sidecar::services::settings::read_settings_file(&data_dir)
-            .general
-            .minimize_to_tray_on_close);
+        assert!(
+            !sidecar::services::settings::read_settings_file(&data_dir)
+                .general
+                .minimize_to_tray_on_close
+        );
         fs::remove_dir_all(data_dir).expect("failed to remove temp settings dir");
     }
 

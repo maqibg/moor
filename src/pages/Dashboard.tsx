@@ -5,7 +5,12 @@ import { Badge } from "@/components/ui/badge";
 import { useServerList } from "@/hooks/useServers";
 import { useProfiles } from "@/hooks/useProfiles";
 import { useLogs } from "@/hooks/useLogs";
-import { getMcpEndpoint } from "@/lib/api";
+import { getApiRuntime } from "@/lib/api/runtime";
+
+async function getMcpEndpoint(): Promise<string> {
+  const runtime = await getApiRuntime();
+  return `${runtime.baseUrl}/mcp`;
+}
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { StatCard } from "@/components/shared/StatCard";
 import { EmptyState } from "@/components/shared/EmptyState";

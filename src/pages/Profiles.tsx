@@ -7,7 +7,21 @@ import { useProfiles } from "@/hooks/useProfiles";
 import { Plus, Trash2, Check, Code, FlaskConical, User, Home } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { getProfilesForDisplay } from "./profiles-state";
+import type { Profile } from "@moor/types";
+
+interface DisplayProfile {
+  profile: Profile;
+  originalIndex: number;
+}
+
+function getProfilesForDisplay(profiles: Profile[]): DisplayProfile[] {
+  return profiles
+    .map((profile, originalIndex) => ({ profile, originalIndex }))
+    .sort((a, b) => {
+      if (a.profile.isActive === b.profile.isActive) return a.originalIndex - b.originalIndex;
+      return a.profile.isActive ? -1 : 1;
+    });
+}
 
 const profileIcons = [Code, FlaskConical, User, Home, Code, FlaskConical, User, Home];
 const profileAccents = [

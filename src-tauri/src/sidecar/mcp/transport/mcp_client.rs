@@ -1,0 +1,164 @@
+use crate::sidecar::db::tool_discovery_repo::ToolInsert;
+use crate::sidecar::mcp::transport::http_client::HttpClientTransport;
+use crate::sidecar::mcp::transport::stdio_client::StdioClientTransport;
+use serde_json::Value;
+use std::collections::HashMap;
+
+pub struct McpClient {
+    transport: McpTransport,
+    server_name: String,
+}
+
+enum McpTransport {
+    Stdio(StdioClientTransport),
+    Http(HttpClientTransport),
+}
+
+pub struct StdioConnectConfig {
+    pub server_name: String,
+    pub command: String,
+    pub args: Vec<String>,
+    pub cwd: Option<String>,
+    pub env: HashMap<String, String>,
+}
+
+pub struct HttpConnectConfig {
+    pub server_name: String,
+    pub url: String,
+    pub headers: HashMap<String, String>,
+}
+
+impl McpClient {
+    pub async fn connect_stdio(config: StdioConnectConfig) -> Result<Self, String> {
+        let transport = StdioClientTransport::spawn(
+            &config.command,
+            &config.args,
+            config.cwd.as_deref(),
+            config.env,
+        )
+        .await?;
+        let mut client = Self {
+            transport: McpTransport::Stdio(transport),
+            server_name: config.server_name,
+        };
+        client.handshake().await?;
+        Ok(client)
+    }
+
+    pub async fn connect_http(config: HttpConnectConfig) -> Result<Self, String> {
+        let transport = HttpClientTransport::new(&config.url, config.headers);
+        let mut client = Self {
+            transport: McpTransport::Http(transport),
+            server_name: config.server_name,
+        };
+        client.handshake().await?;
+        Ok(client)
+    }
+
+    pub async fn list_tools(&self) -> Result<Vec<ToolInsert>, String> {
+        let result = match &self.transport {
+            McpTransport::Stdio(t) => t
+                .send_request("tools/list", Some(serde_json::json!({})))
+                .await
+                .map_err(|err| self.enrich_stdio_error(&err))?,
+            McpTransport::Http(t) => {
+                let id = chrono::Utc::now().timestamp_millis();
+                t.send_request(id, "tools/list", Some(serde_json::json!({})))
+                    .await?
+            }
+        };
+        Ok(parse_tools_list(&result))
+    }
+
+    pub async fn call_tool(&self, tool_name: &str, args: Value) -> Result<Value, String> {
+        let params = serde_json::json!({
+            "name": tool_name,
+            "arguments": args,
+        });
+        match &self.transport {
+            McpTransport::Stdio(t) => t
+                .send_request("tools/call", Some(params))
+                .await
+                .map_err(|err| self.enrich_stdio_error(&err)),
+            McpTransport::Http(t) => {
+                let id = chrono::Utc::now().timestamp_millis();
+                t.send_request(id, "tools/call", Some(params)).await
+            }
+        }
+    }
+
+    pub async fn disconnect(&mut self) -> Result<(), String> {
+        match &mut self.transport {
+            McpTransport::Stdio(t) => t.close().await,
+            McpTransport::Http(_) => Ok(()),
+        }
+    }
+
+    pub fn alive_receiver(&self) -> Option<tokio::sync::watch::Receiver<bool>> {
+        match &self.transport {
+            McpTransport::Stdio(t) => Some(t.alive_receiver()),
+            McpTransport::Http(_) => None,
+        }
+    }
+
+    async fn handshake(&mut self) -> Result<(), String> {
+        let init_params = serde_json::json!({
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {
+                "name": format!("moor-{}", self.server_name),
+                "version": env!("CARGO_PKG_VERSION")
+            }
+        });
+
+        match &mut self.transport {
+            McpTransport::Stdio(t) => {
+                let _ = t
+                    .send_request("initialize", Some(init_params))
+                    .await
+                    .map_err(|err| t.with_startup_stderr_summary(err))?;
+                t.send_notification("notifications/initialized", Some(serde_json::json!({})))
+                    .await
+                    .map_err(|err| t.with_startup_stderr_summary(err))?;
+            }
+            McpTransport::Http(t) => {
+                let id = chrono::Utc::now().timestamp_millis();
+                let _ = t.send_request(id, "initialize", Some(init_params)).await?;
+                t.send_notification("notifications/initialized", Some(serde_json::json!({})))
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    fn enrich_stdio_error(&self, err: &str) -> String {
+        match &self.transport {
+            McpTransport::Stdio(t) => t.with_startup_stderr_summary(err.to_string()),
+            McpTransport::Http(_) => err.to_string(),
+        }
+    }
+}
+
+fn parse_tools_list(result: &Value) -> Vec<ToolInsert> {
+    result
+        .get("tools")
+        .and_then(|v| v.as_array())
+        .map(|tools| {
+            tools
+                .iter()
+                .map(|tool| ToolInsert {
+                    name: tool
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    description: tool
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                    input_schema: tool.get("inputSchema").cloned(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}

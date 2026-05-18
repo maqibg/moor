@@ -22,16 +22,31 @@ import { PageLoading } from "@/components/shared/PageLoading";
 import { useServers } from "@/hooks/useServers";
 import { useConfigImport } from "@/hooks/useConfigImport";
 import { AlertTriangle, FileJson, GripVertical, Plus, RefreshCw, ScanSearch } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 import { AddServerForm } from "./servers/AddServerForm";
 import { ConfigImportPanel } from "./servers/ConfigImportPanel";
-import { getReorderedServers, getServerIds } from "./servers/server-order";
 import type { Server } from "@moor/types";
 
 type ServerActionMap = ReturnType<typeof useServers>["serverActions"];
 
-function getErrorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : "Unable to save server order";
+function getServerIds(servers: Server[]): string[] {
+  return servers.map((server) => server.id);
+}
+
+function getReorderedServers(
+  servers: Server[],
+  activeId: string,
+  overId: string | null | undefined,
+): Server[] {
+  if (!overId || activeId === overId) return servers;
+  const oldIndex = servers.findIndex((server) => server.id === activeId);
+  const newIndex = servers.findIndex((server) => server.id === overId);
+  if (oldIndex < 0 || newIndex < 0) return servers;
+  const next = [...servers];
+  const [moved] = next.splice(oldIndex, 1);
+  if (!moved) return servers;
+  next.splice(newIndex, 0, moved);
+  return next;
 }
 
 function SortableServerCard({
@@ -133,7 +148,7 @@ export function Servers() {
       try {
         await reorderServers(nextServers);
       } catch (err) {
-        setOrderError(getErrorMessage(err));
+        setOrderError(getErrorMessage(err, "Unable to save server order"));
       }
     },
     [reorderServers, servers],

@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiPost } from "@/lib/api";
+import { apiPost } from "@/lib/api/client";
 import { routes } from "@/lib/api-routes";
 import { formatJsonImport, getJsonImportDiagnostics } from "@/lib/json-import-editor";
 import type { ScannedServer, ImportPreview as ImportPreviewType } from "@moor/types";

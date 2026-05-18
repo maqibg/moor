@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, apiPost } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs } from "@/components/ui/tabs";
@@ -15,7 +15,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { CodeBlock } from "@/components/shared/CodeBlock";
-import { apiPost } from "@/lib/api";
 import { ArrowRight, AlertTriangle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { routes } from "@/lib/api-routes";

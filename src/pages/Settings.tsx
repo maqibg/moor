@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { cn } from "@/lib/utils";
-import { getApiRuntime, resetRuntime } from "@/lib/api";
+import { cn, getErrorMessage } from "@/lib/utils";
+import { getApiRuntime, resetRuntime } from "@/lib/api/runtime";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { useSettings } from "@/hooks/useSettings";
 import { Switch } from "@/components/ui/switch";
@@ -36,10 +36,6 @@ async function applyLoginAutostartSetting(enabled: boolean): Promise<void> {
 }
 
 import { createErrorWithCause } from "@/lib/utils";
-
-function getErrorMessage(err: unknown, fallback: string): string {
-  return err instanceof Error ? err.message : fallback;
-}
 
 // --- Reusable Setting Row ---
 

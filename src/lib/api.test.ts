@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type { SidecarInfo } from "@moor/types";
-import { api, formatApiNetworkError, resetRuntime } from "./api";
+import { api } from "./api/client";
+import { formatApiNetworkError } from "./api/errors";
+import { resetRuntime } from "./api/runtime";
 
 const { invokeMock } = vi.hoisted(() => ({
   invokeMock: vi.fn<() => Promise<SidecarInfo>>(),

@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, apiPost, apiPut, apiDelete } from "@/lib/api";
+import { api, apiPost, apiPut, apiDelete } from "@/lib/api/client";
 import { routes } from "@/lib/api-routes";
 import { useSSEEvent } from "@/contexts/SSEContext";
 import type { Profile, ProfileDetail } from "@moor/types";

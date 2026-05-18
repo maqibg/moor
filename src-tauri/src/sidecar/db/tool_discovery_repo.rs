@@ -131,6 +131,13 @@ impl<'a> ToolDiscoveryRepository<'a> {
             .flat_map(|s| serde_json::from_str::<Vec<String>>(s).unwrap_or_default())
             .collect())
     }
+
+    pub fn delete_by_server_id(&self, server_id: &str) -> Result<(), String> {
+        self.db.run(
+            "DELETE FROM tool_discoveries WHERE server_id = ?1",
+            &[&server_id],
+        )
+    }
 }
 
 pub struct ToolInsert {

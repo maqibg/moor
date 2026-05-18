@@ -2,9 +2,11 @@ use crate::sidecar::db::profile_repo::ProfileRepository;
 use crate::sidecar::db::server_repo::{Server, ServerRepository};
 use crate::sidecar::db::tool_discovery_repo::{ToolDiscoveryRepository, ToolInsert};
 use crate::sidecar::db::Database;
-use crate::sidecar::mcp::transport::http_client::HttpClientTransport;
+use crate::sidecar::mcp::transport::mcp_client::{
+    HttpConnectConfig, McpClient, StdioConnectConfig,
+};
 use crate::sidecar::mcp::transport::stdio_client::{
-    build_stdio_environment, find_executable_on_path, StdioClientTransport,
+    build_stdio_environment, find_executable_on_path,
 };
 use crate::sidecar::services::event_bus::EventBus;
 use crate::sidecar::services::tool_catalog::{ToolCatalogService, ToolDetail};
@@ -13,26 +15,42 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+#[derive(Clone)]
+struct ServerSlot {
+    name: String,
+    status: ServerStatus,
+    auto_start: bool,
+    start_token: u64,
+    session: Option<Arc<tokio::sync::Mutex<McpClient>>>,
+}
+
+#[derive(Debug, Clone)]
+enum ServerStatus {
+    Stopped,
+    Starting,
+    Running,
+    Error(String),
+}
+
+impl ServerStatus {
+    fn as_str(&self) -> &str {
+        match self {
+            ServerStatus::Stopped => "stopped",
+            ServerStatus::Starting => "starting",
+            ServerStatus::Running => "running",
+            ServerStatus::Error(_) => "error",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ManagedServer {
-    pub id: String,
-    pub name: String,
     pub status: String,
     pub auto_start: bool,
 }
 
-enum ServerTransport {
-    Stdio(StdioClientTransport),
-    Http(HttpClientTransport),
-}
-
-struct ServerSession {
-    transport: ServerTransport,
-}
-
 pub struct ServerManager {
-    servers: Arc<Mutex<HashMap<String, ManagedServer>>>,
-    sessions: Arc<Mutex<HashMap<String, ServerSession>>>,
+    slots: Arc<Mutex<HashMap<String, ServerSlot>>>,
     db: Arc<Database>,
     event_bus: Arc<EventBus>,
 }
@@ -40,8 +58,7 @@ pub struct ServerManager {
 impl ServerManager {
     pub fn new(db: Arc<Database>, event_bus: Arc<EventBus>) -> Self {
         Self {
-            servers: Arc::new(Mutex::new(HashMap::new())),
-            sessions: Arc::new(Mutex::new(HashMap::new())),
+            slots: Arc::new(Mutex::new(HashMap::new())),
             db,
             event_bus,
         }
@@ -52,47 +69,62 @@ impl ServerManager {
         let _ = repo.reset_running_statuses();
         let servers = repo.find_all().unwrap_or_default();
 
-        let mut map = self.servers.lock().await;
+        let mut map = self.slots.lock().await;
         map.clear();
         for row in servers {
             map.insert(
                 row.id.clone(),
-                ManagedServer {
-                    id: row.id.clone(),
+                ServerSlot {
                     name: row.name.clone(),
-                    status: "stopped".to_string(),
+                    status: ServerStatus::Stopped,
                     auto_start: row.auto_start,
+                    start_token: 0,
+                    session: None,
                 },
             );
         }
     }
 
     pub async fn get_server(&self, id: &str) -> Option<ManagedServer> {
-        self.servers.lock().await.get(id).cloned()
+        let slots = self.slots.lock().await;
+        slots.get(id).map(|s| ManagedServer {
+            status: s.status.as_str().to_string(),
+            auto_start: s.auto_start,
+        })
     }
 
     pub async fn add_server(&self, server: &Server) -> ManagedServer {
         let managed = ManagedServer {
-            id: server.id.clone(),
-            name: server.name.clone(),
             status: "stopped".to_string(),
             auto_start: server.auto_start,
         };
-        self.servers
-            .lock()
-            .await
-            .insert(server.id.clone(), managed.clone());
+        self.slots.lock().await.insert(
+            server.id.clone(),
+            ServerSlot {
+                name: server.name.clone(),
+                status: ServerStatus::Stopped,
+                auto_start: server.auto_start,
+                start_token: 0,
+                session: None,
+            },
+        );
         managed
     }
 
     pub async fn remove_server(&self, id: &str) -> bool {
-        let server = self.servers.lock().await.get(id).cloned();
-        let Some(server) = server else { return false };
-        if server.status == "running" {
+        let should_stop = {
+            let slots = self.slots.lock().await;
+            slots
+                .get(id)
+                .map(|s| matches!(s.status, ServerStatus::Running | ServerStatus::Starting))
+                .unwrap_or(false)
+        };
+        if should_stop {
             self.stop_server(id).await.ok();
         }
-        self.sessions.lock().await.remove(id);
-        self.servers.lock().await.remove(id);
+        self.slots.lock().await.remove(id);
+        let tool_repo = ToolDiscoveryRepository::new(&self.db);
+        let _ = tool_repo.delete_by_server_id(id);
         let repo = ServerRepository::new(&self.db);
         repo.remove(id).is_ok()
     }
@@ -103,29 +135,30 @@ impl ServerManager {
         name: Option<&str>,
         auto_start: Option<bool>,
     ) {
-        let mut map = self.servers.lock().await;
-        if let Some(server) = map.get_mut(id) {
+        let mut slots = self.slots.lock().await;
+        if let Some(slot) = slots.get_mut(id) {
             if let Some(name) = name {
-                server.name = name.to_string();
+                slot.name = name.to_string();
             }
             if let Some(auto_start) = auto_start {
-                server.auto_start = auto_start;
+                slot.auto_start = auto_start;
             }
         }
     }
 
     pub async fn start_server(&self, id: &str) -> Result<(), String> {
-        let should_wait = {
-            let mut servers = self.servers.lock().await;
-            let Some(server) = servers.get_mut(id) else {
+        let (should_wait, start_token) = {
+            let mut slots = self.slots.lock().await;
+            let Some(slot) = slots.get_mut(id) else {
                 return Err(format!("Server {id} not found"));
             };
-            match server.status.as_str() {
-                "running" => return Ok(()),
-                "starting" => true,
+            match &slot.status {
+                ServerStatus::Running => return Ok(()),
+                ServerStatus::Starting => (true, slot.start_token),
                 _ => {
-                    server.status = "starting".to_string();
-                    false
+                    slot.status = ServerStatus::Starting;
+                    slot.start_token = slot.start_token.wrapping_add(1);
+                    (false, slot.start_token)
                 }
             }
         };
@@ -136,31 +169,73 @@ impl ServerManager {
 
         self.persist_server_status(id, "starting", None);
 
-        let config = self.get_stored_config(id)?;
-
-        let result = match config.connection_type.as_str() {
-            "stdio" => self.start_stdio(&config).await,
-            "http" => self.start_http(&config).await,
-            other => Err(format!("Unknown connection type: {other}")),
+        let result = match self.get_stored_config(id) {
+            Ok(config) => match config.connection_type.as_str() {
+                "stdio" => self.connect_stdio(&config).await,
+                "http" => self.connect_http(&config).await,
+                other => Err(format!("Unknown connection type: {other}")),
+            },
+            Err(err) => Err(err),
         };
 
         match result {
-            Ok((tools, transport)) => {
-                self.cache_tools(id, &tools);
-                {
-                    self.sessions
-                        .lock()
-                        .await
-                        .insert(id.to_string(), ServerSession { transport });
+            Ok((tools, client)) => {
+                let alive_rx = client.alive_receiver();
+                let mut client = Some(client);
+                let accepted = {
+                    let mut slots = self.slots.lock().await;
+                    if let Some(slot) = slots.get_mut(id) {
+                        if matches!(slot.status, ServerStatus::Starting)
+                            && slot.start_token == start_token
+                        {
+                            slot.status = ServerStatus::Running;
+                            let client = client
+                                .take()
+                                .expect("client should be available before session is accepted");
+                            slot.session = Some(Arc::new(tokio::sync::Mutex::new(client)));
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                };
+                if !accepted {
+                    if let Some(mut client) = client {
+                        let _ = client.disconnect().await;
+                    }
+                    return Ok(());
                 }
-                self.set_server_status(id, "running", None).await;
+                self.cache_tools(id, &tools);
+                self.persist_server_status(id, "running", None);
+                self.spawn_death_watcher(id.to_string(), start_token, alive_rx);
                 Ok(())
             }
             Err(e) => {
-                self.sessions.lock().await.remove(id);
                 let public_msg = get_public_error_message(&e);
-                self.set_server_status(id, "error", Some(&public_msg)).await;
-                Err(e)
+                let should_persist = {
+                    let mut slots = self.slots.lock().await;
+                    if let Some(slot) = slots.get_mut(id) {
+                        if matches!(slot.status, ServerStatus::Starting)
+                            && slot.start_token == start_token
+                        {
+                            slot.status = ServerStatus::Error(public_msg.clone());
+                            slot.session = None;
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                };
+                if should_persist {
+                    self.persist_server_status(id, "error", Some(&public_msg));
+                    Err(e)
+                } else {
+                    Ok(())
+                }
             }
         }
     }
@@ -168,33 +243,24 @@ impl ServerManager {
     async fn wait_for_start(&self, id: &str) -> Result<(), String> {
         for _ in 0..300 {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            let server = self.servers.lock().await.get(id).cloned();
-            match server.as_ref().map(|server| server.status.as_str()) {
-                Some("running") => return Ok(()),
-                Some("error") => {
-                    let repo = ServerRepository::new(&self.db);
-                    let message = repo
-                        .find_by_id(id)
-                        .ok()
-                        .flatten()
-                        .and_then(|server| server.error_message)
-                        .unwrap_or_else(|| {
-                            "Server failed to start. Check logs for details.".to_string()
-                        });
-                    return Err(message);
-                }
-                Some("starting") => {}
-                Some(_) => return Ok(()),
+            let slots = self.slots.lock().await;
+            match slots.get(id) {
+                Some(slot) => match &slot.status {
+                    ServerStatus::Running => return Ok(()),
+                    ServerStatus::Error(msg) => return Err(msg.clone()),
+                    ServerStatus::Starting => {}
+                    _ => return Ok(()),
+                },
                 None => return Err(format!("Server {id} not found")),
             }
         }
         Err(format!("Timed out while waiting for server {id} to start"))
     }
 
-    async fn start_stdio(
+    async fn connect_stdio(
         &self,
         config: &StoredServerConfig,
-    ) -> Result<(Vec<ToolInsert>, ServerTransport), String> {
+    ) -> Result<(Vec<ToolInsert>, McpClient), String> {
         let command = config
             .command
             .as_deref()
@@ -220,32 +286,24 @@ impl ServerManager {
             })
             .unwrap_or_default();
 
-        let cwd = config.working_dir.as_deref();
+        let client = McpClient::connect_stdio(StdioConnectConfig {
+            server_name: config.name.clone(),
+            command: command.to_string(),
+            args,
+            cwd: config.working_dir.clone(),
+            env,
+        })
+        .await?;
 
-        let transport = StdioClientTransport::spawn(command, &args, cwd, env).await?;
+        let tools = client.list_tools().await?;
 
-        let init_result = transport.send_request("initialize", Some(serde_json::json!({
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": { "name": format!("moor-{}", config.name), "version": env!("CARGO_PKG_VERSION") }
-        }))).await?;
-        let _ = init_result;
-        transport
-            .send_notification("notifications/initialized", Some(serde_json::json!({})))
-            .await?;
-
-        let tools_result = transport
-            .send_request("tools/list", Some(serde_json::json!({})))
-            .await?;
-        let tools = parse_tools_list(&tools_result);
-
-        Ok((tools, ServerTransport::Stdio(transport)))
+        Ok((tools, client))
     }
 
-    async fn start_http(
+    async fn connect_http(
         &self,
         config: &StoredServerConfig,
-    ) -> Result<(Vec<ToolInsert>, ServerTransport), String> {
+    ) -> Result<(Vec<ToolInsert>, McpClient), String> {
         let url = config.url.as_deref().ok_or("http server requires url")?;
 
         let headers = config
@@ -256,40 +314,37 @@ impl ServerManager {
         let headers =
             crate::sidecar::mcp::transport::http_client::resolve_http_headers(Some(&headers));
 
-        let transport = HttpClientTransport::new(url, headers);
+        let client = McpClient::connect_http(HttpConnectConfig {
+            server_name: config.name.clone(),
+            url: url.to_string(),
+            headers,
+        })
+        .await?;
 
-        let init_result = transport.send_request(0, "initialize", Some(serde_json::json!({
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": { "name": format!("moor-{}", config.name), "version": env!("CARGO_PKG_VERSION") }
-        }))).await?;
-        let _ = init_result;
-        transport
-            .send_notification("notifications/initialized", Some(serde_json::json!({})))
-            .await?;
+        let tools = client.list_tools().await?;
 
-        let tools_result = transport
-            .send_request(1, "tools/list", Some(serde_json::json!({})))
-            .await?;
-        let tools = parse_tools_list(&tools_result);
-
-        Ok((tools, ServerTransport::Http(transport)))
+        Ok((tools, client))
     }
 
     pub async fn stop_server(&self, id: &str) -> Result<(), String> {
-        let server = self.servers.lock().await.get(id).cloned();
-        let Some(server) = server else { return Ok(()) };
-        if server.status != "running" {
-            return Ok(());
-        }
-
-        if let Some(mut session) = self.sessions.lock().await.remove(id) {
-            match &mut session.transport {
-                ServerTransport::Stdio(t) => t.close().await?,
-                ServerTransport::Http(_) => {}
+        let old_session = {
+            let mut slots = self.slots.lock().await;
+            let Some(slot) = slots.get_mut(id) else {
+                return Ok(());
+            };
+            if !matches!(slot.status, ServerStatus::Running | ServerStatus::Starting) {
+                return Ok(());
             }
+            slot.status = ServerStatus::Stopped;
+            slot.start_token = slot.start_token.wrapping_add(1);
+            slot.session.take()
+        };
+
+        if let Some(session) = old_session {
+            let mut client = session.lock().await;
+            let _ = client.disconnect().await;
         }
-        self.set_server_status(id, "stopped", None).await;
+        self.persist_server_status(id, "stopped", None);
         Ok(())
     }
 
@@ -304,20 +359,16 @@ impl ServerManager {
             Err(_) => return,
         };
 
-        let servers = self.servers.lock().await;
+        let slots = self.slots.lock().await;
         let to_start: Vec<String> = server_ids
             .iter()
             .filter_map(|id| {
-                servers.get(id).and_then(|s| {
-                    if s.auto_start {
-                        Some(s.id.clone())
-                    } else {
-                        None
-                    }
-                })
+                slots
+                    .get(id)
+                    .and_then(|s| if s.auto_start { Some(id.clone()) } else { None })
             })
             .collect();
-        drop(servers);
+        drop(slots);
 
         for result in
             futures::future::join_all(to_start.iter().map(|id| self.start_server(id))).await
@@ -333,37 +384,18 @@ impl ServerManager {
             .find(|t| t.exposed_name == exposed_name)
             .ok_or_else(|| format!("Tool \"{exposed_name}\" not found or disabled"))?;
 
-        let sessions = self.sessions.lock().await;
-        let session = sessions
-            .get(&owner.server_id)
-            .ok_or_else(|| format!("Server \"{}\" is not running", owner.server_name))?;
+        let session_arc = {
+            let slots = self.slots.lock().await;
+            let slot = slots
+                .get(&owner.server_id)
+                .ok_or_else(|| format!("Server \"{}\" is not running", owner.server_name))?;
+            slot.session
+                .clone()
+                .ok_or_else(|| format!("Server \"{}\" is not running", owner.server_name))
+        }?;
 
-        match &session.transport {
-            ServerTransport::Stdio(transport) => {
-                transport
-                    .send_request(
-                        "tools/call",
-                        Some(serde_json::json!({
-                            "name": owner.tool_name,
-                            "arguments": args,
-                        })),
-                    )
-                    .await
-            }
-            ServerTransport::Http(transport) => {
-                let id = chrono::Utc::now().timestamp_millis();
-                transport
-                    .send_request(
-                        id,
-                        "tools/call",
-                        Some(serde_json::json!({
-                            "name": owner.tool_name,
-                            "arguments": args,
-                        })),
-                    )
-                    .await
-            }
-        }
+        let client = session_arc.lock().await;
+        client.call_tool(&owner.tool_name, args).await
     }
 
     pub async fn get_tool_catalog(
@@ -384,18 +416,54 @@ impl ServerManager {
     }
 
     async fn get_callable_server_ids(&self) -> HashSet<String> {
-        let sessions = self.sessions.lock().await;
-        let servers = self.servers.lock().await;
-        sessions
-            .keys()
-            .filter(|id| {
-                servers
-                    .get(*id)
-                    .map(|s| s.status == "running")
-                    .unwrap_or(false)
-            })
-            .cloned()
+        let slots = self.slots.lock().await;
+        slots
+            .iter()
+            .filter(|(_, s)| matches!(s.status, ServerStatus::Running))
+            .map(|(id, _)| id.clone())
             .collect()
+    }
+
+    fn spawn_death_watcher(
+        &self,
+        server_id: String,
+        start_token: u64,
+        alive_rx: Option<tokio::sync::watch::Receiver<bool>>,
+    ) {
+        let Some(mut rx) = alive_rx else { return };
+        let slots = self.slots.clone();
+        let db = self.db.clone();
+        let event_bus = self.event_bus.clone();
+
+        tokio::spawn(async move {
+            while rx.changed().await.is_ok() {
+                if !*rx.borrow_and_update() {
+                    let msg = "Server process exited unexpectedly".to_string();
+                    {
+                        let mut slots = slots.lock().await;
+                        if let Some(slot) = slots.get_mut(&server_id) {
+                            if matches!(slot.status, ServerStatus::Running)
+                                && slot.start_token == start_token
+                            {
+                                slot.status = ServerStatus::Error(msg.clone());
+                                slot.session = None;
+                            } else {
+                                return;
+                            }
+                        } else {
+                            return;
+                        }
+                    }
+                    let repo = ServerRepository::new(&db);
+                    let _ = repo.update_status(&server_id, "error", Some(&msg));
+                    event_bus.emit(
+                        "server:status",
+                        serde_json::json!({ "serverId": server_id, "status": "error", "errorMessage": msg }),
+                    );
+                    return;
+                }
+            }
+        });
     }
 
     fn cache_tools(&self, server_id: &str, tools: &[ToolInsert]) {
@@ -403,16 +471,6 @@ impl ServerManager {
         let _ = repo.replace_tools_for_server(server_id, tools);
         self.event_bus
             .emit("server:tools", serde_json::json!({ "serverId": server_id }));
-    }
-
-    async fn set_server_status(&self, id: &str, status: &str, error_message: Option<&str>) {
-        {
-            let mut map = self.servers.lock().await;
-            if let Some(server) = map.get_mut(id) {
-                server.status = status.to_string();
-            }
-        }
-        self.persist_server_status(id, status, error_message);
     }
 
     fn persist_server_status(&self, id: &str, status: &str, error_message: Option<&str>) {
@@ -453,30 +511,6 @@ struct StoredServerConfig {
     working_dir: Option<String>,
 }
 
-fn parse_tools_list(result: &Value) -> Vec<ToolInsert> {
-    result
-        .get("tools")
-        .and_then(|v| v.as_array())
-        .map(|tools| {
-            tools
-                .iter()
-                .map(|tool| ToolInsert {
-                    name: tool
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    description: tool
-                        .get("description")
-                        .and_then(|v| v.as_str())
-                        .map(String::from),
-                    input_schema: tool.get("inputSchema").cloned(),
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 fn verify_command_available(command: &str, env: &HashMap<String, String>) -> Result<(), String> {
     let path = std::path::Path::new(command);
     if path.is_absolute() {
@@ -502,6 +536,9 @@ fn get_public_error_message(err: &str) -> String {
     if err.contains("not executable") {
         return "Server failed to start. Check that the command path exists and has execute permission.".to_string();
     }
+    if let Some(summary) = extract_stdio_stderr_summary(err) {
+        return format!("Server failed to start: {summary}");
+    }
     "Server failed to start. Check logs for details.".to_string()
 }
 
@@ -509,6 +546,12 @@ fn extract_missing_command(err: &str) -> Option<String> {
     let re = regex_lite::Regex::new(r#"Command "([^"]+)" was not found"#).ok()?;
     let caps = re.captures(err)?;
     Some(caps[1].to_string())
+}
+
+fn extract_stdio_stderr_summary(err: &str) -> Option<&str> {
+    err.split_once(". stdio stderr: ")
+        .map(|(_, summary)| summary.trim())
+        .filter(|summary| !summary.is_empty())
 }
 
 #[cfg(test)]
@@ -572,6 +615,116 @@ process.stdin.on("data", (chunk) => {{
 
     fn write_slow_mcp_server(data_dir: &std::path::Path, marker: &std::path::Path) -> String {
         write_delayed_mcp_server(data_dir, marker, "slow-mcp-server.mjs", "started", 100)
+    }
+
+    fn write_client_info_mcp_server(
+        data_dir: &std::path::Path,
+        marker: &std::path::Path,
+    ) -> String {
+        let script = data_dir.join("client-info-mcp-server.mjs");
+        std::fs::write(
+            &script,
+            format!(
+                r#"
+import fs from "node:fs";
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {{
+  buffer += chunk;
+  const lines = buffer.split("\n");
+  buffer = lines.pop() ?? "";
+  for (const line of lines) {{
+    if (!line.trim()) continue;
+    const request = JSON.parse(line);
+    if (request.method === "initialize") {{
+      fs.appendFileSync({marker:?}, request.params?.clientInfo?.name + "\n");
+      process.stdout.write(JSON.stringify({{ jsonrpc: "2.0", id: request.id, result: {{ protocolVersion: "2024-11-05", capabilities: {{ tools: {{}} }}, serverInfo: {{ name: "client-info", version: "1.0.0" }} }} }}) + "\n");
+    }} else if (request.method === "tools/list") {{
+      process.stdout.write(JSON.stringify({{ jsonrpc: "2.0", id: request.id, result: {{ tools: [] }} }}) + "\n");
+    }}
+  }}
+}});
+"#,
+                marker = marker.to_string_lossy()
+            ),
+        )
+        .expect("failed to write client-info MCP server");
+        script.to_string_lossy().to_string()
+    }
+
+    fn write_erroring_mcp_server(
+        data_dir: &std::path::Path,
+        marker: &std::path::Path,
+        script_name: &str,
+        server_name: &str,
+        failing_method: &str,
+        response_delay_ms: u64,
+        startup_stderr: Option<&str>,
+    ) -> String {
+        let script = data_dir.join(script_name);
+        let startup_stderr = startup_stderr
+            .map(|line| format!("console.error({line:?});"))
+            .unwrap_or_default();
+        std::fs::write(
+            &script,
+            format!(
+                r#"
+import fs from "node:fs";
+fs.appendFileSync({marker:?}, {server_name:?} + "\n");
+{startup_stderr}
+const failingMethod = {failing_method:?};
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {{
+  buffer += chunk;
+  const lines = buffer.split("\n");
+  buffer = lines.pop() ?? "";
+  for (const line of lines) {{
+    if (!line.trim()) continue;
+    const request = JSON.parse(line);
+    if (request.id === undefined) continue;
+    setTimeout(() => {{
+      let payload = {{ result: {{}} }};
+      if (request.method === failingMethod) {{
+        payload = {{ error: {{ code: -32000, message: request.method + " failed" }} }};
+      }} else if (request.method === "initialize") {{
+        payload = {{ result: {{ protocolVersion: "2024-11-05", capabilities: {{ tools: {{}} }}, serverInfo: {{ name: "erroring", version: "1.0.0" }} }} }};
+      }} else if (request.method === "tools/list") {{
+        payload = {{ result: {{ tools: [{{ name: "echo", description: "Echo", inputSchema: {{ type: "object" }} }}] }} }};
+      }}
+      process.stdout.write(JSON.stringify({{ jsonrpc: "2.0", id: request.id, ...payload }}) + "\n");
+      if (request.method === failingMethod) setTimeout(() => process.exit(1), 20);
+    }}, {response_delay_ms});
+  }}
+}});
+"#,
+                marker = marker.to_string_lossy(),
+                server_name = server_name,
+                startup_stderr = startup_stderr,
+                failing_method = failing_method,
+                response_delay_ms = response_delay_ms
+            ),
+        )
+        .expect("failed to write erroring MCP server");
+        script.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn public_error_prefers_stdio_stderr_summary() {
+        assert_eq!(
+            get_public_error_message(
+                "request timed out (30s). stdio stderr: npm ERR! package not found"
+            ),
+            "Server failed to start: npm ERR! package not found"
+        );
+    }
+
+    #[test]
+    fn public_error_falls_back_without_stdio_stderr_summary() {
+        assert_eq!(
+            get_public_error_message("request timed out (30s)"),
+            "Server failed to start. Check logs for details."
+        );
     }
 
     fn insert_stdio_server(
@@ -645,6 +798,201 @@ process.stdin.on("data", (chunk) => {{
         assert_eq!(starts.lines().count(), 1);
 
         manager.stop_server(&server_id).await.expect("stop failed");
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn initialize_client_info_uses_configured_server_name() {
+        let data_dir = temp_data_dir("client-info-name");
+        std::fs::create_dir_all(&data_dir).expect("failed to create temp dir");
+        let marker = data_dir.join("client-info.log");
+        let script = write_client_info_mcp_server(&data_dir, &marker);
+
+        let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
+        db.run_migrations().expect("failed to run migrations");
+        let profile_repo = ProfileRepository::new(&db);
+        profile_repo.seed_default().expect("failed to seed profile");
+
+        let server_id = uuid::Uuid::new_v4().to_string();
+        insert_stdio_server(&db, &server_id, "readable-server", script, false, 0);
+        profile_repo
+            .assign_to_active_profile(std::slice::from_ref(&server_id))
+            .expect("failed to assign server");
+
+        let event_bus = Arc::new(EventBus::new(16));
+        let manager = Arc::new(ServerManager::new(db, event_bus));
+        manager.load_from_db().await;
+
+        manager
+            .start_server(&server_id)
+            .await
+            .expect("server should start");
+
+        let client_info = std::fs::read_to_string(&marker).expect("client info marker should exist");
+        assert_eq!(client_info.trim(), "moor-readable-server");
+
+        manager.stop_server(&server_id).await.expect("stop failed");
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn stop_while_starting_keeps_server_stopped_and_discards_stale_tools() {
+        let data_dir = temp_data_dir("stop-during-start");
+        std::fs::create_dir_all(&data_dir).expect("failed to create temp dir");
+        let marker = data_dir.join("starts.log");
+        let script = write_delayed_mcp_server(&data_dir, &marker, "stale-start.mjs", "stale", 300);
+
+        let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
+        db.run_migrations().expect("failed to run migrations");
+        let profile_repo = ProfileRepository::new(&db);
+        profile_repo.seed_default().expect("failed to seed profile");
+
+        let server_id = uuid::Uuid::new_v4().to_string();
+        insert_stdio_server(&db, &server_id, "stale", script, false, 0);
+        profile_repo
+            .assign_to_active_profile(std::slice::from_ref(&server_id))
+            .expect("failed to assign server");
+
+        let event_bus = Arc::new(EventBus::new(16));
+        let manager = Arc::new(ServerManager::new(db.clone(), event_bus));
+        manager.load_from_db().await;
+
+        let start = {
+            let manager = manager.clone();
+            let server_id = server_id.clone();
+            tokio::spawn(async move { manager.start_server(&server_id).await })
+        };
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        manager.stop_server(&server_id).await.expect("stop failed");
+        start
+            .await
+            .expect("start task failed")
+            .expect("stale start should finish without overwriting stopped state");
+
+        let runtime = manager
+            .get_server(&server_id)
+            .await
+            .expect("server should remain registered");
+        assert_eq!(runtime.status, "stopped");
+
+        let stored = ServerRepository::new(&db)
+            .find_by_id(&server_id)
+            .expect("server should load")
+            .expect("server should exist");
+        assert_eq!(stored.status, "stopped");
+
+        let stale_tools = ToolDiscoveryRepository::new(&db)
+            .find_by_server_id(&server_id)
+            .expect("tool discovery query should succeed");
+        assert!(stale_tools.is_empty());
+
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn stop_while_starting_ignores_stale_start_failure() {
+        let data_dir = temp_data_dir("stop-during-start-failure");
+        std::fs::create_dir_all(&data_dir).expect("failed to create temp dir");
+        let marker = data_dir.join("starts.log");
+        let script = write_erroring_mcp_server(
+            &data_dir,
+            &marker,
+            "stale-start-failure.mjs",
+            "stale-failure",
+            "initialize",
+            300,
+            None,
+        );
+
+        let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
+        db.run_migrations().expect("failed to run migrations");
+        let profile_repo = ProfileRepository::new(&db);
+        profile_repo.seed_default().expect("failed to seed profile");
+
+        let server_id = uuid::Uuid::new_v4().to_string();
+        insert_stdio_server(&db, &server_id, "stale-failure", script, false, 0);
+        profile_repo
+            .assign_to_active_profile(std::slice::from_ref(&server_id))
+            .expect("failed to assign server");
+
+        let event_bus = Arc::new(EventBus::new(16));
+        let manager = Arc::new(ServerManager::new(db.clone(), event_bus));
+        manager.load_from_db().await;
+
+        let start = {
+            let manager = manager.clone();
+            let server_id = server_id.clone();
+            tokio::spawn(async move { manager.start_server(&server_id).await })
+        };
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        manager.stop_server(&server_id).await.expect("stop failed");
+        start
+            .await
+            .expect("start task failed")
+            .expect("stale failure should not surface after stop");
+
+        let runtime = manager
+            .get_server(&server_id)
+            .await
+            .expect("server should remain registered");
+        assert_eq!(runtime.status, "stopped");
+
+        let stored = ServerRepository::new(&db)
+            .find_by_id(&server_id)
+            .expect("server should load")
+            .expect("server should exist");
+        assert_eq!(stored.status, "stopped");
+
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn tool_list_stdio_stderr_summary_is_appended_once() {
+        let data_dir = temp_data_dir("tool-list-stderr-once");
+        std::fs::create_dir_all(&data_dir).expect("failed to create temp dir");
+        let marker = data_dir.join("starts.log");
+        let script = write_erroring_mcp_server(
+            &data_dir,
+            &marker,
+            "tool-list-stderr-once.mjs",
+            "stderr-once",
+            "tools/list",
+            0,
+            Some("npm ERR! package not found"),
+        );
+
+        let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
+        db.run_migrations().expect("failed to run migrations");
+        let profile_repo = ProfileRepository::new(&db);
+        profile_repo.seed_default().expect("failed to seed profile");
+
+        let server_id = uuid::Uuid::new_v4().to_string();
+        insert_stdio_server(&db, &server_id, "stderr-once", script, false, 0);
+        profile_repo
+            .assign_to_active_profile(std::slice::from_ref(&server_id))
+            .expect("failed to assign server");
+
+        let event_bus = Arc::new(EventBus::new(16));
+        let manager = Arc::new(ServerManager::new(db.clone(), event_bus));
+        manager.load_from_db().await;
+
+        let err = manager
+            .start_server(&server_id)
+            .await
+            .expect_err("tool discovery should fail");
+        assert_eq!(err.matches(". stdio stderr: ").count(), 1);
+
+        let stored = ServerRepository::new(&db)
+            .find_by_id(&server_id)
+            .expect("server should load")
+            .expect("server should exist");
+        assert_eq!(
+            stored.error_message.as_deref(),
+            Some("Server failed to start: npm ERR! package not found")
+        );
+
         let _ = std::fs::remove_dir_all(data_dir);
     }
 

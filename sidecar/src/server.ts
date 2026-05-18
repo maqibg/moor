@@ -8,6 +8,8 @@ import { importApi } from "./api/import.js";
 import { gateway } from "./mcp/gateway.js";
 import { createSecurityMiddleware } from "./services/security.js";
 
+declare const APP_VERSION: string;
+
 export interface AppOptions {
   apiToken: string;
   port: number;
@@ -30,7 +32,14 @@ export function createApp(options: AppOptions) {
   });
 
   app.get("/api/runtime", (c) => {
-    return c.json({ port: options.port, baseUrl, apiTokenConfigured: Boolean(options.apiToken) });
+    const version = typeof APP_VERSION === "undefined" ? "0.0.0-dev" : APP_VERSION;
+    return c.json({
+      port: options.port,
+      baseUrl,
+      apiTokenConfigured: Boolean(options.apiToken),
+      version,
+      pid: process.pid,
+    });
   });
 
   app.route("/api/servers", servers);

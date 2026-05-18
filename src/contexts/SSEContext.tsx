@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useCallback, type ReactNode } from "react";
-import { getApiRequest, resetRuntime } from "@/lib/api";
+import { getApiRuntime, buildApiUrl, buildApiHeaders, resetRuntime } from "@/lib/api/runtime";
 import type { MoorEvent, MoorEventType } from "@moor/types";
 
 interface SSEContextValue {
@@ -21,7 +21,9 @@ export function SSEProvider({ children }: { children: ReactNode }) {
 
     async function connect() {
       try {
-        const { url, headers } = await getApiRequest("/api/events", {
+        const runtime = await getApiRuntime();
+        const url = buildApiUrl(runtime, "/api/events");
+        const headers = buildApiHeaders(runtime, {
           Accept: "text/event-stream",
         });
         const response = await fetch(url, {

@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api } from "@/lib/api/client";
 import { routes } from "@/lib/api-routes";
 import type { AuditLogEntry, LogStats } from "@moor/types";
 
