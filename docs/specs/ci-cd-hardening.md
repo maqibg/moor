@@ -137,14 +137,15 @@ pnpm version:sync
   ├─ syncs → package.json (root)
   ├─ syncs → packages/types/package.json
   ├─ syncs → src-tauri/tauri.conf.json
-  └─ syncs → src-tauri/Cargo.toml
+  ├─ syncs → src-tauri/Cargo.toml
+  └─ syncs → src-tauri/Cargo.lock
 ```
 
 ### 5.3 Changeset Configuration Changes
 
 - Remove `fixed` option (root package `moor` is not a workspace member and cannot be discovered by changeset).
 - `sync-version.mjs` source of truth changed from root `package.json` to `sidecar/package.json`.
-- Targets changed from `[tauri.conf.json, Cargo.toml, sidecar/package.json]` to `[package.json, packages/types/package.json, tauri.conf.json, Cargo.toml]`.
+- Targets changed from `[tauri.conf.json, Cargo.toml, sidecar/package.json]` to `[package.json, packages/types/package.json, tauri.conf.json, Cargo.toml, Cargo.lock]`.
 
 ## 6. File Change List
 

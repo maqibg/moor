@@ -8,12 +8,13 @@ Moor uses `@changesets/cli` for automatic version management and changelog gener
 
 The version number in `sidecar/package.json` is the single source of truth (a workspace member directly managed by changeset), and is synchronized to the following locations via `sync-version.mjs`:
 
-| File                          | Sync Method                             |
-| ----------------------------- | --------------------------------------- |
-| `package.json` (root)         | Script writes to `version` field        |
-| `packages/types/package.json` | Script writes to `version` field        |
-| `src-tauri/tauri.conf.json`   | Script writes to `version` field        |
-| `src-tauri/Cargo.toml`        | Script regex replaces `version = "..."` |
+| File                          | Sync Method                                             |
+| ----------------------------- | ------------------------------------------------------- |
+| `package.json` (root)         | Script writes to `version` field                        |
+| `packages/types/package.json` | Script writes to `version` field                        |
+| `src-tauri/tauri.conf.json`   | Script writes to `version` field                        |
+| `src-tauri/Cargo.toml`        | Script regex replaces `version = "..."`                 |
+| `src-tauri/Cargo.lock`        | Script regex replaces version in `moor` package section |
 
 Runtime version numbers are obtained via build-time injection:
 

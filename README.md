@@ -260,8 +260,9 @@ pnpm tauri build
 
 Outputs:
 
-- `src-tauri/target/release/bundle/macos/Moor.app`
-- `src-tauri/target/release/bundle/dmg/Moor_<version>_aarch64.dmg`
+- macOS: `src-tauri/target/release/bundle/macos/Moor.app`
+- macOS DMG: `src-tauri/target/release/bundle/dmg/Moor_<version>_aarch64.dmg`
+- Windows: `src-tauri/target/release/bundle/nsis/Moor_<version>_x64-setup.exe`
 
 ### Code Quality
 
@@ -276,7 +277,7 @@ vp fmt         # format
 
 ```bash
 # Sidecar tests
-pnpm --filter moor-sidecar test
+cd sidecar && vp test run
 
 # Frontend tests
 vp test

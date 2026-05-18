@@ -270,8 +270,9 @@ pnpm tauri build
 
 出力：
 
-- `src-tauri/target/release/bundle/macos/Moor.app`
-- `src-tauri/target/release/bundle/dmg/Moor_<version>_aarch64.dmg`
+- macOS: `src-tauri/target/release/bundle/macos/Moor.app`
+- macOS DMG: `src-tauri/target/release/bundle/dmg/Moor_<version>_aarch64.dmg`
+- Windows: `src-tauri/target/release/bundle/nsis/Moor_<version>_x64-setup.exe`
 
 ### コード品質
 
@@ -286,7 +287,7 @@ vp fmt         # フォーマット
 
 ```bash
 # Sidecar テスト
-pnpm --filter moor-sidecar test
+cd sidecar && vp test run
 
 # フロントエンドテスト
 vp test

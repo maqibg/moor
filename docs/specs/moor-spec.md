@@ -24,6 +24,8 @@
 
 Build a local MCP console + gateway application running on macOS. Moor acts as a **Smart Aggregator**, aggregating multiple MCP servers (stdio + HTTP/SSE), filtering tools by Profile, and exposing them to AI Agents such as Claude Code, Codex, Cursor, and OpenCode through a single HTTP endpoint (`http://127.0.0.1:<port>/mcp`). All operations are observable, auditable, and hot-swappable.
 
+> **Status Note**: This is the MVP-phase spec (2026-04-28). Several features marked as deferred or excluded below — such as Cursor support, Config Converter, and Windows builds — have since been implemented in subsequent iterations. The production architecture also evolved from a bundled Node.js sidecar to a Rust in-process Axum HTTP server.
+
 ## Core Architecture Decisions (from Interview)
 
 ### AD-1: Gateway Role — Smart Aggregator
@@ -116,12 +118,12 @@ Build a local MCP console + gateway application running on macOS. Moor acts as a
 - **Why**: The smoothest UX, does not interrupt the Agent workflow.
 - **Consequences**: If the Agent is currently using a removed tool, the next `tools/call` returns an error.
 
-### AD-12: Sidecar Packaging — Bundle as Standalone Binary (pkg/SEA)
+### AD-12: Gateway Packaging — Rust In-Process HTTP Server (Evolved)
 
-- **Decision**: Node sidecar is compiled as a standalone binary and packaged into Moor.app.
-- **Why**: Users do not need to pre-install Node.js; it works out of the box.
-- **Implementation**: Compile using `pkg` or Node.js SEA (Single Executable Application).
-- **Consequences**: App size increases by approximately 50-80MB, but provides the best installation experience.
+- **Original Decision (MVP)**: Node sidecar was planned to be compiled as a standalone binary (pkg/SEA) and packaged into Moor.app.
+- **Evolved Decision**: The production gateway is now a **Rust in-process Axum HTTP server** embedded directly in the Tauri app. No external Node.js runtime or sidecar process is required.
+- **Why**: Better performance, smaller bundle size, simpler lifecycle management, and no Node.js SEA compatibility risks.
+- **Development**: Node.js sidecar (Hono) is still used for `pnpm dev:all` / `pnpm sidecar` for faster iteration.
 
 ## Tech Stack (Confirmed)
 
@@ -131,9 +133,11 @@ Moor.app
 ├─ Desktop Layer: Tauri 2 / Rust
 │   ├─ Window management + tray icon
 │   ├─ macOS Keychain access
-│   ├─ Sidecar process lifecycle management
+│   ├─ Sidecar process lifecycle management (dev mode only)
 │   └─ File permissions
-├─ Gateway Daemon: Node.js / TypeScript sidecar (bundled as standalone binary)
+├─ Gateway Daemon
+│   ├─ Production: Rust in-process Axum HTTP server (no external sidecar)
+│   ├─ Development: Node.js / TypeScript sidecar (Hono, via tsx watch)
 │   ├─ MCP protocol: @modelcontextprotocol/sdk
 │   ├─ Server management (stdio spawn + HTTP/SSE client)
 │   ├─ Profile management + tool filtering
@@ -143,7 +147,7 @@ Moor.app
 │   ├─ servers (configs, status)
 │   ├─ profiles (server groups + tool toggles)
 │   └─ audit_logs (tool calls, params, results, errors)
-├─ IPC: WebView ↔ HTTP ↔ Sidecar (business), WebView ↔ Tauri IPC ↔ Rust (system)
+├─ IPC: WebView ↔ HTTP ↔ Gateway (business), WebView ↔ Tauri IPC ↔ Rust (system)
 └─ Design: Cursor-inspired warm minimalism (DESIGN.md + Stitch screens)
 ```
 
@@ -286,7 +290,7 @@ Based on Stitch project screens + interview decisions:
 - ❌ Rate limiting / caching
 - ❌ Config file direct modification
 - ❌ Auto-update mechanism
-- ❌ Windows / Linux support (macOS only)
+- ❌ Windows / Linux support (macOS only) — _Partially evolved: Windows x64 CI builds are now enabled, though macOS remains the primary target._
 
 ## Acceptance Criteria
 
@@ -311,7 +315,7 @@ Based on Stitch project screens + interview decisions:
 | Need to support config import from all clients  | Large format differences between clients                                               | MVP only auto-scans Claude Code + Cursor                  |
 | Need to directly modify client config files     | File permission and format compatibility risks                                         | Changed to showing instructions + one-click copy          |
 | Agents need independent Profiles                | High routing complexity                                                                | MVP uses global Active Profile                            |
-| Users have a Node.js environment                | Increases installation barrier                                                         | Sidecar compiled as standalone binary                     |
+| Users have a Node.js environment                | Increases installation barrier                                                         | Rust in-process HTTP server (no Node.js runtime required) |
 
 ## Ontology (Key Entities)
 
