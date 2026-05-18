@@ -1,5 +1,11 @@
 # moor-sidecar
 
+## 0.5.3
+
+### Patch Changes
+
+- d8c7d31: 重构 MCP 客户端架构，统一 Stdio/HTTP 传输层抽象，改进服务器生命周期管理和前端状态管理。
+
 ## 0.5.2
 
 ### Patch Changes
