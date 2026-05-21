@@ -14,10 +14,40 @@ export const createServerSchema = z.discriminatedUnion("connectionType", [
     name: z.string().min(1),
     connectionType: z.literal("http"),
     url: z.string().min(1),
+    env: z.record(z.string(), z.string()).optional(),
     headers: z.record(z.string(), z.string()).optional(),
     autoStart: z.boolean().optional(),
   }),
 ]);
+
+const nullableStringRecord = z.union([z.record(z.string(), z.string()), z.null()]);
+const nullableStringArray = z.union([z.array(z.string()), z.null()]);
+const nullableString = z.union([z.string(), z.null()]);
+
+export const updateStdioServerSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    command: z.string().min(1).optional(),
+    args: nullableStringArray.optional(),
+    env: nullableStringRecord.optional(),
+    workingDir: nullableString.optional(),
+    autoStart: z.boolean().optional(),
+  })
+  .strict();
+
+export const updateHttpServerSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    url: z.string().min(1).optional(),
+    env: nullableStringRecord.optional(),
+    headers: nullableStringRecord.optional(),
+    autoStart: z.boolean().optional(),
+  })
+  .strict();
+
+export function updateServerSchemaFor(connectionType: "stdio" | "http") {
+  return connectionType === "stdio" ? updateStdioServerSchema : updateHttpServerSchema;
+}
 
 export const serverOrderSchema = z
   .object({

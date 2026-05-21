@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 vi.mock("react-router-dom", () => ({
   useNavigate: () => () => undefined,
   useParams: () => ({ id: "server-a" }),
+  useBlocker: () => ({ state: "unblocked" }),
 }));
 
 vi.mock("@/hooks/useProfiles", () => ({
@@ -48,6 +49,6 @@ describe("ServerDetail", () => {
     const markup = renderToStaticMarkup(<ServerDetail />);
 
     expect(markup).toContain(">Search<");
-    expect(markup).not.toContain(">Edit<");
+    expect(markup).not.toContain("bg-edit/15");
   });
 });

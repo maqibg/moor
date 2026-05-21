@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { getPublicServerStartErrorMessage, serverManager } from "../services/server-manager.js";
 import { getServerRepository } from "../db/server-repository.js";
-import { createServerSchema, serverOrderSchema } from "./schemas.js";
+import { createServerSchema, serverOrderSchema, updateServerSchemaFor } from "./schemas.js";
 import { apiError, validate } from "./validate.js";
 
 const servers = new Hono();
@@ -49,13 +49,15 @@ servers.get("/:id", (c) => {
 });
 
 servers.put("/:id", async (c) => {
-  const body = await c.req.json<Record<string, unknown>>();
+  const raw = await c.req.json();
   const id = c.req.param("id");
   const repo = getServerRepository();
   const server = repo.findById(id);
   if (!server) {
     return c.json(apiError("NOT_FOUND", "Server not found"), 404);
   }
+  const body = validate(updateServerSchemaFor(server.connectionType), raw, c);
+  if (body instanceof Response) return body;
   repo.update(id, body);
   const updated = repo.findById(id);
   const runtime = serverManager.getServer(id);

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
@@ -12,11 +13,31 @@ import {
 import { Label } from "@/components/ui/label";
 import { AlertTriangle, X } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { KeyValueEditor } from "@/components/shared/KeyValueEditor";
 
 const CONNECTION_TYPES = [
   { value: "stdio", label: "stdio" },
   { value: "http", label: "HTTP/SSE" },
 ] as const;
+
+function entriesToRecord(entries: Array<[string, string]>): Record<string, string> | undefined {
+  const record: Record<string, string> = {};
+  for (const [key, value] of entries) {
+    const trimmedKey = key.trim();
+    if (trimmedKey) {
+      record[trimmedKey] = value;
+    }
+  }
+  return Object.keys(record).length > 0 ? record : undefined;
+}
+
+function argsToArray(args: string): string[] | undefined {
+  const parsed = args
+    .split("\n")
+    .map((arg) => arg.trim())
+    .filter(Boolean);
+  return parsed.length > 0 ? parsed : undefined;
+}
 
 interface AddServerFormProps {
   onAdd: (config: {
@@ -39,50 +60,43 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
     command: "",
     args: "",
     url: "",
-    env: "",
-    headers: "",
+    env: [] as Array<[string, string]>,
+    headers: [] as Array<[string, string]>,
     autoStart: false,
   });
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
-    if (!form.name || submitting) return;
+    if (!form.name.trim() || submitting) return;
     setFormError(null);
-
-    let env: Record<string, string> | undefined;
-    let headers: Record<string, string> | undefined;
-
-    if (form.env) {
-      try {
-        env = JSON.parse(form.env) as Record<string, string>;
-      } catch {
-        setFormError("Invalid JSON in environment variables field");
-        return;
-      }
-    }
-
-    if (form.connectionType === "http" && form.headers) {
-      try {
-        headers = JSON.parse(form.headers) as Record<string, string>;
-      } catch {
-        setFormError("Invalid JSON in HTTP headers field");
-        return;
-      }
-    }
 
     setSubmitting(true);
     try {
-      await onAdd({
-        name: form.name,
+      const env = entriesToRecord(form.env);
+
+      const baseConfig = {
+        name: form.name.trim(),
         connectionType: form.connectionType,
-        command: form.connectionType === "stdio" ? form.command : undefined,
-        args: form.args ? form.args.split(" ") : undefined,
-        url: form.connectionType === "http" ? form.url : undefined,
-        env,
-        headers,
         autoStart: form.autoStart,
-      });
+        env,
+      };
+
+      await onAdd(
+        form.connectionType === "stdio"
+          ? {
+              ...baseConfig,
+              connectionType: "stdio",
+              command: form.command.trim(),
+              args: argsToArray(form.args),
+            }
+          : {
+              ...baseConfig,
+              connectionType: "http",
+              url: form.url.trim(),
+              headers: entriesToRecord(form.headers),
+            },
+      );
       onClose();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Failed to add server");
@@ -148,11 +162,12 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Arguments (space-separated)</Label>
-              <Input
-                placeholder="e.g., --port 3000"
+              <Label>Arguments (one per line)</Label>
+              <Textarea
+                placeholder={"-y\n@modelcontextprotocol/server-github"}
                 value={form.args}
                 onChange={(e) => setForm((f) => ({ ...f, args: e.target.value }))}
+                className="min-h-[80px] font-mono text-xs"
               />
             </div>
           </>
@@ -167,11 +182,13 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
               />
             </div>
             <div className="space-y-1.5">
-              <Label>HTTP Headers (JSON, optional)</Label>
-              <Input
-                placeholder='{"Authorization":"Bearer {env:MCP_TOKEN}"}'
-                value={form.headers}
-                onChange={(e) => setForm((f) => ({ ...f, headers: e.target.value }))}
+              <Label>HTTP Headers</Label>
+              <KeyValueEditor
+                entries={form.headers}
+                onChange={(headers) => setForm((f) => ({ ...f, headers }))}
+                keyLabel="Header"
+                keyPlaceholder="Authorization"
+                valuePlaceholder="Bearer {env:MCP_TOKEN}"
               />
             </div>
           </>
@@ -189,11 +206,12 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
           />
         </div>
         <div className="space-y-1.5">
-          <Label>Environment Variables (JSON, optional)</Label>
-          <Input
-            placeholder='{"API_KEY": "..."}'
-            value={form.env}
-            onChange={(e) => setForm((f) => ({ ...f, env: e.target.value }))}
+          <Label>Environment Variables</Label>
+          <KeyValueEditor
+            entries={form.env}
+            onChange={(env) => setForm((f) => ({ ...f, env }))}
+            keyPlaceholder="API_KEY"
+            valuePlaceholder="your-api-key"
           />
         </div>
         {formError && (
@@ -206,7 +224,7 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={!form.name || submitting}>
+          <Button onClick={handleSubmit} disabled={!form.name.trim() || submitting}>
             Add Server
           </Button>
         </div>

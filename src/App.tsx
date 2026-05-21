@@ -1,5 +1,6 @@
 import { lazy, Suspense, type ReactNode } from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { Toaster } from "sonner";
 import { AppShell } from "@/components/layout/AppShell";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { PageLoading } from "@/components/shared/PageLoading";
@@ -36,26 +37,30 @@ function page(element: ReactNode) {
   return <Suspense fallback={<PageLoading message="Loading page..." />}>{element}</Suspense>;
 }
 
-function App() {
-  return (
-    <BrowserRouter>
-      <ErrorBoundary>
-        <Routes>
-          <Route element={<AppShell />}>
-            <Route path="/" element={page(<Dashboard />)} />
-            <Route path="/servers" element={page(<Servers />)} />
-            <Route path="/servers/:id" element={page(<ServerDetail />)} />
-            <Route path="/profiles" element={page(<Profiles />)} />
-            <Route path="/profiles/:id" element={page(<ProfileDetail />)} />
-            <Route path="/logs" element={page(<AuditLogs />)} />
-            <Route path="/config" element={page(<ClientConfig />)} />
-            <Route path="/settings" element={page(<SettingsPage />)} />
-            <Route path="*" element={page(<NotFound />)} />
-          </Route>
-        </Routes>
-      </ErrorBoundary>
-    </BrowserRouter>
-  );
-}
+const router = createBrowserRouter([
+  {
+    element: (
+      <>
+        <Toaster position="top-right" richColors closeButton />
+        <ErrorBoundary>
+          <AppShell />
+        </ErrorBoundary>
+      </>
+    ),
+    children: [
+      { path: "/", element: page(<Dashboard />) },
+      { path: "/servers", element: page(<Servers />) },
+      { path: "/servers/:id", element: page(<ServerDetail />) },
+      { path: "/profiles", element: page(<Profiles />) },
+      { path: "/profiles/:id", element: page(<ProfileDetail />) },
+      { path: "/logs", element: page(<AuditLogs />) },
+      { path: "/config", element: page(<ClientConfig />) },
+      { path: "/settings", element: page(<SettingsPage />) },
+      { path: "*", element: page(<NotFound />) },
+    ],
+  },
+]);
 
-export default App;
+export default function App() {
+  return <RouterProvider router={router} />;
+}

@@ -275,19 +275,26 @@ describe("ServerManager MCP lifecycle", () => {
 
   it("resolves env placeholders for HTTP transport headers", () => {
     process.env.MOOR_TEST_HEADER_TOKEN = "secret-token";
+    process.env.MOOR_TEST_PROCESS_TOKEN = "process-token";
 
     expect(
-      resolveHttpHeaders({
-        Authorization: "Bearer {env:MOOR_TEST_HEADER_TOKEN}",
-        "X-Static": "static",
-        "X-Missing": "{env:MOOR_TEST_MISSING}",
-      }),
+      resolveHttpHeaders(
+        {
+          Authorization: "Bearer {env:MOOR_TEST_HEADER_TOKEN}",
+          "X-Process": "{env:MOOR_TEST_PROCESS_TOKEN}",
+          "X-Static": "static",
+          "X-Missing": "{env:MOOR_TEST_MISSING}",
+        },
+        { MOOR_TEST_HEADER_TOKEN: "server-token" },
+      ),
     ).toEqual({
-      Authorization: "Bearer secret-token",
+      Authorization: "Bearer server-token",
+      "X-Process": "process-token",
       "X-Static": "static",
     });
 
     delete process.env.MOOR_TEST_HEADER_TOKEN;
+    delete process.env.MOOR_TEST_PROCESS_TOKEN;
   });
 
   it("builds a stdio environment with common macOS CLI paths for GUI launches", () => {

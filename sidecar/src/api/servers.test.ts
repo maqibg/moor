@@ -204,4 +204,67 @@ describe("servers API ordering", () => {
     const detail = await detailResponse.json();
     expect(detail.runtime).toMatchObject({ id: created.id, name: "updated" });
   });
+
+  it("validates update payloads by existing connection type", async () => {
+    const stdio = serverManager.addServer({
+      name: "stdio",
+      connectionType: "stdio",
+      command: "node",
+      args: ["server.js"],
+      env: { TOKEN: "secret" },
+      workingDir: "/tmp",
+    });
+
+    const rejectedStdioUrl = await servers.request(`/${stdio.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "http://localhost:3000/mcp" }),
+    });
+    expect(rejectedStdioUrl.status).toBe(400);
+
+    const rejectedEmptyCommand = await servers.request(`/${stdio.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "" }),
+    });
+    expect(rejectedEmptyCommand.status).toBe(400);
+
+    const clearedStdio = await servers.request(`/${stdio.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ args: null, env: null, workingDir: null }),
+    });
+    expect(clearedStdio.status).toBe(200);
+    await expect(clearedStdio.json()).resolves.toMatchObject({
+      args: [],
+      env: {},
+      workingDir: null,
+    });
+
+    const createHttp = await servers.request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "http",
+        connectionType: "http",
+        url: "http://localhost:3000/mcp",
+        env: { TOKEN: "secret" },
+        headers: { Authorization: "Bearer {env:TOKEN}" },
+      }),
+    });
+    expect(createHttp.status).toBe(201);
+    const http = await createHttp.json();
+    expect(http).toMatchObject({
+      connectionType: "http",
+      env: { TOKEN: "secret" },
+      headers: { Authorization: "Bearer {env:TOKEN}" },
+    });
+
+    const rejectedHttpCommand = await servers.request(`/${http.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "node" }),
+    });
+    expect(rejectedHttpCommand.status).toBe(400);
+  });
 });

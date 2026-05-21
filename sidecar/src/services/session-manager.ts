@@ -94,7 +94,7 @@ async function createTransport(config: StoredServerConfig): Promise<Transport> {
 
   if (!config.url) throw new Error("http server requires url");
   const url = new URL(config.url);
-  const requestInit = { headers: resolveHttpHeaders(config.headers) };
+  const requestInit = { headers: resolveHttpHeaders(config.headers, config.env) };
   try {
     const transport = new StreamableHTTPClientTransport(url, { requestInit });
     const probe = new Client(
