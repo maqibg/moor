@@ -1,5 +1,17 @@
 # moor-sidecar
 
+## 0.5.4
+
+### Patch Changes
+
+- Enhance SSE endpoint resolution and add `{env:VAR}` placeholder support in HTTP headers (reads per-server env vars with process env fallback).
+
+  Add duplicate key detection and unsaved changes confirmation to server forms.
+
+  Introduce AlertDialog, KeyValueEditor (with duplicate key visual feedback), and UnsavedChangesDialog components.
+
+  Improve Sonner Toast styling with rounded corners and better close button integration.
+
 ## 0.5.3
 
 ### Patch Changes
