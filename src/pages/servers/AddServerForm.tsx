@@ -18,6 +18,7 @@ import { UnsavedChangesDialog } from "@/components/shared/UnsavedChangesDialog";
 import {
   argsToArrayOrUndefined,
   entriesToRecordOrUndefined,
+  findDuplicateHeaderKeys,
   findDuplicateKeys,
 } from "@/lib/server-form";
 
@@ -76,7 +77,7 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
       setFormError("Environment variable keys must be unique.");
       return;
     }
-    if (form.connectionType === "http" && findDuplicateKeys(form.headers).size > 0) {
+    if (form.connectionType === "http" && findDuplicateHeaderKeys(form.headers).size > 0) {
       setFormError("HTTP header keys must be unique.");
       return;
     }
@@ -201,6 +202,7 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
               <KeyValueEditor
                 entries={form.headers}
                 onChange={(headers) => setForm((f) => ({ ...f, headers }))}
+                duplicateKeyFinder={findDuplicateHeaderKeys}
                 keyLabel="Header"
                 keyPlaceholder="Authorization"
                 valuePlaceholder="Bearer {env:MCP_TOKEN}"

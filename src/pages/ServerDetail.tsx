@@ -19,7 +19,12 @@ import { useProfiles } from "@/hooks/useProfiles";
 import { useServerActions, useServer, useServerTools } from "@/hooks/useServers";
 import { api } from "@/lib/api/client";
 import { routes } from "@/lib/api-routes";
-import { argsToArrayOrNull, entriesToRecordOrNull, findDuplicateKeys } from "@/lib/server-form";
+import {
+  argsToArrayOrNull,
+  entriesToRecordOrNull,
+  findDuplicateHeaderKeys,
+  findDuplicateKeys,
+} from "@/lib/server-form";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { ConnectionType, ServerDetail as ServerDetailDto } from "@moor/types";
@@ -51,7 +56,7 @@ function validateEditForm(form: EditForm, connectionType: ConnectionType): strin
   if (connectionType === "stdio" && !form.command.trim()) return "Command is required.";
   if (connectionType === "http" && !form.url.trim()) return "URL is required.";
   if (findDuplicateKeys(form.env).size > 0) return "Environment variable keys must be unique.";
-  if (connectionType === "http" && findDuplicateKeys(form.headers).size > 0) {
+  if (connectionType === "http" && findDuplicateHeaderKeys(form.headers).size > 0) {
     return "HTTP header keys must be unique.";
   }
   return null;
@@ -148,6 +153,7 @@ export function ServerEditFields({ form, connectionType, onChange }: ServerEditF
             <KeyValueEditor
               entries={form.headers}
               onChange={(headers) => onChange({ ...form, headers })}
+              duplicateKeyFinder={findDuplicateHeaderKeys}
               keyLabel="Header"
               keyPlaceholder="Authorization"
               valuePlaceholder="Bearer {env:MCP_TOKEN}"

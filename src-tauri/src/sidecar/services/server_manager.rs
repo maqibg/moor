@@ -311,8 +311,15 @@ impl ServerManager {
             .as_ref()
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
-        let headers =
-            crate::sidecar::mcp::transport::http_client::resolve_http_headers(Some(&headers));
+        let env = config
+            .env
+            .as_ref()
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        let headers = crate::sidecar::mcp::transport::http_client::resolve_http_headers(
+            Some(&headers),
+            Some(&env),
+        );
 
         let client = McpClient::connect_http(HttpConnectConfig {
             server_name: config.name.clone(),

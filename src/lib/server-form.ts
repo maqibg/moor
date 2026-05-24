@@ -60,3 +60,24 @@ export function findDuplicateKeys(entries: KeyValueEntries): Set<number> {
 
   return duplicateIndexes;
 }
+
+export function findDuplicateHeaderKeys(entries: KeyValueEntries): Set<number> {
+  const firstByKey = new Map<string, number>();
+  const duplicateIndexes = new Set<number>();
+
+  entries.forEach(([key], index) => {
+    const normalizedKey = key.trim().toLowerCase();
+    if (!normalizedKey) return;
+
+    const firstIndex = firstByKey.get(normalizedKey);
+    if (firstIndex === undefined) {
+      firstByKey.set(normalizedKey, index);
+      return;
+    }
+
+    duplicateIndexes.add(firstIndex);
+    duplicateIndexes.add(index);
+  });
+
+  return duplicateIndexes;
+}

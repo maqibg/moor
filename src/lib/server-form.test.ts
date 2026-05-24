@@ -4,6 +4,7 @@ import {
   argsToArrayOrUndefined,
   entriesToRecordOrNull,
   entriesToRecordOrUndefined,
+  findDuplicateHeaderKeys,
   findDuplicateKeys,
 } from "./server-form";
 
@@ -32,6 +33,26 @@ describe("server form utilities", () => {
           [" TOKEN ", "a"],
           ["TOKEN", "b"],
           ["OTHER", "c"],
+        ]),
+      ),
+    ).toEqual([0, 1]);
+  });
+
+  it("keeps environment keys case-sensitive but reports duplicate HTTP headers case-insensitively", () => {
+    expect(
+      Array.from(
+        findDuplicateKeys([
+          ["TOKEN", "a"],
+          ["token", "b"],
+        ]),
+      ),
+    ).toEqual([]);
+    expect(
+      Array.from(
+        findDuplicateHeaderKeys([
+          [" Authorization ", "Bearer a"],
+          ["authorization", "Bearer b"],
+          ["X-Other", "c"],
         ]),
       ),
     ).toEqual([0, 1]);

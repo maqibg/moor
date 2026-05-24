@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 interface KeyValueEditorProps {
   entries: Array<[string, string]>;
   onChange: (entries: Array<[string, string]>) => void;
+  duplicateKeyFinder?: (entries: Array<[string, string]>) => Set<number>;
   keyPlaceholder?: string;
   valuePlaceholder?: string;
   keyLabel?: string;
@@ -18,6 +19,7 @@ interface KeyValueEditorProps {
 export function KeyValueEditor({
   entries,
   onChange,
+  duplicateKeyFinder = findDuplicateKeys,
   keyPlaceholder = "Key",
   valuePlaceholder = "Value",
   keyLabel = "Key",
@@ -38,7 +40,7 @@ export function KeyValueEditor({
     rowIdsRef.current.length = entries.length;
   }
 
-  const duplicateIndexes = findDuplicateKeys(entries);
+  const duplicateIndexes = duplicateKeyFinder(entries);
 
   const update = (index: number, field: 0 | 1, value: string) => {
     const next = entries.map(([k, v], i) =>

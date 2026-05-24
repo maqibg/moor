@@ -413,33 +413,38 @@ fn resolve_sse_endpoint(base_url: &str, endpoint: &str) -> Result<String, String
 }
 
 /// Resolve header values that may contain `{env:VAR_NAME}` patterns.
-pub fn resolve_http_headers(headers: Option<&HashMap<String, String>>) -> HashMap<String, String> {
+pub fn resolve_http_headers(
+    headers: Option<&HashMap<String, String>>,
+    env: Option<&HashMap<String, String>>,
+) -> HashMap<String, String> {
     let Some(headers) = headers else {
         return HashMap::new();
     };
     headers
         .iter()
         .filter_map(|(k, v)| {
-            let resolved = resolve_header_value(v)?;
+            let resolved = resolve_header_value(v, env)?;
             Some((k.clone(), resolved))
         })
         .collect()
 }
 
-fn resolve_header_value(value: &str) -> Option<String> {
+fn resolve_header_value(value: &str, env: Option<&HashMap<String, String>>) -> Option<String> {
     let mut missing = false;
     let resolved = regex_lite::Regex::new(r"\{env:([A-Za-z_][A-Za-z0-9_]*)\}")
         .ok()
         .map(|re| {
             re.replace_all(value, |caps: &regex_lite::Captures| {
                 let var_name = &caps[1];
-                match std::env::var(var_name) {
-                    Ok(val) => val,
-                    Err(_) => {
-                        missing = true;
-                        String::new()
-                    }
+                if let Some(val) = env
+                    .and_then(|server_env| server_env.get(var_name))
+                    .cloned()
+                    .or_else(|| std::env::var(var_name).ok())
+                {
+                    return val;
                 }
+                missing = true;
+                String::new()
             })
             .to_string()
         })
@@ -524,6 +529,45 @@ mod tests {
         assert_eq!(event.event.as_deref(), Some("endpoint"));
         assert_eq!(event.data, "/messages");
         assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn resolve_http_headers_prefers_server_env_then_process_env_and_drops_missing_values() {
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Authorization".to_string(),
+            "Bearer {env:MOOR_HEADER_TOKEN}".to_string(),
+        );
+        headers.insert(
+            "X-Process".to_string(),
+            "{env:MOOR_PROCESS_HEADER_TOKEN}".to_string(),
+        );
+        headers.insert(
+            "X-Missing".to_string(),
+            "{env:MOOR_MISSING_HEADER_TOKEN}".to_string(),
+        );
+        headers.insert("X-Static".to_string(), "static".to_string());
+
+        let mut server_env = HashMap::new();
+        server_env.insert("MOOR_HEADER_TOKEN".to_string(), "server-token".to_string());
+        std::env::set_var("MOOR_HEADER_TOKEN", "process-token");
+        std::env::set_var("MOOR_PROCESS_HEADER_TOKEN", "process-fallback");
+
+        let resolved = resolve_http_headers(Some(&headers), Some(&server_env));
+
+        assert_eq!(
+            resolved.get("Authorization").map(String::as_str),
+            Some("Bearer server-token")
+        );
+        assert_eq!(
+            resolved.get("X-Process").map(String::as_str),
+            Some("process-fallback")
+        );
+        assert_eq!(resolved.get("X-Static").map(String::as_str), Some("static"));
+        assert!(!resolved.contains_key("X-Missing"));
+
+        std::env::remove_var("MOOR_HEADER_TOKEN");
+        std::env::remove_var("MOOR_PROCESS_HEADER_TOKEN");
     }
 
     #[tokio::test]
