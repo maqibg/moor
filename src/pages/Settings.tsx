@@ -384,7 +384,7 @@ function AdvancedSection({
               <p className="font-body text-xs text-[var(--fg-40)]">MCP Gateway Manager</p>
             </div>
             <a
-              href="https://github.com/SnowAutumn/moor"
+              href="https://github.com/varandrew/moor"
               target="_blank"
               rel="noopener noreferrer"
               className="text-[var(--fg-40)] hover:text-cursor-dark transition-colors"

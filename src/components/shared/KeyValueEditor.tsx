@@ -40,7 +40,7 @@ export function KeyValueEditor({
 
   return (
     <div className="space-y-2">
-      <div className="grid grid-cols-[1fr_1fr_32px] gap-2 items-center">
+      <div className="grid grid-cols-[1fr_1fr_36px] gap-2 items-center">
         <span className="font-headline text-[11px] text-[var(--fg-45)] uppercase tracking-wider px-1">
           {keyLabel}
         </span>
@@ -50,7 +50,7 @@ export function KeyValueEditor({
         <span />
       </div>
       {entries.map(([key, value], index) => (
-        <div key={index} className="grid grid-cols-[1fr_1fr_32px] gap-2 items-center">
+        <div key={index} className="grid grid-cols-[1fr_1fr_36px] gap-2 items-center">
           <Input
             placeholder={keyPlaceholder}
             value={key}
@@ -69,12 +69,12 @@ export function KeyValueEditor({
             type="button"
             variant="ghost"
             size="icon"
-            className="h-8 w-8 text-[var(--fg-40)] hover:text-error-warm shrink-0"
+            className="h-9 w-9 text-[var(--fg-40)] hover:text-error-warm shrink-0"
             onClick={() => remove(index)}
             disabled={disabled}
             aria-label={`Remove ${keyLabel.toLowerCase()} row`}
           >
-            <X className="h-3.5 w-3.5" />
+            <X className="h-4 w-4" />
           </Button>
         </div>
       ))}

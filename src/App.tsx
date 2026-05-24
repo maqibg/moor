@@ -41,7 +41,19 @@ const router = createBrowserRouter([
   {
     element: (
       <>
-        <Toaster position="top-right" richColors closeButton />
+        <Toaster
+          position="top-right"
+          closeButton
+          toastOptions={{
+            classNames: {
+              toast: "font-headline",
+              title: "text-sm font-medium",
+              description: "text-xs text-[var(--fg-55)]",
+              closeButton:
+                "bg-transparent hover:bg-[var(--fg-08)] text-[var(--fg-40)] hover:text-cursor-dark border-none",
+            },
+          }}
+        />
         <ErrorBoundary>
           <AppShell />
         </ErrorBoundary>

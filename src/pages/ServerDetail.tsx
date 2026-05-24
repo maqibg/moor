@@ -315,9 +315,11 @@ export function ServerDetail() {
                 </div>
                 <div className="space-y-1.5">
                   <Label>Connection Type</Label>
-                  <Badge variant="outline" className="capitalize h-10 px-3">
-                    {server.connectionType}
-                  </Badge>
+                  <Input
+                    value={server.connectionType}
+                    readOnly
+                    className="capitalize bg-surface-300/50"
+                  />
                 </div>
               </div>
               {server.connectionType === "stdio" ? (
@@ -337,6 +339,16 @@ export function ServerDetail() {
                       value={editForm.args}
                       onChange={(e) => setEditForm((f) => f && { ...f, args: e.target.value })}
                       className="min-h-[80px] font-mono text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Working Directory</Label>
+                    <Input
+                      placeholder="e.g., /path/to/project"
+                      value={editForm.workingDir}
+                      onChange={(e) =>
+                        setEditForm((f) => f && { ...f, workingDir: e.target.value })
+                      }
                     />
                   </div>
                 </>
@@ -362,14 +374,6 @@ export function ServerDetail() {
                   </div>
                 </>
               )}
-              <div className="space-y-1.5">
-                <Label>Working Directory</Label>
-                <Input
-                  placeholder="e.g., /path/to/project"
-                  value={editForm.workingDir}
-                  onChange={(e) => setEditForm((f) => f && { ...f, workingDir: e.target.value })}
-                />
-              </div>
               <div className="space-y-1.5">
                 <Label>Environment Variables</Label>
                 <KeyValueEditor

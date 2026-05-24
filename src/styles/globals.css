@@ -202,3 +202,109 @@ body {
 [data-theme="dark"] * {
   scrollbar-color: rgba(232, 230, 227, 0.15) transparent;
 }
+
+/* ── Sonner Toast ── Design System Overrides ── */
+
+[data-sonner-toast] {
+  --normal-bg: #e6e5e0;
+  --normal-text: #26251e;
+  --normal-border: rgba(38, 37, 30, 0.1);
+  --success-bg: #e6e5e0;
+  --success-text: #26251e;
+  --success-border: rgba(38, 37, 30, 0.1);
+  --error-bg: #e6e5e0;
+  --error-text: #26251e;
+  --error-border: rgba(38, 37, 30, 0.1);
+  --warning-bg: #e6e5e0;
+  --warning-text: #26251e;
+  --warning-border: rgba(38, 37, 30, 0.1);
+  --info-bg: #e6e5e0;
+  --info-text: #26251e;
+  --info-border: rgba(38, 37, 30, 0.1);
+
+  border-radius: 8px !important;
+  font-family: var(--font-headline) !important;
+  box-shadow:
+    rgba(0, 0, 0, 0.14) 0px 28px 70px,
+    rgba(0, 0, 0, 0.1) 0px 14px 32px,
+    rgba(38, 37, 30, 0.1) 0px 0px 0px 1px !important;
+}
+
+/* Success — muted teal */
+[data-sonner-toast][data-type="success"] [data-icon] {
+  color: #1f8a65;
+}
+
+/* Error — warm crimson */
+[data-sonner-toast][data-type="error"] [data-icon] {
+  color: #cf2d56;
+}
+
+/* Warning — gold */
+[data-sonner-toast][data-type="warning"] [data-icon] {
+  color: #c08532;
+}
+
+/* Info — cursor orange */
+[data-sonner-toast][data-type="info"] [data-icon] {
+  color: #f54e00;
+}
+
+/* Close button — match project ghost button */
+[data-sonner-toast] [data-close-button] {
+  background: transparent !important;
+  border: none !important;
+  color: rgba(38, 37, 30, 0.4) !important;
+  border-radius: 8px !important;
+  top: 8px !important;
+  right: 8px !important;
+  left: auto !important;
+}
+
+[data-sonner-toast] [data-close-button]:hover {
+  background: rgba(38, 37, 30, 0.06) !important;
+  color: #26251e !important;
+}
+
+/* Description text */
+[data-sonner-toast] [data-description] {
+  color: rgba(38, 37, 30, 0.55) !important;
+}
+
+/* ── Dark mode overrides ── */
+
+[data-theme="dark"] [data-sonner-toast] {
+  --normal-bg: #2a2a2a;
+  --normal-text: #e8e6e3;
+  --normal-border: rgba(232, 230, 227, 0.1);
+  --success-bg: #2a2a2a;
+  --success-text: #e8e6e3;
+  --success-border: rgba(232, 230, 227, 0.1);
+  --error-bg: #2a2a2a;
+  --error-text: #e8e6e3;
+  --error-border: rgba(232, 230, 227, 0.1);
+  --warning-bg: #2a2a2a;
+  --warning-text: #e8e6e3;
+  --warning-border: rgba(232, 230, 227, 0.1);
+  --info-bg: #2a2a2a;
+  --info-text: #e8e6e3;
+  --info-border: rgba(232, 230, 227, 0.1);
+
+  box-shadow:
+    rgba(0, 0, 0, 0.3) 0px 28px 70px,
+    rgba(0, 0, 0, 0.2) 0px 14px 32px,
+    rgba(232, 230, 227, 0.1) 0px 0px 0px 1px !important;
+}
+
+[data-theme="dark"] [data-sonner-toast] [data-close-button] {
+  color: rgba(232, 230, 227, 0.4) !important;
+}
+
+[data-theme="dark"] [data-sonner-toast] [data-close-button]:hover {
+  background: rgba(232, 230, 227, 0.06) !important;
+  color: #e8e6e3 !important;
+}
+
+[data-theme="dark"] [data-sonner-toast] [data-description] {
+  color: rgba(232, 230, 227, 0.55) !important;
+}
