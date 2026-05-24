@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -6,31 +6,25 @@ import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogCancel,
-  AlertDialogAction,
-} from "@/components/ui/alert-dialog";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { PageLoading } from "@/components/shared/PageLoading";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { KeyValueTable } from "@/components/shared/KeyValueTable";
 import { KeyValueEditor } from "@/components/shared/KeyValueEditor";
 import { CopyButton } from "@/components/shared/CopyButton";
+import { UnsavedChangesDialog } from "@/components/shared/UnsavedChangesDialog";
 import { useParams, useNavigate, useBlocker } from "react-router-dom";
 import { ArrowLeft, Play, Square, RefreshCw, Terminal, Pencil, X, Check } from "lucide-react";
 import { useProfiles } from "@/hooks/useProfiles";
 import { useServerActions, useServer, useServerTools } from "@/hooks/useServers";
+import { api } from "@/lib/api/client";
+import { routes } from "@/lib/api-routes";
+import { argsToArrayOrNull, entriesToRecordOrNull, findDuplicateKeys } from "@/lib/server-form";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import type { ConnectionType, ServerDetail } from "@moor/types";
+import type { ConnectionType, ServerDetail as ServerDetailDto } from "@moor/types";
 
-interface EditForm {
+export interface EditForm {
   name: string;
   command: string;
   url: string;
@@ -40,7 +34,7 @@ interface EditForm {
   workingDir: string;
 }
 
-function serverToForm(server: ServerDetail): EditForm {
+function serverToForm(server: ServerDetailDto): EditForm {
   return {
     name: server.name ?? "",
     command: server.command ?? "",
@@ -52,52 +46,127 @@ function serverToForm(server: ServerDetail): EditForm {
   };
 }
 
-function entriesToRecord(entries: Array<[string, string]>): Record<string, string> | null {
-  const record: Record<string, string> = {};
-  for (const [key, value] of entries) {
-    const trimmedKey = key.trim();
-    if (trimmedKey) {
-      record[trimmedKey] = value;
-    }
-  }
-  return Object.keys(record).length > 0 ? record : null;
-}
-
-function argsToArray(args: string): string[] | null {
-  const parsed = args
-    .split("\n")
-    .map((arg) => arg.trim())
-    .filter(Boolean);
-  return parsed.length > 0 ? parsed : null;
-}
-
 function validateEditForm(form: EditForm, connectionType: ConnectionType): string | null {
   if (!form.name.trim()) return "Name is required.";
   if (connectionType === "stdio" && !form.command.trim()) return "Command is required.";
   if (connectionType === "http" && !form.url.trim()) return "URL is required.";
+  if (findDuplicateKeys(form.env).size > 0) return "Environment variable keys must be unique.";
+  if (connectionType === "http" && findDuplicateKeys(form.headers).size > 0) {
+    return "HTTP header keys must be unique.";
+  }
   return null;
 }
 
 function formToUpdates(form: EditForm, connectionType: ConnectionType): Record<string, unknown> {
   const updates: Record<string, unknown> = { name: form.name.trim() };
-  const env = entriesToRecord(form.env);
+  const env = entriesToRecordOrNull(form.env);
 
+  // autoStart 由详情页 Switch 独立即时保存，不随编辑表单提交。
   if (connectionType === "stdio") {
     updates.command = form.command.trim();
-    updates.args = argsToArray(form.args);
+    updates.args = argsToArrayOrNull(form.args);
     updates.env = env;
     updates.workingDir = form.workingDir.trim() || null;
     return updates;
   }
 
   updates.url = form.url.trim();
-  updates.headers = entriesToRecord(form.headers);
+  updates.headers = entriesToRecordOrNull(form.headers);
   updates.env = env;
   return updates;
 }
 
-function hasChanges(form: EditForm, server: ServerDetail): boolean {
-  return JSON.stringify(form) !== JSON.stringify(serverToForm(server));
+function hasChanges(form: EditForm, baseline: EditForm): boolean {
+  return JSON.stringify(form) !== JSON.stringify(baseline);
+}
+
+interface ServerEditFieldsProps {
+  form: EditForm;
+  connectionType: ConnectionType;
+  onChange: (form: EditForm) => void;
+}
+
+export function ServerEditFields({ form, connectionType, onChange }: ServerEditFieldsProps) {
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <Label>Name</Label>
+          <Input value={form.name} onChange={(e) => onChange({ ...form, name: e.target.value })} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Connection Type</Label>
+          <Input
+            value={connectionType}
+            readOnly
+            aria-disabled="true"
+            className="capitalize bg-surface-300/50 cursor-not-allowed"
+          />
+          <p className="text-[11px] text-[var(--fg-40)]">Type cannot be changed after creation.</p>
+        </div>
+      </div>
+      {connectionType === "stdio" ? (
+        <>
+          <div className="space-y-1.5">
+            <Label>Command</Label>
+            <Input
+              placeholder="e.g., npx -y @modelcontextprotocol/server-github"
+              value={form.command}
+              onChange={(e) => onChange({ ...form, command: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Arguments (one per line)</Label>
+            <Textarea
+              placeholder={"-y\n@modelcontextprotocol/server-github"}
+              value={form.args}
+              onChange={(e) => onChange({ ...form, args: e.target.value })}
+              className="min-h-[80px] font-mono text-xs"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Working Directory</Label>
+            <Input
+              placeholder="e.g., /path/to/project"
+              value={form.workingDir}
+              onChange={(e) => onChange({ ...form, workingDir: e.target.value })}
+            />
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="space-y-1.5">
+            <Label>URL</Label>
+            <Input
+              placeholder="e.g., http://localhost:3000/mcp"
+              value={form.url}
+              onChange={(e) => onChange({ ...form, url: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>HTTP Headers</Label>
+            <KeyValueEditor
+              entries={form.headers}
+              onChange={(headers) => onChange({ ...form, headers })}
+              keyLabel="Header"
+              keyPlaceholder="Authorization"
+              valuePlaceholder="Bearer {env:MCP_TOKEN}"
+            />
+          </div>
+        </>
+      )}
+      <div className="space-y-1.5">
+        <Label>Environment Variables</Label>
+        <KeyValueEditor
+          entries={form.env}
+          onChange={(env) => onChange({ ...form, env })}
+          keyLabel="Variable"
+          keyPlaceholder="API_KEY"
+          valuePlaceholder="your-api-key"
+        />
+      </div>
+    </>
+  );
 }
 
 export function ServerDetail() {
@@ -112,52 +181,112 @@ export function ServerDetail() {
 
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
+  const [baselineForm, setBaselineForm] = useState<EditForm | null>(null);
+  const [baselineServer, setBaselineServer] = useState<ServerDetailDto | null>(null);
   const [saving, setSaving] = useState(false);
+  const [discardEditOpen, setDiscardEditOpen] = useState(false);
+  const [overwriteOpen, setOverwriteOpen] = useState(false);
 
-  const dirty = isEditing && server && editForm ? hasChanges(editForm, server) : false;
+  const dirty = useMemo(
+    () => (isEditing && editForm && baselineForm ? hasChanges(editForm, baselineForm) : false),
+    [baselineForm, editForm, isEditing],
+  );
 
   const blocker = useBlocker(dirty);
+  const editConnectionType = baselineServer?.connectionType ?? server?.connectionType ?? "stdio";
 
-  const enterEdit = useCallback(() => {
-    if (!server) return;
-    setEditForm(serverToForm(server));
-    setIsEditing(true);
-  }, [server]);
-
-  const cancelEdit = useCallback(() => {
+  const exitEdit = useCallback(() => {
     setEditForm(null);
+    setBaselineForm(null);
+    setBaselineServer(null);
     setIsEditing(false);
   }, []);
 
-  const saveEdit = useCallback(async () => {
-    if (!id || !editForm || !server) return;
-    const validationError = validateEditForm(editForm, server.connectionType);
-    if (validationError) {
-      toast.error(validationError);
+  const enterEdit = useCallback(() => {
+    if (!server) return;
+    const nextForm = serverToForm(server);
+    setEditForm(nextForm);
+    setBaselineForm(nextForm);
+    setBaselineServer(server);
+    setIsEditing(true);
+  }, [server]);
+
+  const requestCancelEdit = useCallback(() => {
+    if (dirty) {
+      setDiscardEditOpen(true);
       return;
     }
+    exitEdit();
+  }, [dirty, exitEdit]);
 
-    setSaving(true);
-    try {
-      const updates = formToUpdates(editForm, server.connectionType);
-      await updateServer({ id, updates });
-      if (server?.status === "running") {
-        toast.success("Configuration saved", {
-          description: "Restart the server to apply changes.",
-        });
-      } else {
-        toast.success("Configuration saved");
+  const saveEdit = useCallback(
+    async (overwrite = false) => {
+      if (!id || !editForm || !server || !baselineForm) return;
+      const connectionType = baselineServer?.connectionType ?? server.connectionType;
+      const validationError = validateEditForm(editForm, connectionType);
+      if (validationError) {
+        toast.error(validationError);
+        return;
       }
-      setIsEditing(false);
-      setEditForm(null);
-    } catch (err) {
-      toast.error("Save failed", {
-        description: err instanceof Error ? err.message : "Unknown error",
-      });
-    } finally {
-      setSaving(false);
+
+      setSaving(true);
+      try {
+        if (!overwrite) {
+          const latest = await api<ServerDetailDto>(routes.servers.detail(id));
+          if (latest.connectionType !== connectionType) {
+            toast.error("Save failed", {
+              description: "Connection type changed. Reopen this server before saving.",
+            });
+            return;
+          }
+          if (hasChanges(serverToForm(latest), baselineForm)) {
+            setOverwriteOpen(true);
+            return;
+          }
+        }
+
+        const updates = formToUpdates(editForm, connectionType);
+        await updateServer({ id, updates });
+        if (server?.status === "running") {
+          toast.success("Configuration saved", {
+            description: "Restart the server to apply changes.",
+          });
+        } else {
+          toast.success("Configuration saved");
+        }
+        exitEdit();
+      } catch (err) {
+        toast.error("Save failed", {
+          description: err instanceof Error ? err.message : "Unknown error",
+        });
+      } finally {
+        setSaving(false);
+      }
+    },
+    [baselineForm, baselineServer, editForm, exitEdit, id, server, updateServer],
+  );
+
+  const confirmDiscard = useCallback(() => {
+    if (blocker.state === "blocked") {
+      blocker.proceed?.();
+      return;
     }
-  }, [id, editForm, updateServer, server]);
+    setDiscardEditOpen(false);
+    exitEdit();
+  }, [blocker, exitEdit]);
+
+  const cancelDiscard = useCallback(() => {
+    if (blocker.state === "blocked") {
+      blocker.reset?.();
+      return;
+    }
+    setDiscardEditOpen(false);
+  }, [blocker]);
+
+  const confirmOverwrite = useCallback(() => {
+    setOverwriteOpen(false);
+    void saveEdit(true);
+  }, [saveEdit]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -219,22 +348,19 @@ export function ServerDetail() {
 
   return (
     <div className="space-y-6 animate-fade-in-up">
-      <AlertDialog open={blocker.state === "blocked"}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
-            <AlertDialogDescription>
-              You have unsaved changes. They will be lost if you leave this page.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => blocker.reset?.()}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => blocker.proceed?.()}>
-              Discard changes
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <UnsavedChangesDialog
+        open={blocker.state === "blocked" || discardEditOpen}
+        onCancel={cancelDiscard}
+        onConfirm={confirmDiscard}
+      />
+      <UnsavedChangesDialog
+        open={overwriteOpen}
+        title="Overwrite external changes?"
+        description="This server configuration changed while you were editing. Saving now will overwrite the latest saved configuration."
+        actionLabel="Overwrite changes"
+        onCancel={() => setOverwriteOpen(false)}
+        onConfirm={confirmOverwrite}
+      />
 
       {/* Header */}
       <div className="flex items-start gap-3">
@@ -271,10 +397,10 @@ export function ServerDetail() {
         <div className="flex items-center gap-2 shrink-0">
           {isEditing ? (
             <>
-              <Button variant="outline" onClick={cancelEdit}>
+              <Button variant="outline" onClick={requestCancelEdit}>
                 <X className="h-4 w-4 mr-2" /> Cancel
               </Button>
-              <Button onClick={saveEdit} disabled={!dirty || saving}>
+              <Button onClick={() => void saveEdit()} disabled={!dirty || saving}>
                 <Check className="h-4 w-4 mr-2" /> {saving ? "Saving..." : "Save"}
               </Button>
             </>
@@ -304,86 +430,11 @@ export function ServerDetail() {
         </CardHeader>
         <CardContent className="space-y-4">
           {isEditing && editForm ? (
-            <>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label>Name</Label>
-                  <Input
-                    value={editForm.name}
-                    onChange={(e) => setEditForm((f) => f && { ...f, name: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Connection Type</Label>
-                  <Input
-                    value={server.connectionType}
-                    readOnly
-                    className="capitalize bg-surface-300/50"
-                  />
-                </div>
-              </div>
-              {server.connectionType === "stdio" ? (
-                <>
-                  <div className="space-y-1.5">
-                    <Label>Command</Label>
-                    <Input
-                      placeholder="e.g., npx -y @modelcontextprotocol/server-github"
-                      value={editForm.command}
-                      onChange={(e) => setEditForm((f) => f && { ...f, command: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Arguments (one per line)</Label>
-                    <Textarea
-                      placeholder={"-y\n@modelcontextprotocol/server-github"}
-                      value={editForm.args}
-                      onChange={(e) => setEditForm((f) => f && { ...f, args: e.target.value })}
-                      className="min-h-[80px] font-mono text-xs"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Working Directory</Label>
-                    <Input
-                      placeholder="e.g., /path/to/project"
-                      value={editForm.workingDir}
-                      onChange={(e) =>
-                        setEditForm((f) => f && { ...f, workingDir: e.target.value })
-                      }
-                    />
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="space-y-1.5">
-                    <Label>URL</Label>
-                    <Input
-                      placeholder="e.g., http://localhost:3000/mcp"
-                      value={editForm.url}
-                      onChange={(e) => setEditForm((f) => f && { ...f, url: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>HTTP Headers</Label>
-                    <KeyValueEditor
-                      entries={editForm.headers}
-                      onChange={(headers) => setEditForm((f) => f && { ...f, headers })}
-                      keyLabel="Header"
-                      keyPlaceholder="Authorization"
-                      valuePlaceholder="Bearer {env:MCP_TOKEN}"
-                    />
-                  </div>
-                </>
-              )}
-              <div className="space-y-1.5">
-                <Label>Environment Variables</Label>
-                <KeyValueEditor
-                  entries={editForm.env}
-                  onChange={(env) => setEditForm((f) => f && { ...f, env })}
-                  keyPlaceholder="API_KEY"
-                  valuePlaceholder="your-api-key"
-                />
-              </div>
-            </>
+            <ServerEditFields
+              form={editForm}
+              connectionType={editConnectionType}
+              onChange={(nextForm) => setEditForm(nextForm)}
+            />
           ) : (
             <>
               {commandText && (
@@ -526,7 +577,7 @@ export function ServerDetail() {
   );
 }
 
-function ToolCategoryBadge({ name }: { name: string }) {
+export function ToolCategoryBadge({ name }: { name: string }) {
   const lower = name.toLowerCase();
   if (lower.includes("read") || lower.includes("get") || lower.includes("fetch")) {
     return (

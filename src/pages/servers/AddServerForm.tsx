@@ -14,29 +14,29 @@ import { Label } from "@/components/ui/label";
 import { AlertTriangle, X } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { KeyValueEditor } from "@/components/shared/KeyValueEditor";
+import { UnsavedChangesDialog } from "@/components/shared/UnsavedChangesDialog";
+import {
+  argsToArrayOrUndefined,
+  entriesToRecordOrUndefined,
+  findDuplicateKeys,
+} from "@/lib/server-form";
 
 const CONNECTION_TYPES = [
   { value: "stdio", label: "stdio" },
   { value: "http", label: "HTTP/SSE" },
 ] as const;
 
-function entriesToRecord(entries: Array<[string, string]>): Record<string, string> | undefined {
-  const record: Record<string, string> = {};
-  for (const [key, value] of entries) {
-    const trimmedKey = key.trim();
-    if (trimmedKey) {
-      record[trimmedKey] = value;
-    }
-  }
-  return Object.keys(record).length > 0 ? record : undefined;
-}
-
-function argsToArray(args: string): string[] | undefined {
-  const parsed = args
-    .split("\n")
-    .map((arg) => arg.trim())
-    .filter(Boolean);
-  return parsed.length > 0 ? parsed : undefined;
+function createInitialForm() {
+  return {
+    name: "",
+    connectionType: "stdio" as "stdio" | "http",
+    command: "",
+    args: "",
+    url: "",
+    env: [] as Array<[string, string]>,
+    headers: [] as Array<[string, string]>,
+    autoStart: false,
+  };
 }
 
 interface AddServerFormProps {
@@ -54,26 +54,36 @@ interface AddServerFormProps {
 }
 
 export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
-  const [form, setForm] = useState({
-    name: "",
-    connectionType: "stdio" as "stdio" | "http",
-    command: "",
-    args: "",
-    url: "",
-    env: [] as Array<[string, string]>,
-    headers: [] as Array<[string, string]>,
-    autoStart: false,
-  });
+  const [form, setForm] = useState(createInitialForm);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const dirty = JSON.stringify(form) !== JSON.stringify(createInitialForm());
+
+  const requestClose = () => {
+    if (dirty) {
+      setDiscardOpen(true);
+      return;
+    }
+    onClose();
+  };
 
   const handleSubmit = async () => {
     if (!form.name.trim() || submitting) return;
     setFormError(null);
 
+    if (findDuplicateKeys(form.env).size > 0) {
+      setFormError("Environment variable keys must be unique.");
+      return;
+    }
+    if (form.connectionType === "http" && findDuplicateKeys(form.headers).size > 0) {
+      setFormError("HTTP header keys must be unique.");
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const env = entriesToRecord(form.env);
+      const env = entriesToRecordOrUndefined(form.env);
 
       const baseConfig = {
         name: form.name.trim(),
@@ -88,13 +98,13 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
               ...baseConfig,
               connectionType: "stdio",
               command: form.command.trim(),
-              args: argsToArray(form.args),
+              args: argsToArrayOrUndefined(form.args),
             }
           : {
               ...baseConfig,
               connectionType: "http",
               url: form.url.trim(),
-              headers: entriesToRecord(form.headers),
+              headers: entriesToRecordOrUndefined(form.headers),
             },
       );
       onClose();
@@ -107,6 +117,11 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
 
   return (
     <Card className="animate-scale-in border-cursor-orange/20 shadow-[0_8px_30px_rgba(245,78,0,0.04)]">
+      <UnsavedChangesDialog
+        open={discardOpen}
+        onCancel={() => setDiscardOpen(false)}
+        onConfirm={onClose}
+      />
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-base">Add New Server</CardTitle>
@@ -114,7 +129,7 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
             variant="ghost"
             size="icon"
             className="text-[var(--fg-65)] hover:text-cursor-dark hover:bg-[var(--fg-08)]"
-            onClick={onClose}
+            onClick={requestClose}
           >
             <X className="h-5 w-5" />
           </Button>
@@ -210,6 +225,7 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
           <KeyValueEditor
             entries={form.env}
             onChange={(env) => setForm((f) => ({ ...f, env }))}
+            keyLabel="Variable"
             keyPlaceholder="API_KEY"
             valuePlaceholder="your-api-key"
           />
@@ -221,7 +237,7 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
           </div>
         )}
         <div className="flex justify-end gap-2 pt-1">
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={requestClose}>
             Cancel
           </Button>
           <Button onClick={handleSubmit} disabled={!form.name.trim() || submitting}>

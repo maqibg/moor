@@ -46,11 +46,11 @@ const router = createBrowserRouter([
           closeButton
           toastOptions={{
             classNames: {
-              toast: "font-headline",
+              toast: "font-headline rounded-lg",
               title: "text-sm font-medium",
               description: "text-xs text-[var(--fg-55)]",
               closeButton:
-                "bg-transparent hover:bg-[var(--fg-08)] text-[var(--fg-40)] hover:text-cursor-dark border-none",
+                "!top-2 !right-2 !left-auto !rounded-lg !border-0 !bg-transparent !text-[var(--fg-40)] hover:!bg-[var(--fg-08)] hover:!text-cursor-dark",
             },
           }}
         />

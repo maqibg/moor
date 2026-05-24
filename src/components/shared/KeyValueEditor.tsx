@@ -1,6 +1,9 @@
+import { useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Plus, X } from "lucide-react";
+import { findDuplicateKeys } from "@/lib/server-form";
+import { cn } from "@/lib/utils";
 
 interface KeyValueEditorProps {
   entries: Array<[string, string]>;
@@ -21,6 +24,22 @@ export function KeyValueEditor({
   valueLabel = "Value",
   disabled = false,
 }: KeyValueEditorProps) {
+  const rowIdsRef = useRef<string[]>([]);
+  const nextRowIdRef = useRef(0);
+  const createRowId = () => {
+    nextRowIdRef.current += 1;
+    return `kv-row-${nextRowIdRef.current}`;
+  };
+
+  while (rowIdsRef.current.length < entries.length) {
+    rowIdsRef.current.push(createRowId());
+  }
+  if (rowIdsRef.current.length > entries.length) {
+    rowIdsRef.current.length = entries.length;
+  }
+
+  const duplicateIndexes = findDuplicateKeys(entries);
+
   const update = (index: number, field: 0 | 1, value: string) => {
     const next = entries.map(([k, v], i) =>
       i === index
@@ -31,10 +50,12 @@ export function KeyValueEditor({
   };
 
   const remove = (index: number) => {
+    rowIdsRef.current.splice(index, 1);
     onChange(entries.filter((_, i) => i !== index));
   };
 
   const add = () => {
+    rowIdsRef.current.push(createRowId());
     onChange([...entries, ["", ""]]);
   };
 
@@ -49,35 +70,45 @@ export function KeyValueEditor({
         </span>
         <span />
       </div>
-      {entries.map(([key, value], index) => (
-        <div key={index} className="grid grid-cols-[1fr_1fr_36px] gap-2 items-center">
-          <Input
-            placeholder={keyPlaceholder}
-            value={key}
-            onChange={(e) => update(index, 0, e.target.value)}
-            disabled={disabled}
-            className="h-9 text-xs font-mono"
-          />
-          <Input
-            placeholder={valuePlaceholder}
-            value={value}
-            onChange={(e) => update(index, 1, e.target.value)}
-            disabled={disabled}
-            className="h-9 text-xs font-mono"
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9 text-[var(--fg-40)] hover:text-error-warm shrink-0"
-            onClick={() => remove(index)}
-            disabled={disabled}
-            aria-label={`Remove ${keyLabel.toLowerCase()} row`}
+      {entries.map(([key, value], index) => {
+        const duplicated = duplicateIndexes.has(index);
+        return (
+          <div
+            key={rowIdsRef.current[index]}
+            className="grid grid-cols-[1fr_1fr_36px] gap-2 items-center"
           >
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-      ))}
+            <Input
+              placeholder={keyPlaceholder}
+              value={key}
+              onChange={(e) => update(index, 0, e.target.value)}
+              disabled={disabled}
+              aria-invalid={duplicated || undefined}
+              className={cn("h-9 text-xs font-mono", duplicated && "border-error-warm")}
+            />
+            <Input
+              placeholder={valuePlaceholder}
+              value={value}
+              onChange={(e) => update(index, 1, e.target.value)}
+              disabled={disabled}
+              className="h-9 text-xs font-mono"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 text-[var(--fg-40)] hover:text-error-warm shrink-0"
+              onClick={() => remove(index)}
+              disabled={disabled}
+              aria-label={`Remove ${keyLabel.toLowerCase()} row`}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        );
+      })}
+      {duplicateIndexes.size > 0 && (
+        <p className="px-1 text-xs text-error-warm">{keyLabel} keys must be unique.</p>
+      )}
       <Button
         type="button"
         variant="outline"
