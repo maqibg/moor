@@ -35,7 +35,12 @@ export function UnsavedChangesDialog({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel onClick={onCancel}>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm}>{actionLabel}</AlertDialogAction>
+          <AlertDialogAction
+            className="bg-error-warm text-surface-200 hover:bg-error-warm/90"
+            onClick={onConfirm}
+          >
+            {actionLabel}
+          </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

@@ -6,6 +6,8 @@ import {
   entriesToRecordOrUndefined,
   findDuplicateHeaderKeys,
   findDuplicateKeys,
+  headerEntriesToRecordOrNull,
+  headerEntriesToRecordOrUndefined,
 } from "./server-form";
 
 describe("server form utilities", () => {
@@ -24,6 +26,20 @@ describe("server form utilities", () => {
       ]),
     ).toEqual({ TOKEN: " secret ", EMPTY: "" });
     expect(argsToArrayOrUndefined(" one \n\n two ")).toEqual(["one", "two"]);
+  });
+
+  it("parses pasted argument lines with Windows line endings", () => {
+    expect(argsToArrayOrUndefined(" one\r\n\r\n two ")).toEqual(["one", "two"]);
+  });
+
+  it("normalizes HTTP header keys before creating payload records", () => {
+    expect(
+      headerEntriesToRecordOrUndefined([
+        [" Authorization ", "Bearer token"],
+        ["X-Trace", "abc"],
+      ]),
+    ).toEqual({ authorization: "Bearer token", "x-trace": "abc" });
+    expect(headerEntriesToRecordOrNull([["", "ignored"]])).toBeNull();
   });
 
   it("reports every row that participates in a duplicate trimmed key", () => {

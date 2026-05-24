@@ -24,6 +24,8 @@ import {
   entriesToRecordOrNull,
   findDuplicateHeaderKeys,
   findDuplicateKeys,
+  headerEntriesToRecordOrNull,
+  type KeyValueEntries,
 } from "@/lib/server-form";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -76,13 +78,39 @@ function formToUpdates(form: EditForm, connectionType: ConnectionType): Record<s
   }
 
   updates.url = form.url.trim();
-  updates.headers = entriesToRecordOrNull(form.headers);
+  updates.headers = headerEntriesToRecordOrNull(form.headers);
   updates.env = env;
   return updates;
 }
 
-function hasChanges(form: EditForm, baseline: EditForm): boolean {
-  return JSON.stringify(form) !== JSON.stringify(baseline);
+function stableEntries(
+  entries: KeyValueEntries,
+  normalizeKey: (key: string) => string = (key) => key.trim(),
+): KeyValueEntries {
+  return entries
+    .map(([key, value]) => [normalizeKey(key), value] as [string, string])
+    .filter(([key]) => key)
+    .sort(([a], [b]) => a.localeCompare(b));
+}
+
+function stableArgs(args: string): string[] {
+  return args
+    .split(/\r?\n/)
+    .map((arg) => arg.trim())
+    .filter(Boolean);
+}
+
+export function hasChanges(form: EditForm, baseline: EditForm): boolean {
+  return (
+    form.name.trim() !== baseline.name.trim() ||
+    form.command.trim() !== baseline.command.trim() ||
+    form.url.trim() !== baseline.url.trim() ||
+    form.workingDir.trim() !== baseline.workingDir.trim() ||
+    JSON.stringify(stableArgs(form.args)) !== JSON.stringify(stableArgs(baseline.args)) ||
+    JSON.stringify(stableEntries(form.env)) !== JSON.stringify(stableEntries(baseline.env)) ||
+    JSON.stringify(stableEntries(form.headers, (key) => key.trim().toLowerCase())) !==
+      JSON.stringify(stableEntries(baseline.headers, (key) => key.trim().toLowerCase()))
+  );
 }
 
 interface ServerEditFieldsProps {
@@ -190,7 +218,7 @@ export function ServerDetail() {
   const [baselineForm, setBaselineForm] = useState<EditForm | null>(null);
   const [baselineServer, setBaselineServer] = useState<ServerDetailDto | null>(null);
   const [saving, setSaving] = useState(false);
-  const [discardEditOpen, setDiscardEditOpen] = useState(false);
+  const [discardSource, setDiscardSource] = useState<"manual" | null>(null);
   const [overwriteOpen, setOverwriteOpen] = useState(false);
 
   const dirty = useMemo(
@@ -219,7 +247,7 @@ export function ServerDetail() {
 
   const requestCancelEdit = useCallback(() => {
     if (dirty) {
-      setDiscardEditOpen(true);
+      setDiscardSource("manual");
       return;
     }
     exitEdit();
@@ -273,20 +301,19 @@ export function ServerDetail() {
   );
 
   const confirmDiscard = useCallback(() => {
+    setDiscardSource(null);
     if (blocker.state === "blocked") {
       blocker.proceed?.();
       return;
     }
-    setDiscardEditOpen(false);
     exitEdit();
   }, [blocker, exitEdit]);
 
   const cancelDiscard = useCallback(() => {
+    setDiscardSource(null);
     if (blocker.state === "blocked") {
       blocker.reset?.();
-      return;
     }
-    setDiscardEditOpen(false);
   }, [blocker]);
 
   const confirmOverwrite = useCallback(() => {
@@ -355,7 +382,7 @@ export function ServerDetail() {
   return (
     <div className="space-y-6 animate-fade-in-up">
       <UnsavedChangesDialog
-        open={blocker.state === "blocked" || discardEditOpen}
+        open={blocker.state === "blocked" || discardSource !== null}
         onCancel={cancelDiscard}
         onConfirm={confirmDiscard}
       />

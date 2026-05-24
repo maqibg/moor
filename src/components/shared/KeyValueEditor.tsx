@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Plus, X } from "lucide-react";
@@ -26,19 +26,27 @@ export function KeyValueEditor({
   valueLabel = "Value",
   disabled = false,
 }: KeyValueEditorProps) {
-  const rowIdsRef = useRef<string[]>([]);
-  const nextRowIdRef = useRef(0);
-  const createRowId = () => {
+  const reactId = useId();
+  const duplicateErrorId = `${reactId}-duplicate-error`;
+  const nextRowIdRef = useRef(entries.length);
+  const [rowIds, setRowIds] = useState(() => entries.map((_, index) => `kv-row-${index + 1}`));
+  const createRowId = useCallback(() => {
     nextRowIdRef.current += 1;
     return `kv-row-${nextRowIdRef.current}`;
-  };
+  }, []);
 
-  while (rowIdsRef.current.length < entries.length) {
-    rowIdsRef.current.push(createRowId());
-  }
-  if (rowIdsRef.current.length > entries.length) {
-    rowIdsRef.current.length = entries.length;
-  }
+  useEffect(() => {
+    setRowIds((current) => {
+      if (current.length === entries.length) return current;
+      if (current.length > entries.length) return current.slice(0, entries.length);
+
+      const next = [...current];
+      while (next.length < entries.length) {
+        next.push(createRowId());
+      }
+      return next;
+    });
+  }, [createRowId, entries.length]);
 
   const duplicateIndexes = duplicateKeyFinder(entries);
 
@@ -52,12 +60,12 @@ export function KeyValueEditor({
   };
 
   const remove = (index: number) => {
-    rowIdsRef.current.splice(index, 1);
+    setRowIds((current) => current.filter((_, i) => i !== index));
     onChange(entries.filter((_, i) => i !== index));
   };
 
   const add = () => {
-    rowIdsRef.current.push(createRowId());
+    setRowIds((current) => [...current, createRowId()]);
     onChange([...entries, ["", ""]]);
   };
 
@@ -76,7 +84,7 @@ export function KeyValueEditor({
         const duplicated = duplicateIndexes.has(index);
         return (
           <div
-            key={rowIdsRef.current[index]}
+            key={rowIds[index] ?? `${reactId}-pending-${index}`}
             className="grid grid-cols-[1fr_1fr_36px] gap-2 items-center"
           >
             <Input
@@ -85,6 +93,7 @@ export function KeyValueEditor({
               onChange={(e) => update(index, 0, e.target.value)}
               disabled={disabled}
               aria-invalid={duplicated || undefined}
+              aria-describedby={duplicated ? duplicateErrorId : undefined}
               className={cn("h-9 text-xs font-mono", duplicated && "border-error-warm")}
             />
             <Input
@@ -109,7 +118,9 @@ export function KeyValueEditor({
         );
       })}
       {duplicateIndexes.size > 0 && (
-        <p className="px-1 text-xs text-error-warm">{keyLabel} keys must be unique.</p>
+        <p id={duplicateErrorId} className="px-1 text-xs text-error-warm">
+          {keyLabel} keys must be unique.
+        </p>
       )}
       <Button
         type="button"

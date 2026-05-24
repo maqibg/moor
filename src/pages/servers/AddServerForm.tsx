@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -20,6 +20,7 @@ import {
   entriesToRecordOrUndefined,
   findDuplicateHeaderKeys,
   findDuplicateKeys,
+  headerEntriesToRecordOrUndefined,
 } from "@/lib/server-form";
 
 const CONNECTION_TYPES = [
@@ -59,7 +60,8 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
-  const dirty = JSON.stringify(form) !== JSON.stringify(createInitialForm());
+  const baselineRef = useRef(createInitialForm());
+  const dirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(baselineRef.current), [form]);
 
   const requestClose = () => {
     if (dirty) {
@@ -105,7 +107,7 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
               ...baseConfig,
               connectionType: "http",
               url: form.url.trim(),
-              headers: entriesToRecordOrUndefined(form.headers),
+              headers: headerEntriesToRecordOrUndefined(form.headers),
             },
       );
       onClose();

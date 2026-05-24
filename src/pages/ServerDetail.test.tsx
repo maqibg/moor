@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ServerEditFields, ToolCategoryBadge, type EditForm } from "./ServerDetail";
+import { hasChanges, ServerEditFields, ToolCategoryBadge, type EditForm } from "./ServerDetail";
 
 const baseForm: EditForm = {
   name: "Create Tools",
@@ -41,5 +41,36 @@ describe("ServerDetail", () => {
 
     expect(markup).toContain(">URL<");
     expect(markup).not.toContain(">Working Directory<");
+  });
+
+  it("does not mark equivalent key-value rows dirty because of row order", () => {
+    const baseline: EditForm = {
+      ...baseForm,
+      name: " Create Tools ",
+      args: "one\ntwo",
+      env: [
+        ["TOKEN", "secret"],
+        ["REGION", "us"],
+      ],
+      headers: [
+        ["Authorization", "Bearer token"],
+        ["X-Trace", "abc"],
+      ],
+    };
+    const form: EditForm = {
+      ...baseForm,
+      name: "Create Tools",
+      args: "one\r\ntwo",
+      env: [
+        ["REGION", "us"],
+        ["TOKEN", "secret"],
+      ],
+      headers: [
+        ["x-trace", "abc"],
+        [" authorization ", "Bearer token"],
+      ],
+    };
+
+    expect(hasChanges(form, baseline)).toBe(false);
   });
 });

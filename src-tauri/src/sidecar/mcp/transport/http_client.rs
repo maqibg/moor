@@ -1,7 +1,10 @@
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::sync::Mutex;
+
+static ENV_PATTERN: OnceLock<regex_lite::Regex> = OnceLock::new();
 
 /// MCP Client over HTTP transport (Streamable HTTP or SSE).
 /// Uses reqwest to communicate with HTTP-based MCP servers.
@@ -406,10 +409,16 @@ fn parse_sse_event(raw: &str) -> Option<SseEvent> {
 
 fn resolve_sse_endpoint(base_url: &str, endpoint: &str) -> Result<String, String> {
     let parsed = reqwest::Url::parse(base_url).map_err(|e| format!("Invalid SSE URL: {e}"))?;
-    parsed
+    let resolved = parsed
         .join(endpoint)
-        .map(|url| url.to_string())
-        .map_err(|e| format!("Invalid SSE endpoint: {e}"))
+        .map_err(|e| format!("Invalid SSE endpoint: {e}"))?;
+    if parsed.scheme() != resolved.scheme()
+        || parsed.host_str() != resolved.host_str()
+        || parsed.port_or_known_default() != resolved.port_or_known_default()
+    {
+        return Err("SSE endpoint must be on the same origin as the configured URL".to_string());
+    }
+    Ok(resolved.to_string())
 }
 
 /// Resolve header values that may contain `{env:VAR_NAME}` patterns.
@@ -417,38 +426,56 @@ pub fn resolve_http_headers(
     headers: Option<&HashMap<String, String>>,
     env: Option<&HashMap<String, String>>,
 ) -> HashMap<String, String> {
+    resolve_http_headers_with_process_env(headers, env, |name| std::env::var(name).ok())
+}
+
+fn resolve_http_headers_with_process_env<F>(
+    headers: Option<&HashMap<String, String>>,
+    env: Option<&HashMap<String, String>>,
+    process_env: F,
+) -> HashMap<String, String>
+where
+    F: Fn(&str) -> Option<String>,
+{
     let Some(headers) = headers else {
         return HashMap::new();
     };
     headers
         .iter()
         .filter_map(|(k, v)| {
-            let resolved = resolve_header_value(v, env)?;
+            let resolved = resolve_header_value_with_process_env(v, env, &process_env)?;
             Some((k.clone(), resolved))
         })
         .collect()
 }
 
-fn resolve_header_value(value: &str, env: Option<&HashMap<String, String>>) -> Option<String> {
+fn resolve_header_value_with_process_env<F>(
+    value: &str,
+    env: Option<&HashMap<String, String>>,
+    process_env: &F,
+) -> Option<String>
+where
+    F: Fn(&str) -> Option<String>,
+{
     let mut missing = false;
-    let resolved = regex_lite::Regex::new(r"\{env:([A-Za-z_][A-Za-z0-9_]*)\}")
-        .ok()
-        .map(|re| {
-            re.replace_all(value, |caps: &regex_lite::Captures| {
-                let var_name = &caps[1];
-                if let Some(val) = env
-                    .and_then(|server_env| server_env.get(var_name))
-                    .cloned()
-                    .or_else(|| std::env::var(var_name).ok())
-                {
-                    return val;
-                }
-                missing = true;
-                String::new()
-            })
-            .to_string()
+    let re = ENV_PATTERN.get_or_init(|| {
+        regex_lite::Regex::new(r"\{env:([A-Za-z_][A-Za-z0-9_]*)\}")
+            .expect("static env placeholder regex must compile")
+    });
+    let resolved = re
+        .replace_all(value, |caps: &regex_lite::Captures| {
+            let var_name = &caps[1];
+            if let Some(val) = env
+                .and_then(|server_env| server_env.get(var_name))
+                .cloned()
+                .or_else(|| process_env(var_name))
+            {
+                return val;
+            }
+            missing = true;
+            String::new()
         })
-        .unwrap_or_else(|| value.to_string());
+        .to_string();
 
     if missing {
         None
@@ -532,6 +559,31 @@ mod tests {
     }
 
     #[test]
+    fn sse_endpoint_must_stay_on_the_configured_origin() {
+        assert_eq!(
+            resolve_sse_endpoint("http://127.0.0.1:3000/sse", "/messages")
+                .expect("relative endpoint should resolve"),
+            "http://127.0.0.1:3000/messages"
+        );
+        assert_eq!(
+            resolve_sse_endpoint(
+                "http://127.0.0.1:3000/sse",
+                "http://127.0.0.1:3000/messages"
+            )
+            .expect("same-origin absolute endpoint should resolve"),
+            "http://127.0.0.1:3000/messages"
+        );
+        assert_eq!(
+            resolve_sse_endpoint(
+                "http://127.0.0.1:3000/sse",
+                "https://attacker.example/messages"
+            )
+            .expect_err("cross-origin endpoint should be rejected"),
+            "SSE endpoint must be on the same origin as the configured URL"
+        );
+    }
+
+    #[test]
     fn resolve_http_headers_prefers_server_env_then_process_env_and_drops_missing_values() {
         let mut headers = HashMap::new();
         headers.insert(
@@ -550,10 +602,15 @@ mod tests {
 
         let mut server_env = HashMap::new();
         server_env.insert("MOOR_HEADER_TOKEN".to_string(), "server-token".to_string());
-        std::env::set_var("MOOR_HEADER_TOKEN", "process-token");
-        std::env::set_var("MOOR_PROCESS_HEADER_TOKEN", "process-fallback");
 
-        let resolved = resolve_http_headers(Some(&headers), Some(&server_env));
+        let resolved =
+            resolve_http_headers_with_process_env(Some(&headers), Some(&server_env), |name| {
+                match name {
+                    "MOOR_HEADER_TOKEN" => Some("process-token".to_string()),
+                    "MOOR_PROCESS_HEADER_TOKEN" => Some("process-fallback".to_string()),
+                    _ => None,
+                }
+            });
 
         assert_eq!(
             resolved.get("Authorization").map(String::as_str),
@@ -565,9 +622,6 @@ mod tests {
         );
         assert_eq!(resolved.get("X-Static").map(String::as_str), Some("static"));
         assert!(!resolved.contains_key("X-Missing"));
-
-        std::env::remove_var("MOOR_HEADER_TOKEN");
-        std::env::remove_var("MOOR_PROCESS_HEADER_TOKEN");
     }
 
     #[tokio::test]

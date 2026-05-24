@@ -206,21 +206,21 @@ body {
 /* ── Sonner Toast 设计系统覆盖 ── */
 
 [data-sonner-toast] {
-  --normal-bg: #e6e5e0;
-  --normal-text: #26251e;
-  --normal-border: rgba(38, 37, 30, 0.1);
-  --success-bg: #e6e5e0;
-  --success-text: #26251e;
-  --success-border: rgba(38, 37, 30, 0.1);
-  --error-bg: #e6e5e0;
-  --error-text: #26251e;
-  --error-border: rgba(38, 37, 30, 0.1);
-  --warning-bg: #e6e5e0;
-  --warning-text: #26251e;
-  --warning-border: rgba(38, 37, 30, 0.1);
-  --info-bg: #e6e5e0;
-  --info-text: #26251e;
-  --info-border: rgba(38, 37, 30, 0.1);
+  --normal-bg: var(--color-surface-400);
+  --normal-text: var(--foreground);
+  --normal-border: var(--border);
+  --success-bg: var(--color-surface-400);
+  --success-text: var(--foreground);
+  --success-border: var(--border);
+  --error-bg: var(--color-surface-400);
+  --error-text: var(--foreground);
+  --error-border: var(--border);
+  --warning-bg: var(--color-surface-400);
+  --warning-text: var(--foreground);
+  --warning-border: var(--border);
+  --info-bg: var(--color-surface-400);
+  --info-text: var(--foreground);
+  --info-border: var(--border);
 
   box-shadow:
     rgba(0, 0, 0, 0.14) 0px 28px 70px,
@@ -229,40 +229,24 @@ body {
 }
 
 [data-sonner-toast][data-type="success"] [data-icon] {
-  color: #1f8a65;
+  color: var(--color-success-muted);
 }
 
 [data-sonner-toast][data-type="error"] [data-icon] {
-  color: #cf2d56;
+  color: var(--destructive);
 }
 
 [data-sonner-toast][data-type="warning"] [data-icon] {
-  color: #c08532;
+  color: var(--color-gold);
 }
 
 [data-sonner-toast][data-type="info"] [data-icon] {
-  color: #f54e00;
+  color: var(--color-cursor-orange);
 }
 
 /* ── 深色模式覆盖 ── */
 
 [data-theme="dark"] [data-sonner-toast] {
-  --normal-bg: #2a2a2a;
-  --normal-text: #e8e6e3;
-  --normal-border: rgba(232, 230, 227, 0.1);
-  --success-bg: #2a2a2a;
-  --success-text: #e8e6e3;
-  --success-border: rgba(232, 230, 227, 0.1);
-  --error-bg: #2a2a2a;
-  --error-text: #e8e6e3;
-  --error-border: rgba(232, 230, 227, 0.1);
-  --warning-bg: #2a2a2a;
-  --warning-text: #e8e6e3;
-  --warning-border: rgba(232, 230, 227, 0.1);
-  --info-bg: #2a2a2a;
-  --info-text: #e8e6e3;
-  --info-border: rgba(232, 230, 227, 0.1);
-
   box-shadow:
     rgba(0, 0, 0, 0.3) 0px 28px 70px,
     rgba(0, 0, 0, 0.2) 0px 14px 32px,

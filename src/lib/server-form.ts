@@ -1,9 +1,12 @@
 export type KeyValueEntries = Array<[string, string]>;
 
-function entriesToRecord(entries: KeyValueEntries): Record<string, string> {
+function entriesToRecord(
+  entries: KeyValueEntries,
+  normalizeKey: (key: string) => string = (key) => key.trim(),
+): Record<string, string> {
   const record: Record<string, string> = {};
   for (const [key, value] of entries) {
-    const trimmedKey = key.trim();
+    const trimmedKey = normalizeKey(key);
     if (trimmedKey) {
       record[trimmedKey] = value;
     }
@@ -23,9 +26,23 @@ export function entriesToRecordOrNull(entries: KeyValueEntries): Record<string, 
   return Object.keys(record).length > 0 ? record : null;
 }
 
+export function headerEntriesToRecordOrUndefined(
+  entries: KeyValueEntries,
+): Record<string, string> | undefined {
+  const record = entriesToRecord(entries, (key) => key.trim().toLowerCase());
+  return Object.keys(record).length > 0 ? record : undefined;
+}
+
+export function headerEntriesToRecordOrNull(
+  entries: KeyValueEntries,
+): Record<string, string> | null {
+  const record = entriesToRecord(entries, (key) => key.trim().toLowerCase());
+  return Object.keys(record).length > 0 ? record : null;
+}
+
 function argsToArray(args: string): string[] {
   return args
-    .split("\n")
+    .split(/\r?\n/)
     .map((arg) => arg.trim())
     .filter(Boolean);
 }
