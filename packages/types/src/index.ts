@@ -20,6 +20,7 @@ export type { AuditLogEntry, LogStats } from "./audit.js";
 export type { ClientSnippet, ConvertResult } from "./import.js";
 export type {
   MoorEvent,
+  MoorEventData,
   MoorEventType,
   ProfileActivatedEvent,
   ServerStatusEvent,

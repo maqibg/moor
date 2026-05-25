@@ -159,12 +159,9 @@ describe("servers API ordering", () => {
       queryAll("SELECT status, error_message FROM mcp_servers WHERE id = ?", [server.id]),
     ).toEqual([{ status: "error", error_message: publicMessage }]);
     expect(emitted).toContainEqual({
-      type: "server:status",
-      data: {
-        serverId: server.id,
-        status: "error",
-        errorMessage: publicMessage,
-      },
+      serverId: server.id,
+      status: "error",
+      errorMessage: publicMessage,
     });
   });
 

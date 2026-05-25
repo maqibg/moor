@@ -2,11 +2,10 @@ use crate::sidecar::config::converter::ConvertInput;
 use crate::sidecar::config::import_parser::ScannedServer;
 use crate::sidecar::config::scanner::{self, ImportPreview};
 use crate::sidecar::config::{converter, import_parser, snippets};
-use crate::sidecar::db::server_repo::ServerRepository;
-use crate::sidecar::http::{internal_error, validation_error, ApiErrorResponse, AppState};
+use crate::sidecar::http::{error_from_code, internal_error, ApiErrorResponse, AppState};
+use crate::sidecar::services::server_service::{CreateServerInput, ServerService};
 use axum::{
     extract::State,
-    http::StatusCode,
     response::Json,
     routing::{get, post},
     Router,
@@ -26,7 +25,7 @@ pub fn router() -> Router<Arc<AppState>> {
 
 async fn scan(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ApiErrorResponse> {
     let parsed = scanner::scan_all_configs();
-    let existing_names = get_existing_names(&state.db);
+    let existing_names = ServerService::find_all_names(&state.db);
     let preview = scanner::build_import_preview(&parsed, &existing_names);
     Ok(Json(serde_json::to_value(preview).unwrap()))
 }
@@ -39,17 +38,16 @@ struct ParseBody {
 async fn parse(axum::Json(body): axum::Json<ParseBody>) -> Result<Json<Value>, ApiErrorResponse> {
     let content = body.content.unwrap_or_default();
     if content.trim().is_empty() {
-        return Err(api_error("VALIDATION_ERROR", "content is required"));
+        return Err(error_from_code("VALIDATION_ERROR", "content is required"));
     }
     if content.len() > 512 * 1024 {
-        return Err(api_error(
+        return Err(error_from_code(
             "PAYLOAD_TOO_LARGE",
             "content exceeds maximum allowed size",
         ));
     }
 
     let parsed = import_parser::parse_json_mcp_config(&content, "json-import");
-    // No existing names check for parse — just return parsed results
     let preview = ImportPreview {
         scanned: parsed.servers.len() + parsed.unsupported.len(),
         new_servers: parsed.servers.len(),
@@ -71,7 +69,7 @@ async fn execute(
     State(state): State<Arc<AppState>>,
     axum::Json(body): axum::Json<ExecuteBody>,
 ) -> Result<Json<Value>, ApiErrorResponse> {
-    let existing_names = get_existing_names(&state.db);
+    let existing_names = ServerService::find_all_names(&state.db);
     let all_servers = match body.servers {
         Some(s) if !s.is_empty() => s,
         _ => scanner::scan_all_configs().servers,
@@ -81,57 +79,29 @@ async fn execute(
     let mut imported_ids = vec![];
 
     for server_config in &candidates {
-        let id = uuid::Uuid::new_v4().to_string();
-        let now = chrono::Utc::now().to_rfc3339();
-        let repo = ServerRepository::new(&state.db);
-        let sort_order = repo
-            .next_top_sort_order()
-            .map_err(|e| api_error("INTERNAL_ERROR", &e))?;
+        let input = CreateServerInput {
+            name: server_config.name.clone(),
+            connection_type: server_config.connection_type.clone(),
+            command: server_config.command.clone(),
+            args: server_config.args.clone(),
+            url: server_config.url.clone(),
+            env: server_config.env.clone(),
+            headers: server_config.headers.clone(),
+            working_dir: server_config.working_dir.clone(),
+            auto_start: false,
+        };
 
-        let args_json = server_config
-            .args
-            .as_ref()
-            .map(|a| serde_json::to_string(a).unwrap_or_else(|_| "[]".into()));
-        let env_json = server_config
-            .env
-            .as_ref()
-            .map(|e| serde_json::to_string(e).unwrap_or_else(|_| "{}".into()));
-        let headers_json = server_config
-            .headers
-            .as_ref()
-            .map(|h| serde_json::to_string(h).unwrap_or_default());
+        let server = ServerService::insert_server(&state.db, &state.server_manager, &input)
+            .await
+            .map_err(internal_error)?;
 
-        repo.insert(
-            &id,
-            &server_config.name,
-            &server_config.connection_type,
-            server_config.command.as_deref(),
-            args_json.as_deref(),
-            server_config.url.as_deref(),
-            env_json.as_deref(),
-            headers_json.as_deref(),
-            server_config.working_dir.as_deref(),
-            false,
-            sort_order,
-            &now,
-            &now,
-        )
-        .map_err(|e| api_error("INTERNAL_ERROR", &e))?;
-
-        let server = repo
-            .find_by_id(&id)
-            .map_err(|e| api_error("INTERNAL_ERROR", &e))?;
-        if let Some(server) = server {
-            state.server_manager.add_server(&server).await;
-        }
-
-        imported.push(server_config.name.clone());
-        imported_ids.push(id);
+        imported.push(server.name);
+        imported_ids.push(server.id);
     }
 
     if !imported_ids.is_empty() {
-        let profile_repo = crate::sidecar::db::profile_repo::ProfileRepository::new(&state.db);
-        let _ = profile_repo.assign_to_active_profile(&imported_ids);
+        ServerService::assign_to_active_profile(&state.db, &imported_ids)
+            .map_err(internal_error)?;
     }
 
     Ok(Json(json!({ "imported": imported, "skipped": skipped })))
@@ -164,7 +134,7 @@ async fn convert(
 
     if let Some(ref content) = body.content {
         if content.len() > 512 * 1024 {
-            return Err(api_error(
+            return Err(error_from_code(
                 "PAYLOAD_TOO_LARGE",
                 "content exceeds maximum allowed size",
             ));
@@ -172,9 +142,9 @@ async fn convert(
     }
 
     if clients::get_client_by_id(&target_client).is_none() {
-        return Err(api_error(
+        return Err(error_from_code(
             "VALIDATION_ERROR",
-            &format!("unknown client id: {target_client}"),
+            format!("unknown client id: {target_client}"),
         ));
     }
 
@@ -188,26 +158,7 @@ async fn convert(
 
     match converter::convert_config(&input, &state.db) {
         Ok(result) => Ok(Json(serde_json::to_value(result).unwrap())),
-        Err(e) => Err(api_error("INTERNAL_ERROR", &e)),
-    }
-}
-
-fn get_existing_names(db: &crate::sidecar::db::Database) -> std::collections::HashSet<String> {
-    let repo = ServerRepository::new(db);
-    repo.find_all_names()
-        .map(|rows| rows.into_iter().map(|(_, name)| name).collect())
-        .unwrap_or_default()
-}
-
-fn api_error(code: &str, message: &str) -> ApiErrorResponse {
-    match code {
-        "VALIDATION_ERROR" => validation_error(message.to_string()),
-        "PAYLOAD_TOO_LARGE" => crate::sidecar::http::api_error(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            code,
-            message.to_string(),
-        ),
-        _ => internal_error(message.to_string()),
+        Err(e) => Err(internal_error(e)),
     }
 }
 

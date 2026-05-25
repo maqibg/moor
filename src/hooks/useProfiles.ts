@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, apiPost, apiPut, apiDelete } from "@/lib/api/client";
 import { routes } from "@/lib/api-routes";
+import { serverKeys, profileKeys } from "@/lib/query-keys";
 import { useSSEEvent } from "@/contexts/SSEContext";
 import type { Profile, ProfileDetail } from "@moor/types";
 
@@ -9,8 +10,8 @@ export function useProfiles() {
   const queryClient = useQueryClient();
 
   useSSEEvent("profile:activated", () => {
-    void queryClient.invalidateQueries({ queryKey: ["profiles"] });
-    void queryClient.invalidateQueries({ queryKey: ["servers"] });
+    void queryClient.invalidateQueries({ queryKey: profileKeys.list() });
+    void queryClient.invalidateQueries({ queryKey: serverKeys.list() });
     void queryClient.invalidateQueries({ queryKey: ["logs"] });
   });
 
@@ -19,18 +20,18 @@ export function useProfiles() {
     isLoading: loading,
     error,
   } = useQuery<Profile[]>({
-    queryKey: ["profiles"],
+    queryKey: profileKeys.list(),
     queryFn: ({ signal }) => api<Profile[]>(routes.profiles.list(), { signal }),
   });
 
   const refresh = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: ["profiles"] });
+    await queryClient.invalidateQueries({ queryKey: profileKeys.list() });
   }, [queryClient]);
 
   const createProfile = useMutation({
     mutationFn: (name: string) => apiPost<Profile>(routes.profiles.create(), { name }),
     onSuccess: (profile) => {
-      queryClient.setQueryData<Profile[]>(["profiles"], (prev) => [...(prev ?? []), profile]);
+      queryClient.setQueryData<Profile[]>(profileKeys.list(), (prev) => [...(prev ?? []), profile]);
     },
   });
 
@@ -39,15 +40,17 @@ export function useProfiles() {
       await apiPut(routes.profiles.activate(id), {});
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["profiles"] });
-      void queryClient.invalidateQueries({ queryKey: ["servers"] });
+      void queryClient.invalidateQueries({ queryKey: profileKeys.list() });
+      void queryClient.invalidateQueries({ queryKey: serverKeys.list() });
     },
   });
 
   const deleteProfile = useMutation({
     mutationFn: (id: string) => apiDelete(routes.profiles.delete(id)).then(() => id),
     onSuccess: (id) => {
-      queryClient.setQueryData<Profile[]>(["profiles"], (prev) => prev?.filter((p) => p.id !== id));
+      queryClient.setQueryData<Profile[]>(profileKeys.list(), (prev) =>
+        prev?.filter((p) => p.id !== id),
+      );
     },
   });
 
@@ -56,7 +59,7 @@ export function useProfiles() {
       await apiPut(routes.profiles.update(id), updates);
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["profiles"] });
+      void queryClient.invalidateQueries({ queryKey: profileKeys.list() });
     },
   });
 
@@ -95,13 +98,13 @@ export function useProfile(id: string | undefined) {
     isLoading,
     error,
   } = useQuery<ProfileDetail | null>({
-    queryKey: ["profiles", id],
+    queryKey: profileKeys.detail(id!),
     queryFn: ({ signal }) => api<ProfileDetail | null>(routes.profiles.detail(id!), { signal }),
     enabled: !!id,
   });
 
   const refresh = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ["profiles", id] });
+    void queryClient.invalidateQueries({ queryKey: profileKeys.detail(id!) });
   }, [queryClient, id]);
 
   return { profile, isLoading, error, refresh };

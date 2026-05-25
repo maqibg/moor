@@ -64,12 +64,20 @@ pub fn validation_error(message: impl Into<String>) -> ApiErrorResponse {
     api_error(StatusCode::BAD_REQUEST, "VALIDATION_ERROR", message)
 }
 
-pub fn not_found(message: impl Into<String>) -> ApiErrorResponse {
-    api_error(StatusCode::NOT_FOUND, "NOT_FOUND", message)
-}
-
 pub fn internal_error(message: impl Into<String>) -> ApiErrorResponse {
     api_error(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", message)
+}
+
+pub fn error_from_code(code: &str, message: impl Into<String>) -> ApiErrorResponse {
+    let message = message.into();
+    match code {
+        "VALIDATION_ERROR" | "ORDER_INVALID" | "ACTIVE_PROFILE" => {
+            ApiErrorResponse::new(StatusCode::BAD_REQUEST, code, message)
+        }
+        "NOT_FOUND" => ApiErrorResponse::new(StatusCode::NOT_FOUND, code, message),
+        "PAYLOAD_TOO_LARGE" => ApiErrorResponse::new(StatusCode::PAYLOAD_TOO_LARGE, code, message),
+        _ => ApiErrorResponse::new(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", message),
+    }
 }
 
 pub fn json_error_response(

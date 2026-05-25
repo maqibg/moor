@@ -46,7 +46,6 @@ impl ServerStatus {
 #[derive(Debug, Clone)]
 pub struct ManagedServer {
     pub status: String,
-    pub auto_start: bool,
 }
 
 pub struct ServerManager {
@@ -89,14 +88,12 @@ impl ServerManager {
         let slots = self.slots.lock().await;
         slots.get(id).map(|s| ManagedServer {
             status: s.status.as_str().to_string(),
-            auto_start: s.auto_start,
         })
     }
 
     pub async fn add_server(&self, server: &Server) -> ManagedServer {
         let managed = ManagedServer {
             status: "stopped".to_string(),
-            auto_start: server.auto_start,
         };
         self.slots.lock().await.insert(
             server.id.clone(),
@@ -835,7 +832,8 @@ process.stdin.on("data", (chunk) => {{
             .await
             .expect("server should start");
 
-        let client_info = std::fs::read_to_string(&marker).expect("client info marker should exist");
+        let client_info =
+            std::fs::read_to_string(&marker).expect("client info marker should exist");
         assert_eq!(client_info.trim(), "moor-readable-server");
 
         manager.stop_server(&server_id).await.expect("stop failed");

@@ -1,11 +1,10 @@
-import { useState, useCallback, useEffect, useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { PageLoading } from "@/components/shared/PageLoading";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -13,105 +12,15 @@ import { KeyValueTable } from "@/components/shared/KeyValueTable";
 import { KeyValueEditor } from "@/components/shared/KeyValueEditor";
 import { CopyButton } from "@/components/shared/CopyButton";
 import { UnsavedChangesDialog } from "@/components/shared/UnsavedChangesDialog";
-import { useParams, useNavigate, useBlocker } from "react-router-dom";
+import { ToolCategoryBadge } from "@/components/shared/ToolCategoryBadge";
+import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Play, Square, RefreshCw, Terminal, Pencil, X, Check } from "lucide-react";
 import { useProfiles } from "@/hooks/useProfiles";
 import { useServerActions, useServer, useServerTools } from "@/hooks/useServers";
-import { api } from "@/lib/api/client";
-import { routes } from "@/lib/api-routes";
-import {
-  argsToArrayOrNull,
-  entriesToRecordOrNull,
-  findDuplicateHeaderKeys,
-  findDuplicateKeys,
-  headerEntriesToRecordOrNull,
-  type KeyValueEntries,
-} from "@/lib/server-form";
+import { useEditSession } from "@/hooks/useEditSession";
+import { findDuplicateHeaderKeys, type EditForm } from "@/lib/server-form";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
-import type { ConnectionType, ServerDetail as ServerDetailDto } from "@moor/types";
-
-export interface EditForm {
-  name: string;
-  command: string;
-  url: string;
-  args: string;
-  env: Array<[string, string]>;
-  headers: Array<[string, string]>;
-  workingDir: string;
-}
-
-function serverToForm(server: ServerDetailDto): EditForm {
-  return {
-    name: server.name ?? "",
-    command: server.command ?? "",
-    url: server.url ?? "",
-    args: server.args?.join("\n") ?? "",
-    env: server.env ? Object.entries(server.env) : [],
-    headers: server.headers ? Object.entries(server.headers) : [],
-    workingDir: server.workingDir ?? "",
-  };
-}
-
-function validateEditForm(form: EditForm, connectionType: ConnectionType): string | null {
-  if (!form.name.trim()) return "Name is required.";
-  if (connectionType === "stdio" && !form.command.trim()) return "Command is required.";
-  if (connectionType === "http" && !form.url.trim()) return "URL is required.";
-  if (findDuplicateKeys(form.env).size > 0) return "Environment variable keys must be unique.";
-  if (connectionType === "http" && findDuplicateHeaderKeys(form.headers).size > 0) {
-    return "HTTP header keys must be unique.";
-  }
-  return null;
-}
-
-function formToUpdates(form: EditForm, connectionType: ConnectionType): Record<string, unknown> {
-  const updates: Record<string, unknown> = { name: form.name.trim() };
-  const env = entriesToRecordOrNull(form.env);
-
-  // autoStart 由详情页 Switch 独立即时保存，不随编辑表单提交。
-  if (connectionType === "stdio") {
-    updates.command = form.command.trim();
-    updates.args = argsToArrayOrNull(form.args);
-    updates.env = env;
-    updates.workingDir = form.workingDir.trim() || null;
-    return updates;
-  }
-
-  updates.url = form.url.trim();
-  updates.headers = headerEntriesToRecordOrNull(form.headers);
-  updates.env = env;
-  return updates;
-}
-
-function stableEntries(
-  entries: KeyValueEntries,
-  normalizeKey: (key: string) => string = (key) => key.trim(),
-): KeyValueEntries {
-  return entries
-    .map(([key, value]) => [normalizeKey(key), value] as [string, string])
-    .filter(([key]) => key)
-    .sort(([a], [b]) => a.localeCompare(b));
-}
-
-function stableArgs(args: string): string[] {
-  return args
-    .split(/\r?\n/)
-    .map((arg) => arg.trim())
-    .filter(Boolean);
-}
-
-export function hasChanges(form: EditForm, baseline: EditForm): boolean {
-  return (
-    form.name.trim() !== baseline.name.trim() ||
-    form.command.trim() !== baseline.command.trim() ||
-    form.url.trim() !== baseline.url.trim() ||
-    form.workingDir.trim() !== baseline.workingDir.trim() ||
-    JSON.stringify(stableArgs(form.args)) !== JSON.stringify(stableArgs(baseline.args)) ||
-    JSON.stringify(stableEntries(form.env)) !== JSON.stringify(stableEntries(baseline.env)) ||
-    JSON.stringify(stableEntries(form.headers, (key) => key.trim().toLowerCase())) !==
-      JSON.stringify(stableEntries(baseline.headers, (key) => key.trim().toLowerCase()))
-  );
-}
+import type { ConnectionType } from "@moor/types";
 
 interface ServerEditFieldsProps {
   form: EditForm;
@@ -213,123 +122,24 @@ export function ServerDetail() {
   const { server, isLoading: loading } = useServer(id);
   const { tools, refresh: refreshTools } = useServerTools(id, activeProfile?.id);
 
-  const [isEditing, setIsEditing] = useState(false);
-  const [editForm, setEditForm] = useState<EditForm | null>(null);
-  const [baselineForm, setBaselineForm] = useState<EditForm | null>(null);
-  const [baselineServer, setBaselineServer] = useState<ServerDetailDto | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [discardSource, setDiscardSource] = useState<"manual" | null>(null);
-  const [overwriteOpen, setOverwriteOpen] = useState(false);
-
-  const dirty = useMemo(
-    () => (isEditing && editForm && baselineForm ? hasChanges(editForm, baselineForm) : false),
-    [baselineForm, editForm, isEditing],
-  );
-
-  const blocker = useBlocker(dirty);
-  const editConnectionType = baselineServer?.connectionType ?? server?.connectionType ?? "stdio";
-
-  const exitEdit = useCallback(() => {
-    setEditForm(null);
-    setBaselineForm(null);
-    setBaselineServer(null);
-    setIsEditing(false);
-  }, []);
-
-  const enterEdit = useCallback(() => {
-    if (!server) return;
-    const nextForm = serverToForm(server);
-    setEditForm(nextForm);
-    setBaselineForm(nextForm);
-    setBaselineServer(server);
-    setIsEditing(true);
-  }, [server]);
-
-  const requestCancelEdit = useCallback(() => {
-    if (dirty) {
-      setDiscardSource("manual");
-      return;
-    }
-    exitEdit();
-  }, [dirty, exitEdit]);
-
-  const saveEdit = useCallback(
-    async (overwrite = false) => {
-      if (!id || !editForm || !server || !baselineForm) return;
-      const connectionType = baselineServer?.connectionType ?? server.connectionType;
-      const validationError = validateEditForm(editForm, connectionType);
-      if (validationError) {
-        toast.error(validationError);
-        return;
-      }
-
-      setSaving(true);
-      try {
-        if (!overwrite) {
-          const latest = await api<ServerDetailDto>(routes.servers.detail(id));
-          if (latest.connectionType !== connectionType) {
-            toast.error("Save failed", {
-              description: "Connection type changed. Reopen this server before saving.",
-            });
-            return;
-          }
-          if (hasChanges(serverToForm(latest), baselineForm)) {
-            setOverwriteOpen(true);
-            return;
-          }
-        }
-
-        const updates = formToUpdates(editForm, connectionType);
-        await updateServer({ id, updates });
-        if (server?.status === "running") {
-          toast.success("Configuration saved", {
-            description: "Restart the server to apply changes.",
-          });
-        } else {
-          toast.success("Configuration saved");
-        }
-        exitEdit();
-      } catch (err) {
-        toast.error("Save failed", {
-          description: err instanceof Error ? err.message : "Unknown error",
-        });
-      } finally {
-        setSaving(false);
-      }
-    },
-    [baselineForm, baselineServer, editForm, exitEdit, id, server, updateServer],
-  );
-
-  const confirmDiscard = useCallback(() => {
-    setDiscardSource(null);
-    if (blocker.state === "blocked") {
-      blocker.proceed?.();
-      return;
-    }
-    exitEdit();
-  }, [blocker, exitEdit]);
-
-  const cancelDiscard = useCallback(() => {
-    setDiscardSource(null);
-    if (blocker.state === "blocked") {
-      blocker.reset?.();
-    }
-  }, [blocker]);
-
-  const confirmOverwrite = useCallback(() => {
-    setOverwriteOpen(false);
-    void saveEdit(true);
-  }, [saveEdit]);
-
-  useEffect(() => {
-    if (!dirty) return;
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = "";
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [dirty]);
+  const {
+    isEditing,
+    editForm,
+    editConnectionType,
+    dirty,
+    saving,
+    blocker,
+    discardOpen,
+    overwriteOpen,
+    setOverwriteOpen,
+    setEditForm,
+    enterEdit,
+    requestCancelEdit,
+    saveEdit,
+    confirmDiscard,
+    cancelDiscard,
+    confirmOverwrite,
+  } = useEditSession({ server, serverId: id, updateServer });
 
   if (loading || !server?.id) {
     return <PageLoading message="Loading server details..." />;
@@ -382,7 +192,7 @@ export function ServerDetail() {
   return (
     <div className="space-y-6 animate-fade-in-up">
       <UnsavedChangesDialog
-        open={blocker.state === "blocked" || discardSource !== null}
+        open={blocker.state === "blocked" || discardOpen}
         onCancel={cancelDiscard}
         onConfirm={confirmDiscard}
       />
@@ -607,55 +417,5 @@ export function ServerDetail() {
         </CardContent>
       </Card>
     </div>
-  );
-}
-
-export function ToolCategoryBadge({ name }: { name: string }) {
-  const lower = name.toLowerCase();
-  if (lower.includes("read") || lower.includes("get") || lower.includes("fetch")) {
-    return (
-      <Badge variant="subtle" className="text-[10px] bg-read/15 text-read border-read/20">
-        Read
-      </Badge>
-    );
-  }
-  if (
-    lower.includes("write") ||
-    lower.includes("edit") ||
-    lower.includes("update") ||
-    lower.includes("create")
-  ) {
-    return (
-      <Badge variant="subtle" className="text-[10px] bg-edit/15 text-edit border-edit/20">
-        Edit
-      </Badge>
-    );
-  }
-  if (
-    lower.includes("search") ||
-    lower.includes("find") ||
-    lower.includes("list") ||
-    lower.includes("grep")
-  ) {
-    return (
-      <Badge variant="subtle" className="text-[10px] bg-grep/15 text-grep border-grep/20">
-        Search
-      </Badge>
-    );
-  }
-  if (lower.includes("delete") || lower.includes("remove") || lower.includes("destroy")) {
-    return (
-      <Badge
-        variant="subtle"
-        className="text-[10px] bg-error-warm/10 text-error-warm border-error-warm/15"
-      >
-        Destructive
-      </Badge>
-    );
-  }
-  return (
-    <Badge variant="subtle" className="text-[10px]">
-      Tool
-    </Badge>
   );
 }

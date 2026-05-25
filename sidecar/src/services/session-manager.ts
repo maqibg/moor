@@ -6,6 +6,7 @@ import {
 } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { Server } from "@moor/types";
 import { buildStdioEnvironment, assertStdioCommandAvailable } from "./stdio-env.js";
 import { resolveHttpHeaders } from "./http-headers.js";
 
@@ -20,20 +21,7 @@ export interface ServerSession {
   transport: Transport;
 }
 
-export interface StoredServerConfig {
-  id: string;
-  name: string;
-  connection_type: "stdio" | "http";
-  command: string | null;
-  args: string[] | null;
-  url: string | null;
-  env: Record<string, string> | null;
-  headers: Record<string, string> | null;
-  working_dir: string | null;
-  auto_start: boolean;
-}
-
-export type SessionFactory = (config: StoredServerConfig) => Promise<ServerSession>;
+export type SessionFactory = (server: Server) => Promise<ServerSession>;
 
 export class SessionManager {
   private sessions: Map<string, ServerSession> = new Map();
@@ -60,8 +48,8 @@ export class SessionManager {
     return this.sessions.get(id);
   }
 
-  async createSession(id: string, config: StoredServerConfig): Promise<ServerSession> {
-    const session = await this.sessionFactory(config);
+  async createSession(id: string, server: Server): Promise<ServerSession> {
+    const session = await this.sessionFactory(server);
     this.sessions.set(id, session);
     return session;
   }
@@ -78,27 +66,30 @@ export class SessionManager {
   }
 }
 
-async function createTransport(config: StoredServerConfig): Promise<Transport> {
-  if (config.connection_type === "stdio") {
-    if (!config.command) throw new Error("stdio server requires command");
-    const env = buildStdioEnvironment({ ...getDefaultEnvironment(), ...process.env }, config.env);
-    assertStdioCommandAvailable(config.command, env);
+async function createTransport(server: Server): Promise<Transport> {
+  if (server.connectionType === "stdio") {
+    if (!server.command) throw new Error("stdio server requires command");
+    const env = buildStdioEnvironment(
+      { ...getDefaultEnvironment(), ...process.env },
+      server.env ?? null,
+    );
+    assertStdioCommandAvailable(server.command, env);
     return new StdioClientTransport({
-      command: config.command,
-      args: config.args ?? [],
-      cwd: config.working_dir ?? undefined,
+      command: server.command,
+      args: server.args ?? [],
+      cwd: server.workingDir ?? undefined,
       env,
       stderr: "pipe",
     });
   }
 
-  if (!config.url) throw new Error("http server requires url");
-  const url = new URL(config.url);
-  const requestInit = { headers: resolveHttpHeaders(config.headers, config.env) };
+  if (!server.url) throw new Error("http server requires url");
+  const url = new URL(server.url);
+  const requestInit = { headers: resolveHttpHeaders(server.headers ?? null, server.env ?? null) };
   try {
     const transport = new StreamableHTTPClientTransport(url, { requestInit });
     const probe = new Client(
-      { name: `moor-probe-${config.name}`, version: getAppVersion() },
+      { name: `moor-probe-${server.name}`, version: getAppVersion() },
       { capabilities: {} },
     );
     await probe.connect(transport);
@@ -109,10 +100,10 @@ async function createTransport(config: StoredServerConfig): Promise<Transport> {
   }
 }
 
-async function createSession(config: StoredServerConfig): Promise<ServerSession> {
+async function createSession(server: Server): Promise<ServerSession> {
   const version = getAppVersion();
-  const client = new Client({ name: `moor-${config.name}`, version }, { capabilities: {} });
-  const transport = await createTransport(config);
+  const client = new Client({ name: `moor-${server.name}`, version }, { capabilities: {} });
+  const transport = await createTransport(server);
   await client.connect(transport);
   return { client, transport };
 }

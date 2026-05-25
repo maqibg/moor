@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useCallback, type ReactNode } from "react";
 import { getApiRuntime, buildApiUrl, buildApiHeaders, resetRuntime } from "@/lib/api/runtime";
-import type { MoorEvent, MoorEventType } from "@moor/types";
+import type { MoorEvent, MoorEventData, MoorEventType } from "@moor/types";
 
 interface SSEContextValue {
   subscribe: (eventType: MoorEventType, handler: (data: unknown) => void) => () => void;
@@ -87,7 +87,10 @@ export function SSEProvider({ children }: { children: ReactNode }) {
   return <SSEContext.Provider value={{ subscribe }}>{children}</SSEContext.Provider>;
 }
 
-export function useSSEEvent(eventType: MoorEventType, handler: (data: unknown) => void) {
+export function useSSEEvent<T extends MoorEventType>(
+  eventType: T,
+  handler: (data: MoorEventData<T>) => void,
+) {
   const ctx = useContext(SSEContext);
   if (!ctx) throw new Error("useSSEEvent must be used within SSEProvider");
 
@@ -95,6 +98,6 @@ export function useSSEEvent(eventType: MoorEventType, handler: (data: unknown) =
   handlerRef.current = handler;
 
   useEffect(() => {
-    return ctx.subscribe(eventType, (data) => handlerRef.current(data));
+    return ctx.subscribe(eventType, (data) => handlerRef.current(data as MoorEventData<T>));
   }, [ctx, eventType]);
 }

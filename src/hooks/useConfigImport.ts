@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiPost } from "@/lib/api/client";
 import { routes } from "@/lib/api-routes";
+import { serverKeys } from "@/lib/query-keys";
 import { formatJsonImport, getJsonImportDiagnostics } from "@/lib/json-import-editor";
 import type { ScannedServer, ImportPreview as ImportPreviewType } from "@moor/types";
 
@@ -102,7 +103,7 @@ export function useConfigImport() {
       setScanCandidates([]);
       setSelectedImports(new Set());
       setImportPreview(null);
-      void queryClient.invalidateQueries({ queryKey: ["servers"] });
+      void queryClient.invalidateQueries({ queryKey: serverKeys.list() });
     },
   });
 

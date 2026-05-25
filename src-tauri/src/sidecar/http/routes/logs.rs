@@ -40,20 +40,14 @@ async fn list(
             query.limit,
             query.offset,
         )
-        .map_err(|e| api_error("INTERNAL_ERROR", &e))?;
+        .map_err(internal_error)?;
     Ok(Json(serde_json::to_value(logs).unwrap()))
 }
 
 async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ApiErrorResponse> {
     let repo = AuditLogRepository::new(&state.db);
-    let stats = repo
-        .get_stats()
-        .map_err(|e| api_error("INTERNAL_ERROR", &e))?;
+    let stats = repo.get_stats().map_err(internal_error)?;
     Ok(Json(serde_json::to_value(stats).unwrap()))
-}
-
-fn api_error(_code: &str, message: &str) -> ApiErrorResponse {
-    internal_error(message.to_string())
 }
 
 #[cfg(test)]

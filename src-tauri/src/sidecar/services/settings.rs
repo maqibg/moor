@@ -1,7 +1,7 @@
-use crate::sidecar::db::Database;
+use crate::sidecar::db::{settings_repo, Database};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::{collections::HashMap, fs, path::Path};
+use std::{fs, path::Path};
 
 const SETTINGS_FILE: &str = "settings.json";
 
@@ -170,7 +170,7 @@ fn insert_nested_setting(root: &mut Map<String, Value>, key: &str, value: Value)
     current.insert(parts[parts.len() - 1].to_string(), value);
 }
 
-fn db_entries_to_settings(entries: HashMap<String, String>) -> Settings {
+fn db_entries_to_settings(entries: std::collections::HashMap<String, String>) -> Settings {
     let mut raw = Map::new();
     for (key, value) in entries {
         let parsed = serde_json::from_str(&value).unwrap_or(Value::String(value));
@@ -180,41 +180,24 @@ fn db_entries_to_settings(entries: HashMap<String, String>) -> Settings {
         .unwrap_or_else(|_| default_settings())
 }
 
-fn load_db_entries(db: &Database) -> Result<HashMap<String, String>, String> {
-    let rows = db.query_all("SELECT key, value FROM settings", &[], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
-    Ok(rows.into_iter().collect())
-}
-
-fn persist_settings(db: &Database, settings: &Settings) -> Result<(), String> {
+fn persist(db: &Database, settings: &Settings) -> Result<(), String> {
     let entries = settings_to_db_entries(settings)?;
-    let now = chrono::Utc::now().to_rfc3339();
-    db.transaction(|conn| {
-        for (key, value) in entries {
-            conn.execute(
-                "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?1, ?2, ?3)",
-                rusqlite::params![key, value, &now],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        Ok(())
-    })
+    settings_repo::save_entries(db, &entries)
 }
 
 pub fn init_settings(db: &Database, data_dir: &Path) -> Result<Settings, String> {
-    let entries = load_db_entries(db)?;
+    let entries = settings_repo::load_entries(db)?;
     if !entries.is_empty() {
         return Ok(db_entries_to_settings(entries));
     }
 
     let settings = read_settings_file(data_dir);
-    persist_settings(db, &settings)?;
+    persist(db, &settings)?;
     Ok(settings)
 }
 
 pub fn get_settings(db: &Database) -> Result<Settings, String> {
-    let entries = load_db_entries(db)?;
+    let entries = settings_repo::load_entries(db)?;
     if entries.is_empty() {
         return Ok(default_settings());
     }
@@ -225,17 +208,17 @@ pub fn update_settings(db: &Database, patch: Value) -> Result<Settings, String> 
     let current = get_settings(db)?;
     let updated = merge_settings_value(current, patch)?;
     validate_settings(&updated)?;
-    persist_settings(db, &updated)?;
+    persist(db, &updated)?;
     Ok(updated)
 }
 
 pub fn reset_settings(db: &Database) -> Result<Settings, String> {
     let settings = default_settings();
-    persist_settings(db, &settings)?;
+    persist(db, &settings)?;
     Ok(settings)
 }
 
-fn merge_settings_value(mut base: Settings, value: Value) -> Result<Settings, String> {
+pub fn merge_settings_value(mut base: Settings, value: Value) -> Result<Settings, String> {
     if value.is_null() {
         return Ok(base);
     }

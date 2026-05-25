@@ -7,7 +7,7 @@ import { apiError, validate } from "./validate.js";
 const servers = new Hono();
 
 servers.get("/", (c) => {
-  return c.json(getServerRepository().findAll());
+  return c.json(serverManager.listServers());
 });
 
 servers.post("/", async (c) => {
@@ -40,47 +40,31 @@ servers.put("/order", async (c) => {
 });
 
 servers.get("/:id", (c) => {
-  const row = getServerRepository().findById(c.req.param("id"));
-  if (!row) {
+  const result = serverManager.getServerDetail(c.req.param("id"));
+  if (!result) {
     return c.json(apiError("NOT_FOUND", "Server not found"), 404);
   }
-  const runtime = serverManager.getServer(c.req.param("id"));
-  return c.json({ ...row, runtime });
+  return c.json(result);
 });
 
 servers.put("/:id", async (c) => {
   const raw = await c.req.json();
   const id = c.req.param("id");
-  const repo = getServerRepository();
-  const server = repo.findById(id);
+  const server = getServerRepository().findById(id);
   if (!server) {
     return c.json(apiError("NOT_FOUND", "Server not found"), 404);
   }
   const body = validate(updateServerSchemaFor(server.connectionType), raw, c);
   if (body instanceof Response) return body;
-  repo.update(id, body);
-  const updated = repo.findById(id);
-  const runtime = serverManager.getServer(id);
-  if (runtime) {
-    if (body.name) runtime.name = updated!.name;
-    if ("autoStart" in body) runtime.autoStart = updated!.autoStart;
-  }
+  const updated = serverManager.updateServer(id, body);
   return c.json(updated);
 });
 
 servers.delete("/:id", async (c) => {
-  const id = c.req.param("id");
-  const runtime = serverManager.getServer(id);
-  if (runtime?.status === "running") {
-    await serverManager.stopServer(id);
-  }
-  const repo = getServerRepository();
-  const existing = repo.findById(id);
-  if (!existing) {
+  const removed = await serverManager.removeServer(c.req.param("id"));
+  if (!removed) {
     return c.json(apiError("NOT_FOUND", "Server not found"), 404);
   }
-  repo.remove(id);
-  serverManager.unregisterServer(id);
   return c.json({ success: true });
 });
 

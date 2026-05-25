@@ -2,15 +2,16 @@ import { useCallback, useState, type SetStateAction } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, apiPost, apiPut, apiDelete } from "@/lib/api/client";
 import { routes } from "@/lib/api-routes";
+import { serverKeys } from "@/lib/query-keys";
 import { useSSEEvent } from "@/contexts/SSEContext";
 import type { Server, ServerDetail, ToolDetail } from "@moor/types";
 import { getErrorMessage } from "@/lib/utils";
 import {
   applyServerAction,
-  getServerStatusEventPayload,
   mergeServerStatusEvent,
   syncUpdatedServerCaches,
   type ServerAction,
+  type ServerStatusEventPayload,
 } from "./server-patch-utils";
 
 type ServerMutationResult = "success" | "failed";
@@ -23,7 +24,7 @@ export function useServerList() {
     isLoading: loading,
     error,
   } = useQuery<Server[]>({
-    queryKey: ["servers"],
+    queryKey: serverKeys.list(),
     queryFn: ({ signal }) => api<Server[]>(routes.servers.list(), { signal }),
   });
 
@@ -43,7 +44,7 @@ export function useServerList() {
 
   const setData = useCallback(
     (updater: SetStateAction<Server[]>) => {
-      queryClient.setQueryData<Server[]>(["servers"], (old) => {
+      queryClient.setQueryData<Server[]>(serverKeys.list(), (old) => {
         const prev = old ?? [];
         return typeof updater === "function" ? updater(prev) : updater;
       });
@@ -52,23 +53,21 @@ export function useServerList() {
   );
 
   const mergeStatusEvent = useCallback(
-    (eventData: unknown) => {
-      const payload = getServerStatusEventPayload(eventData);
-      if (!payload) return;
-      setData((prev) => mergeServerStatusEvent(prev, payload));
-      if (payload.status !== "starting") {
-        clearServerAction(payload.serverId);
+    (eventData: ServerStatusEventPayload) => {
+      setData((prev) => mergeServerStatusEvent(prev, eventData));
+      if (eventData.status !== "starting") {
+        clearServerAction(eventData.serverId);
       }
     },
     [clearServerAction, setData],
   );
 
   const refreshSilently = useCallback(async () => {
-    await queryClient.refetchQueries({ queryKey: ["servers"] });
+    await queryClient.refetchQueries({ queryKey: serverKeys.list() });
   }, [queryClient]);
 
   const refresh = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: ["servers"] });
+    await queryClient.invalidateQueries({ queryKey: serverKeys.list() });
   }, [queryClient]);
 
   useSSEEvent("server:status", (data) => mergeStatusEvent(data));
@@ -96,7 +95,7 @@ export function useServerActions(callbacks?: {
 
   const setServersData = useCallback(
     (updater: SetStateAction<Server[]>) => {
-      queryClient.setQueryData<Server[]>(["servers"], (old) => {
+      queryClient.setQueryData<Server[]>(serverKeys.list(), (old) => {
         const prev = old ?? [];
         return typeof updater === "function" ? updater(prev) : updater;
       });
@@ -106,7 +105,7 @@ export function useServerActions(callbacks?: {
 
   const setServerDetailPatch = useCallback(
     (id: string, patch: Partial<ServerDetail>) => {
-      queryClient.setQueryData<ServerDetail>(["servers", id], (prev) =>
+      queryClient.setQueryData<ServerDetail>(serverKeys.detail(id), (prev) =>
         prev ? { ...prev, ...patch } : prev,
       );
     },
@@ -115,8 +114,8 @@ export function useServerActions(callbacks?: {
 
   const refreshAfterServerMutation = useCallback(
     async (id: string) => {
-      await queryClient.refetchQueries({ queryKey: ["servers"] });
-      await queryClient.invalidateQueries({ queryKey: ["servers", id] });
+      await queryClient.refetchQueries({ queryKey: serverKeys.list() });
+      await queryClient.invalidateQueries({ queryKey: serverKeys.detail(id) });
     },
     [queryClient],
   );
@@ -135,7 +134,7 @@ export function useServerActions(callbacks?: {
       return apiPost<Server>(routes.servers.create(), config);
     },
     onSuccess: (server) => {
-      queryClient.setQueryData<Server[]>(["servers"], (prev) => [...(prev ?? []), server]);
+      queryClient.setQueryData<Server[]>(serverKeys.list(), (prev) => [...(prev ?? []), server]);
     },
   });
 
@@ -207,7 +206,9 @@ export function useServerActions(callbacks?: {
       await apiDelete(routes.servers.delete(id));
     },
     onSuccess: (_data, id) => {
-      queryClient.setQueryData<Server[]>(["servers"], (prev) => prev?.filter((s) => s.id !== id));
+      queryClient.setQueryData<Server[]>(serverKeys.list(), (prev) =>
+        prev?.filter((s) => s.id !== id),
+      );
     },
   });
 
@@ -219,17 +220,17 @@ export function useServerActions(callbacks?: {
       return ordered;
     },
     onMutate: async (nextServers) => {
-      await queryClient.cancelQueries({ queryKey: ["servers"] });
-      const previous = queryClient.getQueryData<Server[]>(["servers"]);
-      queryClient.setQueryData<Server[]>(["servers"], nextServers);
+      await queryClient.cancelQueries({ queryKey: serverKeys.list() });
+      const previous = queryClient.getQueryData<Server[]>(serverKeys.list());
+      queryClient.setQueryData<Server[]>(serverKeys.list(), nextServers);
       return { previous };
     },
     onSuccess: (ordered) => {
-      queryClient.setQueryData<Server[]>(["servers"], ordered);
+      queryClient.setQueryData<Server[]>(serverKeys.list(), ordered);
     },
     onError: (_err, _vars, context) => {
       if (context?.previous) {
-        queryClient.setQueryData<Server[]>(["servers"], context.previous);
+        queryClient.setQueryData<Server[]>(serverKeys.list(), context.previous);
       }
     },
   });
@@ -274,15 +275,14 @@ export function useServer(id: string | undefined) {
     isLoading,
     error,
   } = useQuery<ServerDetail>({
-    queryKey: ["servers", id],
+    queryKey: serverKeys.detail(id!),
     queryFn: ({ signal }) => api<ServerDetail>(routes.servers.detail(id!), { signal }),
     enabled: !!id,
   });
 
   useSSEEvent("server:status", (eventData) => {
-    const payload = getServerStatusEventPayload(eventData);
-    if (payload && payload.serverId === id) {
-      void queryClient.invalidateQueries({ queryKey: ["servers", id] });
+    if (eventData.serverId === id) {
+      void queryClient.invalidateQueries({ queryKey: serverKeys.detail(id!) });
     }
   });
 
@@ -293,14 +293,15 @@ export function useServerTools(serverId: string | undefined, profileId?: string)
   const queryClient = useQueryClient();
 
   const { data: tools = [] } = useQuery<ToolDetail[]>({
-    queryKey: ["servers", serverId, "tools", profileId],
+    queryKey: serverKeys.tools(serverId!, profileId),
     queryFn: ({ signal }) =>
       api<ToolDetail[]>(routes.servers.tools(serverId!, profileId), { signal }),
     enabled: !!serverId,
   });
 
   const refresh = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ["servers", serverId, "tools"] });
+    if (!serverId) return;
+    void queryClient.invalidateQueries({ queryKey: serverKeys.toolsRoot(serverId) });
   }, [queryClient, serverId]);
 
   return { tools, refresh };

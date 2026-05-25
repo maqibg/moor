@@ -118,7 +118,7 @@ export function getDb(): DatabaseSync {
 }
 
 export function runMigrations() {
-  const db = getDb();
+  const db = getDatabase();
   db.exec(`
     CREATE TABLE IF NOT EXISTS profiles (
       id TEXT PRIMARY KEY,
@@ -190,43 +190,48 @@ export function runMigrations() {
     );
   `);
 
-  ensureColumn("tool_discoveries", "exposed_name", "TEXT");
-  ensureColumn("mcp_servers", "headers", "TEXT");
-  ensureColumn("mcp_servers", "auto_start", "INTEGER NOT NULL DEFAULT 0");
-  ensureColumn("mcp_servers", "sort_order", "INTEGER NOT NULL DEFAULT 0");
-  backfillServerSortOrder();
+  ensureColumn(db, "tool_discoveries", "exposed_name", "TEXT");
+  ensureColumn(db, "mcp_servers", "headers", "TEXT");
+  ensureColumn(db, "mcp_servers", "auto_start", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "mcp_servers", "sort_order", "INTEGER NOT NULL DEFAULT 0");
+  backfillServerSortOrder(db);
 }
 
-function ensureColumn(table: string, column: string, definition: string) {
-  const exists = queryAll(`PRAGMA table_info(${table})`).some((row) => row.name === column);
-  if (!exists) run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+function ensureColumn(db: Database, table: string, column: string, definition: string) {
+  const exists = db.queryAll(`PRAGMA table_info(${table})`).some((row) => row.name === column);
+  if (!exists) db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 
-function backfillServerSortOrder() {
-  const rows = queryAll("SELECT id, sort_order FROM mcp_servers ORDER BY created_at DESC, id ASC");
+function backfillServerSortOrder(db: Database) {
+  const rows = db.queryAll(
+    "SELECT id, sort_order FROM mcp_servers ORDER BY created_at DESC, id ASC",
+  );
   if (rows.length <= 1) return;
 
   const sortOrders = rows.map((row) => Number(row.sort_order ?? 0));
   const needsBackfill = new Set(sortOrders).size === 1;
   if (!needsBackfill) return;
 
-  transaction(() => {
+  db.transaction(() => {
     rows.forEach((row, index) => {
-      run("UPDATE mcp_servers SET sort_order = ? WHERE id = ?", [index, row.id]);
+      db.run("UPDATE mcp_servers SET sort_order = ? WHERE id = ?", [index, row.id]);
     });
   });
 }
 
+/** @internal Direct DatabaseSync access — prefer getDatabase() adapter */
 export function run(sql: string, params: unknown[] = []) {
   getDb()
     .prepare(sql)
     .run(...normalizeParams(params));
 }
 
+/** @internal Direct DatabaseSync access — prefer getDatabase() adapter */
 export function exec(sql: string) {
   getDb().exec(sql);
 }
 
+/** @internal Direct DatabaseSync access — prefer getDatabase() adapter */
 export function transaction<T>(callback: () => T): T {
   exec("BEGIN IMMEDIATE");
   try {
@@ -239,12 +244,14 @@ export function transaction<T>(callback: () => T): T {
   }
 }
 
+/** @internal Direct DatabaseSync access — prefer getDatabase() adapter */
 export function queryAll(sql: string, params: unknown[] = []): Record<string, unknown>[] {
   return getDb()
     .prepare(sql)
     .all(...normalizeParams(params)) as Record<string, unknown>[];
 }
 
+/** @internal Direct DatabaseSync access — prefer getDatabase() adapter */
 export function queryOne(sql: string, params: unknown[] = []): Record<string, unknown> | null {
   const row = getDb()
     .prepare(sql)

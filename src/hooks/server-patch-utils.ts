@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { isRecord } from "@/lib/utils";
+import { serverKeys } from "@/lib/query-keys";
 import type { Server, ServerAction, ServerStatus } from "@moor/types";
 
 export { ServerAction, ServerStatus };
@@ -16,37 +16,15 @@ export interface ServerStatusEventPayload {
   errorMessage?: string | null;
 }
 
-const serverStatuses = ["stopped", "starting", "running", "error"] satisfies ServerStatus[];
-
-function isServerStatus(value: unknown): value is ServerStatus {
-  return typeof value === "string" && serverStatuses.includes(value as ServerStatus);
-}
-
 export async function syncUpdatedServerCaches(
   queryClient: QueryClient,
   updated: Server,
   id: string,
 ): Promise<void> {
-  queryClient.setQueryData<Server[]>(["servers"], (prev) =>
+  queryClient.setQueryData<Server[]>(serverKeys.list(), (prev) =>
     prev?.map((server) => (server.id === id ? { ...server, ...updated } : server)),
   );
-  await queryClient.invalidateQueries({ queryKey: ["servers", id] });
-}
-
-export function getServerStatusEventPayload(eventData: unknown): ServerStatusEventPayload | null {
-  if (!isRecord(eventData)) return null;
-
-  const payload = isRecord(eventData.data) ? eventData.data : eventData;
-  const serverId = payload.serverId;
-  const status = payload.status;
-
-  if (typeof serverId !== "string" || !isServerStatus(status)) return null;
-
-  return {
-    serverId,
-    status,
-    errorMessage: typeof payload.errorMessage === "string" ? payload.errorMessage : null,
-  };
+  await queryClient.invalidateQueries({ queryKey: serverKeys.detail(id) });
 }
 
 export function applyServerAction<TServer extends ServerStateItem>(

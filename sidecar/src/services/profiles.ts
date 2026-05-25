@@ -1,6 +1,6 @@
 import { getProfileRepository, type ProfileServerRow } from "../db/profile-repository.js";
 import { eventBus } from "./event-bus.js";
-import type { Profile } from "@moor/types";
+import type { Profile, ProfileDetail } from "@moor/types";
 
 export interface ActiveProfileServer {
   serverId: string;
@@ -9,10 +9,34 @@ export interface ActiveProfileServer {
 }
 
 class ProfileService {
+  list(): Profile[] {
+    return getProfileRepository().findAll();
+  }
+
+  create(name: string): Profile {
+    return getProfileRepository().create(name);
+  }
+
+  getById(id: string): ProfileDetail | null {
+    const repo = getProfileRepository();
+    const profile = repo.findById(id);
+    if (!profile) return null;
+    const servers = repo.findProfileServers(id);
+    return { ...profile, servers };
+  }
+
+  update(id: string, name?: string): Profile | null {
+    return getProfileRepository().update(id, { name });
+  }
+
+  remove(id: string): { success: true } | { error: "not_found" | "active" } {
+    return getProfileRepository().remove(id);
+  }
+
   activate(id: string): Profile | null {
     const result = getProfileRepository().activate(id);
     if (result) {
-      eventBus.emit("profile:activated", { type: "profile:activated", data: { profileId: id } });
+      eventBus.emit("profile:activated", { profileId: id });
     }
     return result;
   }

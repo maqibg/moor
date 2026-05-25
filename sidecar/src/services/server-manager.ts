@@ -2,13 +2,13 @@ import { getServerRepository } from "../db/server-repository.js";
 import { getToolDiscoveryRepository } from "../db/tool-discovery-repository.js";
 import { toolCatalogService } from "./tool-catalog-service.js";
 import { SessionManager } from "./session-manager.js";
-import type { StoredServerConfig, ServerSession, SessionFactory } from "./session-manager.js";
+import type { ServerSession, SessionFactory } from "./session-manager.js";
 import type { Server, ToolCatalogEntry } from "@moor/types";
 import { eventBus } from "./event-bus.js";
 import { profileService } from "./profiles.js";
 import { getDatabase } from "../db/index.js";
 
-export type { StoredServerConfig, ServerSession, SessionFactory };
+export type { ServerSession, SessionFactory };
 
 export interface ServerConfig {
   name: string;
@@ -112,10 +112,6 @@ export class ServerRuntime {
     return profileService.getActiveProfileId();
   }
 
-  listServers(): ManagedServer[] {
-    return Array.from(this.servers.values());
-  }
-
   registerServer(id: string): void {
     const row = getServerRepository().findById(id);
     if (!row) return;
@@ -130,6 +126,43 @@ export class ServerRuntime {
 
   unregisterServer(id: string): void {
     this.servers.delete(id);
+  }
+
+  listServers(): Server[] {
+    return getServerRepository().findAll();
+  }
+
+  getServerDetail(id: string): (Server & { runtime?: ManagedServer }) | null {
+    const row = getServerRepository().findById(id);
+    if (!row) return null;
+    const runtime = this.getServer(id);
+    return runtime ? { ...row, runtime } : row;
+  }
+
+  updateServer(id: string, body: Record<string, unknown>): Server | null {
+    const repo = getServerRepository();
+    const server = repo.findById(id);
+    if (!server) return null;
+    repo.update(id, body);
+    const updated = repo.findById(id)!;
+    const runtime = this.getServer(id);
+    if (runtime) {
+      if (body.name) runtime.name = updated.name;
+      if ("autoStart" in body) runtime.autoStart = updated.autoStart;
+    }
+    return updated;
+  }
+
+  async removeServer(id: string): Promise<boolean> {
+    const runtime = this.getServer(id);
+    if (runtime?.status === "running") {
+      await this.stopServer(id);
+    }
+    const existing = getServerRepository().findById(id);
+    if (!existing) return false;
+    getServerRepository().remove(id);
+    this.unregisterServer(id);
+    return true;
   }
 
   async startServer(id: string): Promise<void> {
@@ -151,8 +184,9 @@ export class ServerRuntime {
   private async startServerSession(id: string): Promise<void> {
     this.setServerStatus(id, "starting");
     try {
-      const config = this.getStoredServerConfig(id);
-      const session = await this.sessionManager.createSession(id, config);
+      const server = getServerRepository().findById(id);
+      if (!server) throw new Error(`Server ${id} not found`);
+      const session = await this.sessionManager.createSession(id, server);
 
       const toolsResult = await session.client.listTools();
       this.cacheTools(
@@ -243,7 +277,7 @@ export class ServerRuntime {
     tools: Array<{ name: string; description?: string; inputSchema?: unknown }>,
   ) {
     getToolDiscoveryRepository().replaceToolsForServer(serverId, tools);
-    eventBus.emit("server:tools", { type: "server:tools", data: { serverId, tools } });
+    eventBus.emit("server:tools", { serverId });
   }
 
   getDiscoveredTools(serverId: string) {
@@ -262,26 +296,10 @@ export class ServerRuntime {
     server.status = status;
     getServerRepository().updateStatus(id, status, errorMessage ?? null);
     eventBus.emit("server:status", {
-      type: "server:status",
-      data: { serverId: id, status, errorMessage },
+      serverId: id,
+      status,
+      errorMessage,
     });
-  }
-
-  private getStoredServerConfig(id: string): StoredServerConfig {
-    const row = getServerRepository().findById(id);
-    if (!row) throw new Error(`Server ${id} not found`);
-    return {
-      id: row.id,
-      name: row.name,
-      connection_type: row.connectionType,
-      command: row.command ?? null,
-      args: row.args ?? null,
-      url: row.url ?? null,
-      env: row.env ?? null,
-      headers: row.headers ?? null,
-      working_dir: row.workingDir ?? null,
-      auto_start: row.autoStart,
-    };
   }
 }
 

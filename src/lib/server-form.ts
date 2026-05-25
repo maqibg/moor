@@ -1,3 +1,5 @@
+import type { ConnectionType, ServerDetail } from "@moor/types";
+
 export type KeyValueEntries = Array<[string, string]>;
 
 function entriesToRecord(
@@ -97,4 +99,88 @@ export function findDuplicateHeaderKeys(entries: KeyValueEntries): Set<number> {
   });
 
   return duplicateIndexes;
+}
+
+export interface EditForm {
+  name: string;
+  command: string;
+  url: string;
+  args: string;
+  env: KeyValueEntries;
+  headers: KeyValueEntries;
+  workingDir: string;
+}
+
+export function serverToForm(server: ServerDetail): EditForm {
+  return {
+    name: server.name ?? "",
+    command: server.command ?? "",
+    url: server.url ?? "",
+    args: server.args?.join("\n") ?? "",
+    env: server.env ? Object.entries(server.env) : [],
+    headers: server.headers ? Object.entries(server.headers) : [],
+    workingDir: server.workingDir ?? "",
+  };
+}
+
+export function validateEditForm(form: EditForm, connectionType: ConnectionType): string | null {
+  if (!form.name.trim()) return "Name is required.";
+  if (connectionType === "stdio" && !form.command.trim()) return "Command is required.";
+  if (connectionType === "http" && !form.url.trim()) return "URL is required.";
+  if (findDuplicateKeys(form.env).size > 0) return "Environment variable keys must be unique.";
+  if (connectionType === "http" && findDuplicateHeaderKeys(form.headers).size > 0) {
+    return "HTTP header keys must be unique.";
+  }
+  return null;
+}
+
+export function formToUpdates(
+  form: EditForm,
+  connectionType: ConnectionType,
+): Record<string, unknown> {
+  const updates: Record<string, unknown> = { name: form.name.trim() };
+  const env = entriesToRecordOrNull(form.env);
+
+  if (connectionType === "stdio") {
+    updates.command = form.command.trim();
+    updates.args = argsToArrayOrNull(form.args);
+    updates.env = env;
+    updates.workingDir = form.workingDir.trim() || null;
+    return updates;
+  }
+
+  updates.url = form.url.trim();
+  updates.headers = headerEntriesToRecordOrNull(form.headers);
+  updates.env = env;
+  return updates;
+}
+
+function stableEntries(
+  entries: KeyValueEntries,
+  normalizeKey: (key: string) => string = (key) => key.trim(),
+): KeyValueEntries {
+  return entries
+    .map(([key, value]) => [normalizeKey(key), value] as [string, string])
+    .filter(([key]) => key)
+    .sort(([a], [b]) => a.localeCompare(b));
+}
+
+function stableArgs(args: string): string[] {
+  return args
+    .split(/\r?\n/)
+    .map((arg) => arg.trim())
+    .filter(Boolean);
+}
+
+export function hasChanges(form: EditForm, baseline: EditForm): boolean {
+  return (
+    form.name.trim() !== baseline.name.trim() ||
+    form.command.trim() !== baseline.command.trim() ||
+    form.url.trim() !== baseline.url.trim() ||
+    form.workingDir.trim() !== baseline.workingDir.trim() ||
+    JSON.stringify(stableArgs(form.args)) !== JSON.stringify(stableArgs(baseline.args)) ||
+    JSON.stringify(stableEntries(form.env)) !== JSON.stringify(stableEntries(baseline.env)) ||
+    JSON.stringify(stableEntries(form.headers, (key) => key.trim().toLowerCase())) !==
+      JSON.stringify(stableEntries(baseline.headers, (key) => key.trim().toLowerCase()))
+  );
 }

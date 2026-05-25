@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { hasChanges, ServerEditFields, ToolCategoryBadge, type EditForm } from "./ServerDetail";
+import { hasChanges, type EditForm } from "@/lib/server-form";
+import { ServerEditFields } from "./ServerDetail";
+import { ToolCategoryBadge } from "@/components/shared/ToolCategoryBadge";
 
 const baseForm: EditForm = {
   name: "Create Tools",
