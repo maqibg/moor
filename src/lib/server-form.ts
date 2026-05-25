@@ -1,4 +1,4 @@
-import type { ConnectionType, ServerDetail } from "@moor/types";
+import type { ConnectionType, ServerDetail, ServerUpdateInput } from "@moor/types";
 
 export type KeyValueEntries = Array<[string, string]>;
 
@@ -134,11 +134,8 @@ export function validateEditForm(form: EditForm, connectionType: ConnectionType)
   return null;
 }
 
-export function formToUpdates(
-  form: EditForm,
-  connectionType: ConnectionType,
-): Record<string, unknown> {
-  const updates: Record<string, unknown> = { name: form.name.trim() };
+export function formToUpdates(form: EditForm, connectionType: ConnectionType): ServerUpdateInput {
+  const updates: ServerUpdateInput = { name: form.name.trim() };
   const env = entriesToRecordOrNull(form.env);
 
   if (connectionType === "stdio") {

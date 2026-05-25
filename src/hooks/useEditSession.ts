@@ -9,13 +9,13 @@ import {
   hasChanges,
   type EditForm,
 } from "@/lib/server-form";
-import type { ServerDetail } from "@moor/types";
+import type { ServerDetail, ServerUpdateInput } from "@moor/types";
 import { toast } from "sonner";
 
 interface EditSessionOptions {
   server: ServerDetail | null | undefined;
   serverId: string | undefined;
-  updateServer: (args: { id: string; updates: Record<string, unknown> }) => Promise<unknown>;
+  updateServer: (args: { id: string; updates: ServerUpdateInput }) => Promise<unknown>;
 }
 
 export function useEditSession({ server, serverId, updateServer }: EditSessionOptions) {

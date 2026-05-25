@@ -3,6 +3,7 @@ import { getPublicServerStartErrorMessage, serverManager } from "../services/ser
 import { getServerRepository } from "../db/server-repository.js";
 import { createServerSchema, serverOrderSchema, updateServerSchemaFor } from "./schemas.js";
 import { apiError, validate } from "./validate.js";
+import type { ServerUpdateInput } from "@moor/types";
 
 const servers = new Hono();
 
@@ -54,7 +55,7 @@ servers.put("/:id", async (c) => {
   if (!server) {
     return c.json(apiError("NOT_FOUND", "Server not found"), 404);
   }
-  const body = validate(updateServerSchemaFor(server.connectionType), raw, c);
+  const body = validate<ServerUpdateInput>(updateServerSchemaFor(server.connectionType), raw, c);
   if (body instanceof Response) return body;
   const updated = serverManager.updateServer(id, body);
   return c.json(updated);

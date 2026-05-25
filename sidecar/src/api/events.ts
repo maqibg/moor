@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { eventBus } from "../services/event-bus.js";
+import type { MoorEventData, MoorEventType } from "@moor/types";
 
 const events = new Hono();
 
@@ -9,16 +10,20 @@ events.get("/", (c) => {
     start(controller) {
       const encoder = new TextEncoder();
 
-      const send = (event: string, data: unknown) => {
+      const send = <T extends MoorEventType>(event: T, data: MoorEventData<T>) => {
         controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
       };
 
-      const unsubStatus = eventBus.on("server:status", send);
-      const unsubTools = eventBus.on("server:tools", send);
-      const unsubProfile = eventBus.on("profile:activated", send);
-      const unsubSettings = eventBus.on("settings:changed", send);
+      const unsubStatus = eventBus.on("server:status", (event, data) => send(event, data));
+      const unsubTools = eventBus.on("server:tools", (event, data) => send(event, data));
+      const unsubProfile = eventBus.on("profile:activated", (event, data) => send(event, data));
+      const unsubSettings = eventBus.on("settings:changed", (event, data) => send(event, data));
 
-      send("connected", { timestamp: new Date().toISOString() });
+      controller.enqueue(
+        encoder.encode(
+          `event: connected\ndata: ${JSON.stringify({ timestamp: new Date().toISOString() })}\n\n`,
+        ),
+      );
 
       const heartbeat = setInterval(() => {
         controller.enqueue(encoder.encode(`:heartbeat\n\n`));

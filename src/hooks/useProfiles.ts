@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, apiPost, apiPut, apiDelete } from "@/lib/api/client";
 import { routes } from "@/lib/api-routes";
-import { serverKeys, profileKeys } from "@/lib/query-keys";
+import { serverKeys, profileKeys, logKeys } from "@/lib/query-keys";
 import { useSSEEvent } from "@/contexts/SSEContext";
 import type { Profile, ProfileDetail } from "@moor/types";
 
@@ -12,7 +12,7 @@ export function useProfiles() {
   useSSEEvent("profile:activated", () => {
     void queryClient.invalidateQueries({ queryKey: profileKeys.list() });
     void queryClient.invalidateQueries({ queryKey: serverKeys.list() });
-    void queryClient.invalidateQueries({ queryKey: ["logs"] });
+    void queryClient.invalidateQueries({ queryKey: logKeys.all() });
   });
 
   const {

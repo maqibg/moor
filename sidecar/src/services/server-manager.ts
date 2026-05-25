@@ -3,7 +3,7 @@ import { getToolDiscoveryRepository } from "../db/tool-discovery-repository.js";
 import { toolCatalogService } from "./tool-catalog-service.js";
 import { SessionManager } from "./session-manager.js";
 import type { ServerSession, SessionFactory } from "./session-manager.js";
-import type { Server, ToolCatalogEntry } from "@moor/types";
+import type { Server, ServerUpdateInput, ToolCatalogEntry } from "@moor/types";
 import { eventBus } from "./event-bus.js";
 import { profileService } from "./profiles.js";
 import { getDatabase } from "../db/index.js";
@@ -139,7 +139,7 @@ export class ServerRuntime {
     return runtime ? { ...row, runtime } : row;
   }
 
-  updateServer(id: string, body: Record<string, unknown>): Server | null {
+  updateServer(id: string, body: ServerUpdateInput): Server | null {
     const repo = getServerRepository();
     const server = repo.findById(id);
     if (!server) return null;

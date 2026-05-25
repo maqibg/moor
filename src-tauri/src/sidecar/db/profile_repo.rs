@@ -239,6 +239,7 @@ impl<'a> ProfileRepository<'a> {
         )
     }
 
+    #[cfg(test)]
     pub fn assign_to_active_profile(&self, server_ids: &[String]) -> Result<(), String> {
         let active =
             self.db

@@ -1,6 +1,6 @@
 use crate::sidecar::http::{error_from_code, internal_error, ApiErrorResponse, AppState};
 use crate::sidecar::services::server_service::{
-    CreateServerInput, ServerService, ServerServiceError,
+    CreateServerInput, ServerService, ServerServiceError, UpdateServerInput,
 };
 use axum::{
     extract::{Path, Query, State},
@@ -64,9 +64,6 @@ async fn create(
         .await
         .map_err(internal_error)?;
 
-    ServerService::assign_to_active_profile(&state.db, std::slice::from_ref(&server.id))
-        .map_err(internal_error)?;
-
     if server.auto_start {
         let sm = state.server_manager.clone();
         let server_id = server.id.clone();
@@ -120,7 +117,7 @@ async fn get_one(
 async fn update(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    axum::Json(body): axum::Json<std::collections::HashMap<String, serde_json::Value>>,
+    axum::Json(body): axum::Json<UpdateServerInput>,
 ) -> Result<Json<Value>, ApiErrorResponse> {
     let server = ServerService::update_server(&state.db, &state.server_manager, &id, &body)
         .await
@@ -141,6 +138,7 @@ async fn remove(
 fn server_service_error(error: ServerServiceError) -> ApiErrorResponse {
     match error {
         ServerServiceError::NotFound(message) => error_from_code("NOT_FOUND", message),
+        ServerServiceError::Validation(message) => error_from_code("VALIDATION_ERROR", message),
         ServerServiceError::InvalidOrder(message) => error_from_code("ORDER_INVALID", message),
         ServerServiceError::Internal(message) => internal_error(message),
     }
@@ -241,6 +239,57 @@ mod tests {
                 &now,
             )
             .expect("failed to insert server");
+    }
+
+    fn fail_profile_server_inserts(db: &Database) {
+        db.exec(
+            "CREATE TRIGGER fail_profile_server_insert
+             BEFORE INSERT ON profile_servers
+             BEGIN
+               SELECT RAISE(ABORT, 'profile insert failed');
+             END;",
+        )
+        .expect("failed to create failing profile trigger");
+    }
+
+    #[tokio::test]
+    async fn create_rolls_back_server_when_profile_assignment_fails() {
+        let data_dir = temp_data_dir("create-profile-failure");
+        let state = test_state(data_dir.clone());
+        ProfileRepository::new(&state.db)
+            .seed_default()
+            .expect("failed to seed profile");
+        fail_profile_server_inserts(&state.db);
+
+        let result = create(
+            State(state.clone()),
+            axum::Json(CreateServerBody {
+                name: "Broken".to_string(),
+                connection_type: "stdio".to_string(),
+                command: Some("node".to_string()),
+                args: None,
+                url: None,
+                env: None,
+                headers: None,
+                working_dir: None,
+                auto_start: None,
+            }),
+        )
+        .await;
+
+        assert!(result.is_err());
+        let ids = state
+            .db
+            .query_all("SELECT id FROM mcp_servers", &[], |row| {
+                row.get::<_, String>(0)
+            })
+            .expect("failed to query servers");
+        for id in &ids {
+            assert!(state.server_manager.get_server(id).await.is_none());
+        }
+        assert!(ids.is_empty());
+
+        let _ = std::fs::remove_dir_all(data_dir);
     }
 
     #[tokio::test]

@@ -5,6 +5,7 @@ export type {
   ServerDetail,
   ServerRuntime,
   ServerStatus,
+  ServerUpdateInput,
 } from "./server.js";
 export type {
   ImportDiagnostic,

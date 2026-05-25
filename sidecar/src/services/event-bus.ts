@@ -8,7 +8,7 @@ type EventHandler<T extends MoorEventType = MoorEventType> = (
 type AnyHandler = EventHandler<MoorEventType>;
 
 class EventBus {
-  private handlers: Map<string, Set<AnyHandler>> = new Map();
+  private handlers: Map<MoorEventType, Set<AnyHandler>> = new Map();
 
   on<T extends MoorEventType>(event: T, handler: EventHandler<T>): () => void {
     if (!this.handlers.has(event)) {

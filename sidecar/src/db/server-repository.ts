@@ -1,6 +1,6 @@
 import type { Database } from "./index.js";
 import { getDatabase } from "./index.js";
-import type { Server, ServerStatus } from "@moor/types";
+import type { Server, ServerStatus, ServerUpdateInput } from "@moor/types";
 import { parseJsonValue } from "./serializers.js";
 
 const FIND_BY_IDS_BATCH_SIZE = 500;
@@ -118,8 +118,8 @@ export class ServerRepository {
     return Number(row.min_sort_order) - 1;
   }
 
-  update(id: string, fields: Record<string, unknown>): void {
-    const columnMap: Record<string, string> = {
+  update(id: string, fields: ServerUpdateInput): void {
+    const columnMap = {
       name: "name",
       command: "command",
       args: "args",
@@ -127,14 +127,15 @@ export class ServerRepository {
       env: "env",
       headers: "headers",
       workingDir: "working_dir",
-      working_dir: "working_dir",
       autoStart: "auto_start",
-    };
+    } satisfies Record<keyof ServerUpdateInput, string>;
 
     const setClauses: string[] = [];
     const values: unknown[] = [];
 
-    for (const [field, col] of Object.entries(columnMap)) {
+    for (const [field, col] of Object.entries(columnMap) as Array<
+      [keyof ServerUpdateInput, string]
+    >) {
       if (field in fields) {
         setClauses.push(`${col} = ?`);
         const val = fields[field];

@@ -1,12 +1,78 @@
 import { createContext, useContext, useEffect, useRef, useCallback, type ReactNode } from "react";
 import { getApiRuntime, buildApiUrl, buildApiHeaders, resetRuntime } from "@/lib/api/runtime";
-import type { MoorEvent, MoorEventData, MoorEventType } from "@moor/types";
+import type { MoorEvent, MoorEventData, MoorEventType, ServerStatus } from "@moor/types";
 
 interface SSEContextValue {
-  subscribe: (eventType: MoorEventType, handler: (data: unknown) => void) => () => void;
+  subscribe: <T extends MoorEventType>(
+    eventType: T,
+    handler: (data: MoorEventData<T>) => void,
+  ) => () => void;
 }
 
 const SSEContext = createContext<SSEContextValue | null>(null);
+
+type WarnFn = (message: string) => void;
+const serverStatuses = new Set<ServerStatus>(["stopped", "starting", "running", "error"]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function invalidEvent(event: string, warn: WarnFn): null {
+  warn(`Dropped invalid SSE payload for ${event}`);
+  return null;
+}
+
+function isServerStatusEvent(data: unknown): data is MoorEventData<"server:status"> {
+  return (
+    isRecord(data) &&
+    typeof data.serverId === "string" &&
+    typeof data.status === "string" &&
+    serverStatuses.has(data.status as ServerStatus) &&
+    (data.errorMessage === undefined ||
+      data.errorMessage === null ||
+      typeof data.errorMessage === "string")
+  );
+}
+
+function isServerToolsEvent(data: unknown): data is MoorEventData<"server:tools"> {
+  return isRecord(data) && typeof data.serverId === "string";
+}
+
+function isProfileActivatedEvent(data: unknown): data is MoorEventData<"profile:activated"> {
+  return isRecord(data) && typeof data.profileId === "string";
+}
+
+function isSettingsChangedEvent(data: unknown): data is MoorEventData<"settings:changed"> {
+  return (
+    isRecord(data) &&
+    typeof data.version === "number" &&
+    isRecord(data.general) &&
+    isRecord(data.appearance) &&
+    isRecord(data.advanced)
+  );
+}
+
+export function parseMoorSSEEvent(
+  event: string,
+  data: unknown,
+  warn: WarnFn = (message) => console.warn(message),
+): MoorEvent | null {
+  if (event === "connected") return null;
+
+  switch (event) {
+    case "server:status":
+      return isServerStatusEvent(data) ? { type: event, data } : invalidEvent(event, warn);
+    case "server:tools":
+      return isServerToolsEvent(data) ? { type: event, data } : invalidEvent(event, warn);
+    case "profile:activated":
+      return isProfileActivatedEvent(data) ? { type: event, data } : invalidEvent(event, warn);
+    case "settings:changed":
+      return isSettingsChangedEvent(data) ? { type: event, data } : invalidEvent(event, warn);
+    default:
+      return invalidEvent(event, warn);
+  }
+}
 
 export function SSEProvider({ children }: { children: ReactNode }) {
   const handlersRef = useRef(new Map<MoorEventType, Set<(data: unknown) => void>>());
@@ -51,8 +117,16 @@ export function SSEProvider({ children }: { children: ReactNode }) {
             const dataLine = chunk.split("\n").find((line) => line.startsWith("data: "));
             if (!event || !dataLine) continue;
 
-            const data = JSON.parse(dataLine.slice(6));
-            const typedEvent = { type: event, data } as MoorEvent;
+            let data: unknown;
+            try {
+              data = JSON.parse(dataLine.slice(6));
+            } catch {
+              console.warn(`Dropped invalid SSE JSON for ${event}`);
+              continue;
+            }
+
+            const typedEvent = parseMoorSSEEvent(event, data);
+            if (!typedEvent) continue;
 
             const handlers = handlersRef.current.get(typedEvent.type);
             if (handlers) {
@@ -74,15 +148,19 @@ export function SSEProvider({ children }: { children: ReactNode }) {
     return () => controller.abort();
   }, []);
 
-  const subscribe = useCallback((eventType: MoorEventType, handler: (data: unknown) => void) => {
-    if (!handlersRef.current.has(eventType)) {
-      handlersRef.current.set(eventType, new Set());
-    }
-    handlersRef.current.get(eventType)!.add(handler);
-    return () => {
-      handlersRef.current.get(eventType)?.delete(handler);
-    };
-  }, []);
+  const subscribe = useCallback(
+    <T extends MoorEventType>(eventType: T, handler: (data: MoorEventData<T>) => void) => {
+      if (!handlersRef.current.has(eventType)) {
+        handlersRef.current.set(eventType, new Set());
+      }
+      const unknownHandler = handler as (data: unknown) => void;
+      handlersRef.current.get(eventType)!.add(unknownHandler);
+      return () => {
+        handlersRef.current.get(eventType)?.delete(unknownHandler);
+      };
+    },
+    [],
+  );
 
   return <SSEContext.Provider value={{ subscribe }}>{children}</SSEContext.Provider>;
 }
@@ -98,6 +176,6 @@ export function useSSEEvent<T extends MoorEventType>(
   handlerRef.current = handler;
 
   useEffect(() => {
-    return ctx.subscribe(eventType, (data) => handlerRef.current(data as MoorEventData<T>));
+    return ctx.subscribe(eventType, (data) => handlerRef.current(data));
   }, [ctx, eventType]);
 }

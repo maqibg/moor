@@ -4,7 +4,7 @@ import { api, apiPost, apiPut, apiDelete } from "@/lib/api/client";
 import { routes } from "@/lib/api-routes";
 import { serverKeys } from "@/lib/query-keys";
 import { useSSEEvent } from "@/contexts/SSEContext";
-import type { Server, ServerDetail, ToolDetail } from "@moor/types";
+import type { Server, ServerDetail, ServerUpdateInput, ToolDetail } from "@moor/types";
 import { getErrorMessage } from "@/lib/utils";
 import {
   applyServerAction,
@@ -193,7 +193,7 @@ export function useServerActions(callbacks?: {
   });
 
   const updateServer = useMutation({
-    mutationFn: async ({ id, updates }: { id: string; updates: Record<string, unknown> }) => {
+    mutationFn: async ({ id, updates }: { id: string; updates: ServerUpdateInput }) => {
       return apiPut<Server>(routes.servers.update(id), updates);
     },
     onSuccess: (updated, { id }) => {

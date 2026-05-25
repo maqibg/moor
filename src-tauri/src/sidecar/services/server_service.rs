@@ -1,7 +1,7 @@
-use crate::sidecar::db::profile_repo::ProfileRepository;
-use crate::sidecar::db::server_repo::{Server, ServerRepository};
+use crate::sidecar::db::server_repo::{map_server, Server, ServerRepository};
 use crate::sidecar::db::Database;
 use crate::sidecar::services::server_manager::ServerManager;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -36,12 +36,143 @@ impl CreateServerInput {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum UpdateField<T> {
+    #[default]
+    Unset,
+    Set(Option<T>),
+}
+
+impl<T> UpdateField<T> {
+    fn is_set(&self) -> bool {
+        matches!(self, Self::Set(_))
+    }
+}
+
+impl<'de, T> Deserialize<'de> for UpdateField<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Option::<T>::deserialize(deserializer).map(Self::Set)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateServerInput {
+    pub name: Option<String>,
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: UpdateField<Vec<String>>,
+    pub url: Option<String>,
+    #[serde(default)]
+    pub env: UpdateField<HashMap<String, String>>,
+    #[serde(default)]
+    pub headers: UpdateField<HashMap<String, String>>,
+    #[serde(default)]
+    pub working_dir: UpdateField<String>,
+    pub auto_start: Option<bool>,
+}
+
+impl UpdateServerInput {
+    fn validate_for(&self, connection_type: &str) -> Result<(), String> {
+        if self.name.as_ref().is_some_and(|name| name.is_empty()) {
+            return Err("name is required".into());
+        }
+        match connection_type {
+            "stdio" => {
+                if self
+                    .command
+                    .as_ref()
+                    .is_some_and(|command| command.is_empty())
+                {
+                    return Err("command is required for stdio".into());
+                }
+                if self.url.is_some() || self.headers.is_set() {
+                    return Err("http-only fields cannot update a stdio server".into());
+                }
+            }
+            "http" => {
+                if self.url.as_ref().is_some_and(|url| url.is_empty()) {
+                    return Err("url is required for http".into());
+                }
+                if self.command.is_some() || self.args.is_set() || self.working_dir.is_set() {
+                    return Err("stdio-only fields cannot update an http server".into());
+                }
+            }
+            _ => return Err("connectionType must be 'stdio' or 'http'".into()),
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_server_input_rejects_invalid_json_shapes() {
+        assert!(
+            serde_json::from_value::<UpdateServerInput>(serde_json::json!({
+                "args": "--flag"
+            }))
+            .is_err()
+        );
+
+        assert!(
+            serde_json::from_value::<UpdateServerInput>(serde_json::json!({
+                "name": "Valid",
+                "extra": true
+            }))
+            .is_err()
+        );
+
+        let parsed = serde_json::from_value::<UpdateServerInput>(serde_json::json!({
+            "args": null,
+            "env": null,
+            "headers": null,
+            "workingDir": null,
+            "autoStart": true
+        }))
+        .expect("nullable update payload should deserialize");
+
+        assert_eq!(parsed.args, UpdateField::Set(None));
+        assert_eq!(parsed.env, UpdateField::Set(None));
+        assert_eq!(parsed.headers, UpdateField::Set(None));
+        assert_eq!(parsed.working_dir, UpdateField::Set(None));
+        assert_eq!(parsed.auto_start, Some(true));
+
+        let empty = serde_json::from_value::<UpdateServerInput>(serde_json::json!({}))
+            .expect("empty update payload should deserialize");
+        assert_eq!(empty.args, UpdateField::Unset);
+        assert_eq!(empty.env, UpdateField::Unset);
+        assert_eq!(empty.headers, UpdateField::Unset);
+        assert_eq!(empty.working_dir, UpdateField::Unset);
+    }
+}
+
 pub struct ServerService;
 
 pub enum ServerServiceError {
     NotFound(String),
+    Validation(String),
     InvalidOrder(String),
     Internal(String),
+}
+
+fn serialize_json<T: Serialize>(field: &str, value: &T) -> Result<String, String> {
+    serde_json::to_string(value).map_err(|e| format!("serialize {field}: {e}"))
+}
+
+fn serialize_nullable_json<T: Serialize>(
+    field: &str,
+    value: &Option<T>,
+) -> Result<Option<String>, String> {
+    value.as_ref().map(|v| serialize_json(field, v)).transpose()
 }
 
 impl ServerService {
@@ -50,48 +181,104 @@ impl ServerService {
         server_manager: &Arc<ServerManager>,
         input: &CreateServerInput,
     ) -> Result<Server, String> {
-        let server = {
-            let repo = ServerRepository::new(db);
-            let id = uuid::Uuid::new_v4().to_string();
-            let now = chrono::Utc::now().to_rfc3339();
-            let sort_order = repo.next_top_sort_order()?;
-
-            let args_json = input
-                .args
-                .as_ref()
-                .map(|a| serde_json::to_string(a).unwrap_or_else(|_| "[]".into()));
-            let env_json = input
-                .env
-                .as_ref()
-                .map(|e| serde_json::to_string(e).unwrap_or_else(|_| "{}".into()));
-            let headers_json = input
-                .headers
-                .as_ref()
-                .map(|h| serde_json::to_string(h).unwrap_or_default());
-
-            repo.insert(
-                &id,
-                &input.name,
-                &input.connection_type,
-                input.command.as_deref(),
-                args_json.as_deref(),
-                input.url.as_deref(),
-                env_json.as_deref(),
-                headers_json.as_deref(),
-                input.working_dir.as_deref(),
-                input.auto_start,
-                sort_order,
-                &now,
-                &now,
-            )?;
-
-            repo.find_by_id(&id)?
-                .ok_or_else(|| "Created server could not be reloaded".to_string())
-        }?;
-
-        server_manager.add_server(&server).await;
+        let servers = Self::insert_servers(db, server_manager, std::slice::from_ref(input)).await?;
+        let server = servers
+            .into_iter()
+            .next()
+            .ok_or_else(|| "Created server could not be reloaded".to_string())?;
 
         Ok(server)
+    }
+
+    pub async fn insert_servers(
+        db: &Database,
+        server_manager: &Arc<ServerManager>,
+        inputs: &[CreateServerInput],
+    ) -> Result<Vec<Server>, String> {
+        let servers = Self::insert_servers_transaction(db, inputs)?;
+
+        for server in &servers {
+            server_manager.add_server(server).await;
+        }
+
+        Ok(servers)
+    }
+
+    fn insert_servers_transaction(
+        db: &Database,
+        inputs: &[CreateServerInput],
+    ) -> Result<Vec<Server>, String> {
+        db.transaction(|conn| {
+            let mut servers = Vec::with_capacity(inputs.len());
+            let mut next_sort_order = match conn.query_row(
+                "SELECT MIN(sort_order) FROM mcp_servers",
+                [],
+                |row| row.get::<_, Option<i64>>(0),
+            ) {
+                Ok(Some(value)) => value - 1,
+                Ok(None) => 0,
+                Err(e) => return Err(e.to_string()),
+            };
+            let active_profile_id = match conn.query_row(
+                "SELECT id FROM profiles WHERE is_active = 1",
+                [],
+                |row| row.get::<_, String>(0),
+            ) {
+                Ok(id) => Some(id),
+                Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                Err(e) => return Err(e.to_string()),
+            };
+
+            for input in inputs {
+                input.validate()?;
+                let id = uuid::Uuid::new_v4().to_string();
+                let now = chrono::Utc::now().to_rfc3339();
+                let args_json = serialize_nullable_json("args", &input.args)?;
+                let env_json = serialize_nullable_json("env", &input.env)?;
+                let headers_json = serialize_nullable_json("headers", &input.headers)?;
+
+                conn.execute(
+                    "INSERT INTO mcp_servers (id, name, connection_type, command, args, url, env, headers, working_dir, auto_start, sort_order, status, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'stopped', ?12, ?13)",
+                    rusqlite::params![
+                        &id,
+                        &input.name,
+                        &input.connection_type,
+                        input.command.as_deref(),
+                        args_json.as_deref(),
+                        input.url.as_deref(),
+                        env_json.as_deref(),
+                        headers_json.as_deref(),
+                        input.working_dir.as_deref(),
+                        input.auto_start as i64,
+                        next_sort_order,
+                        &now,
+                        &now,
+                    ],
+                )
+                .map_err(|e| e.to_string())?;
+
+                if let Some(profile_id) = &active_profile_id {
+                    conn.execute(
+                        "INSERT OR IGNORE INTO profile_servers (profile_id, server_id, enabled, disabled_tools) VALUES (?1, ?2, 1, '[]')",
+                        rusqlite::params![profile_id, &id],
+                    )
+                    .map_err(|e| e.to_string())?;
+                }
+
+                let server = conn
+                    .query_row(
+                        "SELECT * FROM mcp_servers WHERE id = ?1",
+                        rusqlite::params![&id],
+                        map_server,
+                    )
+                    .map_err(|e| e.to_string())?;
+                servers.push(server);
+                next_sort_order -= 1;
+            }
+
+            Ok(servers)
+        })
     }
 
     pub fn list_servers(db: &Database) -> Result<Vec<Server>, String> {
@@ -106,13 +293,16 @@ impl ServerService {
         db: &Database,
         server_manager: &Arc<ServerManager>,
         id: &str,
-        body: &HashMap<String, serde_json::Value>,
+        body: &UpdateServerInput,
     ) -> Result<Server, ServerServiceError> {
         let (new_name, new_auto_start) = {
             let repo = ServerRepository::new(db);
-            repo.find_by_id(id)
+            let existing = repo
+                .find_by_id(id)
                 .map_err(ServerServiceError::Internal)?
                 .ok_or_else(|| ServerServiceError::NotFound("Server not found".into()))?;
+            body.validate_for(&existing.connection_type)
+                .map_err(ServerServiceError::Validation)?;
 
             let mut set_clauses = Vec::new();
             let mut param_idx = 1u32;
@@ -120,49 +310,52 @@ impl ServerService {
             let mut new_name: Option<String> = None;
             let mut new_auto_start: Option<bool> = None;
 
-            if let Some(v) = body.get("name") {
-                if let Some(s) = v.as_str() {
-                    set_clauses.push(format!("name = ?{param_idx}"));
-                    params.push(Box::new(s.to_string()));
-                    new_name = Some(s.to_string());
-                    param_idx += 1;
-                }
+            if let Some(value) = &body.name {
+                set_clauses.push(format!("name = ?{param_idx}"));
+                params.push(Box::new(value.clone()));
+                new_name = Some(value.clone());
+                param_idx += 1;
             }
-            if let Some(v) = body.get("command") {
+            if let Some(value) = &body.command {
                 set_clauses.push(format!("command = ?{param_idx}"));
-                params.push(Box::new(v.as_str().map(|s| s.to_string())));
+                params.push(Box::new(value.clone()));
                 param_idx += 1;
             }
-            if let Some(v) = body.get("args") {
+            if let UpdateField::Set(value) = &body.args {
                 set_clauses.push(format!("args = ?{param_idx}"));
-                params.push(Box::new(serde_json::to_string(v).unwrap_or_default()));
+                let serialized =
+                    serialize_nullable_json("args", value).map_err(ServerServiceError::Internal)?;
+                params.push(Box::new(serialized));
                 param_idx += 1;
             }
-            if let Some(v) = body.get("url") {
+            if let Some(value) = &body.url {
                 set_clauses.push(format!("url = ?{param_idx}"));
-                params.push(Box::new(v.as_str().map(|s| s.to_string())));
+                params.push(Box::new(value.clone()));
                 param_idx += 1;
             }
-            if let Some(v) = body.get("env") {
+            if let UpdateField::Set(value) = &body.env {
                 set_clauses.push(format!("env = ?{param_idx}"));
-                params.push(Box::new(serde_json::to_string(v).unwrap_or_default()));
+                let serialized =
+                    serialize_nullable_json("env", value).map_err(ServerServiceError::Internal)?;
+                params.push(Box::new(serialized));
                 param_idx += 1;
             }
-            if let Some(v) = body.get("headers") {
+            if let UpdateField::Set(value) = &body.headers {
                 set_clauses.push(format!("headers = ?{param_idx}"));
-                params.push(Box::new(serde_json::to_string(v).unwrap_or_default()));
+                let serialized = serialize_nullable_json("headers", value)
+                    .map_err(ServerServiceError::Internal)?;
+                params.push(Box::new(serialized));
                 param_idx += 1;
             }
-            if let Some(v) = body.get("workingDir") {
+            if let UpdateField::Set(value) = &body.working_dir {
                 set_clauses.push(format!("working_dir = ?{param_idx}"));
-                params.push(Box::new(v.as_str().map(|s| s.to_string())));
+                params.push(Box::new(value.clone()));
                 param_idx += 1;
             }
-            if let Some(v) = body.get("autoStart") {
-                let val = v.as_bool().unwrap_or(false);
+            if let Some(value) = body.auto_start {
                 set_clauses.push(format!("auto_start = ?{param_idx}"));
-                params.push(Box::new(val as i64));
-                new_auto_start = Some(val);
+                params.push(Box::new(value as i64));
+                new_auto_start = Some(value);
                 param_idx += 1;
             }
 
@@ -207,13 +400,6 @@ impl ServerService {
             ));
         }
         Ok(())
-    }
-
-    pub fn assign_to_active_profile(db: &Database, server_ids: &[String]) -> Result<(), String> {
-        if server_ids.is_empty() {
-            return Ok(());
-        }
-        ProfileRepository::new(db).assign_to_active_profile(server_ids)
     }
 
     pub fn find_all_names(db: &Database) -> HashSet<String> {

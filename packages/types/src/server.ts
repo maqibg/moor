@@ -31,3 +31,14 @@ export interface ServerRuntime {
 export interface ServerDetail extends Server {
   runtime: ServerRuntime;
 }
+
+export interface ServerUpdateInput {
+  name?: string;
+  command?: string;
+  args?: string[] | null;
+  url?: string;
+  env?: Record<string, string> | null;
+  headers?: Record<string, string> | null;
+  workingDir?: string | null;
+  autoStart?: boolean;
+}

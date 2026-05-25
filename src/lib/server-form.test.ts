@@ -6,9 +6,11 @@ import {
   entriesToRecordOrUndefined,
   findDuplicateHeaderKeys,
   findDuplicateKeys,
+  formToUpdates,
   headerEntriesToRecordOrNull,
   headerEntriesToRecordOrUndefined,
 } from "./server-form";
+import type { ServerUpdateInput } from "@moor/types";
 
 describe("server form utilities", () => {
   it("uses undefined for empty create fields and null for empty update fields", () => {
@@ -72,5 +74,46 @@ describe("server form utilities", () => {
         ]),
       ),
     ).toEqual([0, 1]);
+  });
+
+  it("returns shared typed update payloads", () => {
+    const stdioUpdates: ServerUpdateInput = formToUpdates(
+      {
+        name: " Local ",
+        command: " node ",
+        url: "",
+        args: " --stdio \n",
+        env: [["TOKEN", "secret"]],
+        headers: [],
+        workingDir: " /tmp/moor ",
+      },
+      "stdio",
+    );
+    expect(stdioUpdates).toEqual({
+      name: "Local",
+      command: "node",
+      args: ["--stdio"],
+      env: { TOKEN: "secret" },
+      workingDir: "/tmp/moor",
+    });
+
+    const httpUpdates: ServerUpdateInput = formToUpdates(
+      {
+        name: " Remote ",
+        command: "",
+        url: " https://example.com/mcp ",
+        args: "",
+        env: [],
+        headers: [[" Authorization ", "Bearer token"]],
+        workingDir: "",
+      },
+      "http",
+    );
+    expect(httpUpdates).toEqual({
+      name: "Remote",
+      url: "https://example.com/mcp",
+      headers: { authorization: "Bearer token" },
+      env: null,
+    });
   });
 });

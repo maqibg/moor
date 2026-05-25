@@ -122,6 +122,7 @@ impl<'a> ServerRepository<'a> {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[cfg(test)]
     pub fn insert(
         &self,
         id: &str,
@@ -143,15 +144,6 @@ impl<'a> ServerRepository<'a> {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'stopped', ?12, ?13)",
             &[&id, &name, &connection_type, &command, &args, &url, &env, &headers, &working_dir, &(auto_start as i64), &sort_order, &created_at, &updated_at],
         )
-    }
-
-    pub fn next_top_sort_order(&self) -> Result<i64, String> {
-        let result = self.db.query_one(
-            "SELECT MIN(sort_order) AS min_sort_order FROM mcp_servers",
-            &[],
-            |row| row.get::<_, Option<i64>>(0),
-        )?;
-        Ok(result.flatten().map_or(0, |v| v - 1))
     }
 
     pub fn update(

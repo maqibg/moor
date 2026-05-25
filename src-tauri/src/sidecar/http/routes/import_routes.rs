@@ -75,8 +75,7 @@ async fn execute(
         _ => scanner::scan_all_configs().servers,
     };
     let (candidates, skipped) = scanner::partition_import_candidates(&all_servers, &existing_names);
-    let mut imported = vec![];
-    let mut imported_ids = vec![];
+    let mut inputs = vec![];
 
     for server_config in &candidates {
         let input = CreateServerInput {
@@ -90,19 +89,16 @@ async fn execute(
             working_dir: server_config.working_dir.clone(),
             auto_start: false,
         };
-
-        let server = ServerService::insert_server(&state.db, &state.server_manager, &input)
-            .await
-            .map_err(internal_error)?;
-
-        imported.push(server.name);
-        imported_ids.push(server.id);
+        inputs.push(input);
     }
 
-    if !imported_ids.is_empty() {
-        ServerService::assign_to_active_profile(&state.db, &imported_ids)
-            .map_err(internal_error)?;
-    }
+    let imported_servers = ServerService::insert_servers(&state.db, &state.server_manager, &inputs)
+        .await
+        .map_err(internal_error)?;
+    let imported = imported_servers
+        .into_iter()
+        .map(|server| server.name)
+        .collect::<Vec<_>>();
 
     Ok(Json(json!({ "imported": imported, "skipped": skipped })))
 }
@@ -167,6 +163,7 @@ use crate::sidecar::config::clients;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sidecar::db::profile_repo::ProfileRepository;
     use crate::sidecar::db::Database;
     use crate::sidecar::services::event_bus::EventBus;
     use crate::sidecar::services::server_manager::ServerManager;
@@ -181,20 +178,78 @@ mod tests {
         std::env::temp_dir().join(format!("moor-import-{test_name}-{timestamp}"))
     }
 
-    #[tokio::test]
-    async fn snippets_use_runtime_port() {
-        let data_dir = temp_data_dir("snippets-port");
+    fn test_state(data_dir: std::path::PathBuf) -> Arc<AppState> {
         std::fs::create_dir_all(&data_dir).expect("failed to create temp data dir");
         let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
+        db.run_migrations().expect("failed to run migrations");
         let event_bus = Arc::new(EventBus::new(16));
-        let state = Arc::new(AppState {
+        Arc::new(AppState {
             db: db.clone(),
             api_token: "test-token".to_string(),
             version: "test".to_string(),
             port: 19444,
             event_bus: event_bus.clone(),
             server_manager: Arc::new(ServerManager::new(db, event_bus)),
-        });
+        })
+    }
+
+    fn fail_profile_server_inserts(db: &Database) {
+        db.exec(
+            "CREATE TRIGGER fail_profile_server_insert
+             BEFORE INSERT ON profile_servers
+             BEGIN
+               SELECT RAISE(ABORT, 'profile insert failed');
+             END;",
+        )
+        .expect("failed to create failing profile trigger");
+    }
+
+    #[tokio::test]
+    async fn execute_rolls_back_import_when_profile_assignment_fails() {
+        let data_dir = temp_data_dir("execute-profile-failure");
+        let state = test_state(data_dir.clone());
+        ProfileRepository::new(&state.db)
+            .seed_default()
+            .expect("failed to seed profile");
+        fail_profile_server_inserts(&state.db);
+
+        let result = execute(
+            State(state.clone()),
+            axum::Json(ExecuteBody {
+                servers: Some(vec![ScannedServer {
+                    name: "Imported".to_string(),
+                    connection_type: "stdio".to_string(),
+                    command: Some("node".to_string()),
+                    args: None,
+                    url: None,
+                    env: None,
+                    headers: None,
+                    working_dir: None,
+                    source: "test".to_string(),
+                }]),
+            }),
+        )
+        .await;
+
+        assert!(result.is_err());
+        let ids = state
+            .db
+            .query_all("SELECT id FROM mcp_servers", &[], |row| {
+                row.get::<_, String>(0)
+            })
+            .expect("failed to query servers");
+        for id in &ids {
+            assert!(state.server_manager.get_server(id).await.is_none());
+        }
+        assert!(ids.is_empty());
+
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn snippets_use_runtime_port() {
+        let data_dir = temp_data_dir("snippets-port");
+        let state = test_state(data_dir.clone());
 
         let Json(value) = snippets_handler(State(state))
             .await
