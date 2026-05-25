@@ -1,5 +1,11 @@
 # moor-sidecar
 
+## 0.5.5
+
+### Patch Changes
+
+- Add ServerUpdateInput type for standardized server updates, introduce ToolCategoryBadge component and useEditSession hook with typed SSE event handling, and add Linux build configuration for Tauri app.
+
 ## 0.5.4
 
 ### Patch Changes
