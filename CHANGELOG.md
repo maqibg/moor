@@ -1,5 +1,25 @@
 # moor-sidecar
 
+## 0.5.8
+
+### Patch Changes
+
+- Update repository links from varandrew/moor to maqibg/moor
+  - Update frontend Settings page GitHub link
+  - Update all README files (en, zh, ja, es)
+  - Configure CI to auto-publish releases instead of drafts
+- Fix Cargo.lock version sync in release workflow
+
+## 0.5.7
+
+### Patch Changes
+
+- Add Chinese language support with language switcher
+  - Add i18n infrastructure with react-i18next
+  - Translate all UI components to Chinese
+  - Add language toggle in Settings page
+  - Persist language preference in localStorage
+
 ## 0.5.6
 
 ### Patch Changes
