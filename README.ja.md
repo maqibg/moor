@@ -79,7 +79,7 @@ macOS（Apple Silicon / Intel）または Windows x64、Node.js >= 22、pnpm >= 
 ```bash
 git clone https://github.com/varandrew/moor.git
 cd moor
-vp install
+pnpm install
 ```
 
 ビルド手順については [開発](#development) セクションを参照してください。
@@ -242,7 +242,7 @@ WebView ◀──SSE──── /api/events
 ### 依存関係のインストール
 
 ```bash
-vp install
+pnpm install
 ```
 
 ### 開発モード
@@ -358,18 +358,18 @@ vp test
 
 ## 技術スタック
 
-| レイヤー          | 技術                                              |
-| ----------------- | ------------------------------------------------- |
-| フロントエンド    | React 19, Vite 6, TypeScript 5.7, Tailwind CSS v4 |
-| UI プリミティブ   | Radix UI                                          |
-| UI コンポーネント | shadcn/ui (New York style)                        |
-| デスクトップ      | Tauri 2 (Rust)                                    |
-| ゲートウェイ      | Rust, Axum, Tokio, rusqlite (インプロセス)        |
-| 開発 Sidecar      | Node.js, TypeScript, Hono, @hono/node-server      |
-| データベース      | SQLite (rusqlite / node:sqlite)                   |
-| MCP プロトコル    | @modelcontextprotocol/sdk (stdio + HTTP/SSE)      |
-| アイコン          | Lucide React                                      |
-| ツールチェーン    | Vite+ (vp CLI), Oxlint, Oxfmt, Vitest             |
+| レイヤー          | 技術                                                    |
+| ----------------- | ------------------------------------------------------- |
+| フロントエンド    | React 19, vite-plus, TypeScript 5.7, Tailwind CSS v4    |
+| UI プリミティブ   | Radix UI                                                |
+| UI コンポーネント | shadcn/ui (New York style)                              |
+| デスクトップ      | Tauri 2 (Rust)                                          |
+| ゲートウェイ      | Rust, Axum, Tokio, rusqlite (インプロセス)              |
+| 開発 Sidecar      | Node.js, TypeScript, Hono, @hono/node-server, @hono/mcp |
+| データベース      | SQLite (rusqlite / node:sqlite)                         |
+| MCP プロトコル    | @modelcontextprotocol/sdk (stdio + HTTP/SSE)            |
+| アイコン          | Lucide React                                            |
+| ツールチェーン    | vite-plus (vp CLI), Oxlint, Oxfmt, Vitest               |
 
 ## 謝辞
 

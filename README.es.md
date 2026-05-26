@@ -79,7 +79,7 @@ Requiere macOS (Apple Silicon / Intel) o Windows x64, Node.js >= 22, pnpm >= 10 
 ```bash
 git clone https://github.com/varandrew/moor.git
 cd moor
-vp install
+pnpm install
 ```
 
 Consulta [Desarrollo](#development) para las instrucciones de compilación.
@@ -242,7 +242,7 @@ WebView ◀──SSE──── /api/events
 ### Instalar dependencias
 
 ```bash
-vp install
+pnpm install
 ```
 
 ### Modo de desarrollo
@@ -358,18 +358,18 @@ vp test
 
 ## Stack tecnológico
 
-| Capa          | Tecnología                                        |
-| ------------- | ------------------------------------------------- |
-| Frontend      | React 19, Vite 6, TypeScript 5.7, Tailwind CSS v4 |
-| UI Primitives | Radix UI                                          |
-| UI Components | shadcn/ui (New York style)                        |
-| Desktop       | Tauri 2 (Rust)                                    |
-| Gateway       | Rust, Axum, Tokio, rusqlite (en proceso)          |
-| Dev Sidecar   | Node.js, TypeScript, Hono, @hono/node-server      |
-| Database      | SQLite (rusqlite / node:sqlite)                   |
-| MCP Protocol  | @modelcontextprotocol/sdk (stdio + HTTP/SSE)      |
-| Icons         | Lucide React                                      |
-| Tooling       | Vite+ (vp CLI), Oxlint, Oxfmt, Vitest             |
+| Capa          | Tecnología                                              |
+| ------------- | ------------------------------------------------------- |
+| Frontend      | React 19, vite-plus, TypeScript 5.7, Tailwind CSS v4    |
+| UI Primitives | Radix UI                                                |
+| UI Components | shadcn/ui (New York style)                              |
+| Desktop       | Tauri 2 (Rust)                                          |
+| Gateway       | Rust, Axum, Tokio, rusqlite (en proceso)                |
+| Dev Sidecar   | Node.js, TypeScript, Hono, @hono/node-server, @hono/mcp |
+| Database      | SQLite (rusqlite / node:sqlite)                         |
+| MCP Protocol  | @modelcontextprotocol/sdk (stdio + HTTP/SSE)            |
+| Icons         | Lucide React                                            |
+| Tooling       | vite-plus (vp CLI), Oxlint, Oxfmt, Vitest               |
 
 ## Agradecimientos
 

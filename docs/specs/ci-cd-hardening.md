@@ -82,6 +82,10 @@ matrix:
       target: "x86_64-apple-darwin"
     - platform: "windows-latest"
       target: "x86_64-pc-windows-msvc"
+    - platform: "ubuntu-22.04"
+      target: "x86_64-unknown-linux-gnu"
+    - platform: "ubuntu-22.04-arm"
+      target: "aarch64-unknown-linux-gnu"
 ```
 
 ### 3.3 Build Steps
@@ -119,13 +123,21 @@ setup-node → pnpm install → tauri-action
                                  └─ vp build (Vite)
                               └─ cargo build --target x86_64-pc-windows-msvc
                                  └─ bundles Windows installers with in-process Rust HTTP server
+
+Linux x86_64 / aarch64:
+setup-node → install system deps (webkit2gtk, etc.) → pnpm install → tauri-action
+                              └─ beforeBuildCommand: pnpm version:sync && pnpm build:frontend
+                                 ├─ tsc -b
+                                 └─ vp build (Vite)
+                              └─ cargo build --target {x86_64-unknown-linux-gnu | aarch64-unknown-linux-gnu}
+                                 └─ bundles .deb, .rpm, .AppImage with in-process Rust HTTP server
 ```
 
 ## 5. Version Management Architecture
 
 ### 5.1 Source of Truth
 
-`moor-sidecar` (`sidecar/package.json`) serves as the single source of truth for the version number. Reason: changeset can only discover pnpm workspace members, and the workspace only contains `sidecar`.
+`moor-sidecar` (`sidecar/package.json`) serves as the single source of truth for the version number. Reason: changeset discovers pnpm workspace members, and `sidecar` is the primary package that changeset bumps directly.
 
 ### 5.2 Version Sync Flow
 

@@ -77,7 +77,7 @@
 ```bash
 git clone https://github.com/varandrew/moor.git
 cd moor
-vp install
+pnpm install
 ```
 
 构建说明请参阅[开发](#开发)章节。
@@ -238,7 +238,7 @@ WebView ◀──SSE──── /api/events
 ### 安装依赖
 
 ```bash
-vp install
+pnpm install
 ```
 
 ### 开发模式
@@ -352,18 +352,18 @@ vp test
 
 ## 技术栈
 
-| 层级     | 技术                                              |
-| -------- | ------------------------------------------------- |
-| 前端     | React 19, Vite 6, TypeScript 5.7, Tailwind CSS v4 |
-| UI 基础  | Radix UI                                          |
-| UI 组件  | shadcn/ui (New York style)                        |
-| 桌面框架 | Tauri 2 (Rust)                                    |
-| 网关     | Rust, Axum, Tokio, rusqlite (进程内)              |
-| 开发侧车 | Node.js, TypeScript, Hono, @hono/node-server      |
-| 数据库   | SQLite (rusqlite / node:sqlite)                   |
-| MCP 协议 | @modelcontextprotocol/sdk (stdio + HTTP/SSE)      |
-| 图标     | Lucide React                                      |
-| 工具链   | Vite+ (vp CLI), Oxlint, Oxfmt, Vitest             |
+| 层级     | 技术                                                    |
+| -------- | ------------------------------------------------------- |
+| 前端     | React 19, vite-plus, TypeScript 5.7, Tailwind CSS v4    |
+| UI 基础  | Radix UI                                                |
+| UI 组件  | shadcn/ui (New York style)                              |
+| 桌面框架 | Tauri 2 (Rust)                                          |
+| 网关     | Rust, Axum, Tokio, rusqlite (进程内)                    |
+| 开发侧车 | Node.js, TypeScript, Hono, @hono/node-server, @hono/mcp |
+| 数据库   | SQLite (rusqlite / node:sqlite)                         |
+| MCP 协议 | @modelcontextprotocol/sdk (stdio + HTTP/SSE)            |
+| 图标     | Lucide React                                            |
+| 工具链   | vite-plus (vp CLI), Oxlint, Oxfmt, Vitest               |
 
 ## 鸣谢
 

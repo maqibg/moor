@@ -286,6 +286,13 @@ Based on Stitch project screens + interview decisions:
 - Log detail expand: full arguments + result
 - Statistics: tool usage frequency, error rate, avg duration
 
+### 6. Settings
+
+- General: auto-start on login, auto-start servers on launch, minimize to tray, show window on launch
+- Appearance: theme (System/Light/Dark)
+- Advanced: MCP request timeout, server start timeout, log retention, audit logging toggle, sidecar port, API token display
+- Reset to defaults with confirmation
+
 ## Non-Goals (Explicitly Excluded from MVP)
 
 - ❌ Real-time safety confirmation / tool interception (deferred)
@@ -298,7 +305,7 @@ Based on Stitch project screens + interview decisions:
 - ❌ Rate limiting / caching
 - ❌ Config file direct modification
 - ❌ Auto-update mechanism
-- ❌ Windows / Linux support (macOS only) — _Partially evolved: Windows x64 CI builds are now enabled, though macOS remains the primary target._
+- ❌ Windows / Linux support (macOS only) — _Evolved: Windows x64 and Linux (x86_64 + aarch64) CI builds are now enabled. macOS remains the primary target._
 
 ## Acceptance Criteria
 
