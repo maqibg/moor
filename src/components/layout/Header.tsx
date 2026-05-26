@@ -2,9 +2,11 @@ import { useProfiles } from "@/hooks/useProfiles";
 import { ChevronDown, Check } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/hooks/useI18n";
 
 export function Header() {
   const { profiles, activateProfile } = useProfiles();
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -21,7 +23,7 @@ export function Header() {
   return (
     <header className="h-14 border-b border-[var(--fg-08)] bg-surface-200/80 backdrop-blur-md flex items-center justify-between px-6 sticky top-0 z-40">
       <div className="flex items-center gap-2">
-        <span className="font-body text-sm text-[var(--fg-40)]">Active Profile</span>
+        <span className="font-body text-sm text-[var(--fg-40)]">{t("Active Profile")}</span>
         <div className="relative" ref={ref}>
           <button
             onClick={() => setOpen(!open)}
@@ -36,7 +38,7 @@ export function Header() {
               <span className="animate-ping-slow absolute inline-flex h-full w-full rounded-full bg-success-muted opacity-60" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-success-muted" />
             </span>
-            {activeProfile?.name || "None"}
+            {activeProfile?.name || t("None")}
             <ChevronDown
               className={cn(
                 "h-3.5 w-3.5 text-[var(--fg-35)] transition-transform duration-200",

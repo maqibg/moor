@@ -20,8 +20,10 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/hooks/useI18n";
 
 export function AuditLogs() {
+  const { t } = useI18n();
   const [toolFilter, setToolFilter] = useState("");
   const [expandedLog, setExpandedLog] = useState<string | null>(null);
   const { logs, refresh } = useLogs(toolFilter ? { tool_name: toolFilter } : undefined);
@@ -35,11 +37,11 @@ export function AuditLogs() {
   return (
     <div className="space-y-8 animate-fade-in-up">
       <PageHeader
-        title="Audit Logs"
-        subtitle="Tool call history and statistics"
+        title={t("Audit Logs")}
+        subtitle={t("Tool call history and statistics")}
         action={
           <Button variant="outline" onClick={handleRefresh}>
-            <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+            <RefreshCw className="h-4 w-4 mr-2" /> {t("Refresh")}
           </Button>
         }
       />
@@ -48,7 +50,7 @@ export function AuditLogs() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           icon={Activity}
-          label="Total Calls"
+          label={t("Total Calls")}
           value={stats.totalCalls.toString()}
           accent="bg-[var(--fg-06)] text-[var(--fg-50)] border-[var(--fg-10)]"
           delay={1}
@@ -56,7 +58,7 @@ export function AuditLogs() {
         />
         <StatCard
           icon={AlertTriangle}
-          label="Errors"
+          label={t("Errors")}
           value={stats.errorCalls.toString()}
           accent="bg-error-warm/10 text-error-warm border-error-warm/20"
           delay={2}
@@ -64,7 +66,7 @@ export function AuditLogs() {
         />
         <StatCard
           icon={Zap}
-          label="Error Rate"
+          label={t("Error Rate")}
           value={`${(stats.errorRate * 100).toFixed(1)}%`}
           accent={
             stats.errorRate > 0.1
@@ -76,7 +78,7 @@ export function AuditLogs() {
         />
         <StatCard
           icon={Clock}
-          label="Avg Duration"
+          label={t("Avg Duration")}
           value={stats.avgDurationMs ? `${Math.round(stats.avgDurationMs)}ms` : "—"}
           accent="bg-read/10 text-read border-read/15"
           delay={4}
@@ -89,7 +91,7 @@ export function AuditLogs() {
         <Card className="animate-fade-in-up stagger-5">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <BarChart3 className="h-4 w-4 text-[var(--fg-40)]" /> Top Tools
+              <BarChart3 className="h-4 w-4 text-[var(--fg-40)]" /> {t("Top Tools")}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -110,7 +112,7 @@ export function AuditLogs() {
           <div className="relative flex-1 max-w-xs">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--fg-30)]" />
             <Input
-              placeholder="Filter by tool name..."
+              placeholder={t("Filter by tool name...")}
               value={toolFilter}
               onChange={(e) => setToolFilter(e.target.value)}
               className="pl-9"
@@ -118,7 +120,7 @@ export function AuditLogs() {
           </div>
           {toolFilter && (
             <Button variant="ghost" size="sm" onClick={() => setToolFilter("")}>
-              Clear
+              {t("Clear")}
             </Button>
           )}
         </div>
@@ -129,19 +131,19 @@ export function AuditLogs() {
               <thead>
                 <tr className="border-b border-[var(--fg-08)]">
                   <th className="text-left font-headline text-[11px] text-[var(--fg-45)] uppercase tracking-wider px-4 py-2.5 font-medium">
-                    Time
+                    {t("Time")}
                   </th>
                   <th className="text-left font-headline text-[11px] text-[var(--fg-45)] uppercase tracking-wider px-4 py-2.5 font-medium">
-                    Tool
+                    {t("Tool")}
                   </th>
                   <th className="text-left font-headline text-[11px] text-[var(--fg-45)] uppercase tracking-wider px-4 py-2.5 font-medium">
-                    Status
+                    {t("Status")}
                   </th>
                   <th className="text-left font-headline text-[11px] text-[var(--fg-45)] uppercase tracking-wider px-4 py-2.5 font-medium">
-                    Duration
+                    {t("Duration")}
                   </th>
                   <th className="text-left font-headline text-[11px] text-[var(--fg-45)] uppercase tracking-wider px-4 py-2.5 font-medium">
-                    Agent
+                    {t("Agent")}
                   </th>
                   <th className="w-10 px-2" />
                 </tr>
@@ -150,7 +152,7 @@ export function AuditLogs() {
                 {logs.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="p-0">
-                      <EmptyState icon={Clock} message="No log entries" />
+                      <EmptyState icon={Clock} message={t("No log entries")} />
                     </td>
                   </tr>
                 ) : (
@@ -168,7 +170,7 @@ export function AuditLogs() {
                         </td>
                         <td className="px-4 py-2.5">
                           <Badge variant={log.error ? "error" : "success"} className="text-[10px]">
-                            {log.error ? "Error" : "Success"}
+                            {log.error ? t("Error") : t("Success")}
                           </Badge>
                         </td>
                         <td className="px-4 py-2.5 font-mono text-[11px] text-[var(--fg-45)]">
@@ -192,7 +194,7 @@ export function AuditLogs() {
                               {log.arguments != null && (
                                 <div>
                                   <p className="font-headline text-[11px] text-[var(--fg-50)] mb-1.5 uppercase tracking-wider">
-                                    Arguments
+                                    {t("Arguments")}
                                   </p>
                                   <pre className="font-mono text-[11px] bg-surface-100 rounded-xl p-3 text-[var(--fg-70)] overflow-auto max-h-40 border border-[var(--fg-06)]">
                                     {JSON.stringify(log.arguments, null, 2)}
@@ -202,7 +204,7 @@ export function AuditLogs() {
                               {(log.result || log.error) && (
                                 <div>
                                   <p className="font-headline text-[11px] text-[var(--fg-50)] mb-1.5 uppercase tracking-wider">
-                                    {log.error ? "Error" : "Result"}
+                                    {log.error ? t("Error") : t("Result")}
                                   </p>
                                   <pre
                                     className={cn(

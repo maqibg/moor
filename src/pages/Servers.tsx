@@ -26,6 +26,7 @@ import { cn, getErrorMessage } from "@/lib/utils";
 import { AddServerForm } from "./servers/AddServerForm";
 import { ConfigImportPanel } from "./servers/ConfigImportPanel";
 import type { Server } from "@moor/types";
+import { useI18n } from "@/hooks/useI18n";
 
 type ServerActionMap = ReturnType<typeof useServers>["serverActions"];
 
@@ -62,6 +63,7 @@ function SortableServerCard({
   onStop: (id: string) => Promise<void>;
   onRemove: (id: string) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: server.id,
   });
@@ -82,8 +84,8 @@ function SortableServerCard({
             variant="ghost"
             size="icon"
             className="shrink-0 cursor-grab text-[var(--fg-30)] hover:text-cursor-dark active:cursor-grabbing"
-            title={`Reorder ${server.name}`}
-            aria-label={`Reorder ${server.name}`}
+            title={t("Reorder {{name}}", { name: server.name })}
+            aria-label={t("Reorder {{name}}", { name: server.name })}
             {...attributes}
             {...listeners}
           >
@@ -110,6 +112,7 @@ export function Servers() {
     refresh,
     serverActions,
   } = useServers();
+  const { t } = useI18n();
   const [showAdd, setShowAdd] = useState(false);
   const [showJsonImport, setShowJsonImport] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
@@ -148,21 +151,21 @@ export function Servers() {
       try {
         await reorderServers(nextServers);
       } catch (err) {
-        setOrderError(getErrorMessage(err, "Unable to save server order"));
+        setOrderError(getErrorMessage(err, t("Unable to save server order")));
       }
     },
-    [reorderServers, servers],
+    [reorderServers, servers, t],
   );
 
   return (
     <div className="space-y-6 animate-fade-in-up">
       <PageHeader
-        title="Servers"
-        subtitle="Manage and configure your MCP servers"
+        title={t("Servers")}
+        subtitle={t("Manage and configure your MCP servers")}
         action={
           <div className="flex items-center gap-2">
             <Button variant="outline" onClick={() => void refresh()} disabled={loading}>
-              <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} /> Refresh
+              <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} /> {t("Refresh")}
             </Button>
             <Button
               variant="outline"
@@ -171,10 +174,10 @@ export function Servers() {
                 setShowJsonImport(true);
               }}
             >
-              <FileJson className="h-4 w-4 mr-2" /> Import JSON
+              <FileJson className="h-4 w-4 mr-2" /> {t("Import JSON")}
             </Button>
             <Button variant="outline" onClick={handleScan}>
-              <ScanSearch className="h-4 w-4 mr-2" /> Scan Configs
+              <ScanSearch className="h-4 w-4 mr-2" /> {t("Scan Configs")}
             </Button>
             <Button
               onClick={() => {
@@ -182,7 +185,7 @@ export function Servers() {
                 setShowAdd(true);
               }}
             >
-              <Plus className="h-4 w-4 mr-2" /> Add Server
+              <Plus className="h-4 w-4 mr-2" /> {t("Add Server")}
             </Button>
           </div>
         }
@@ -208,7 +211,7 @@ export function Servers() {
       {/* Server List */}
       <div className="space-y-2">
         {loading ? (
-          <PageLoading message="Loading servers..." />
+          <PageLoading message={t("Loading servers...")} />
         ) : servers.length === 0 ? (
           <button
             onClick={() => setShowAdd(true)}
@@ -222,9 +225,9 @@ export function Servers() {
               <Plus className="h-5 w-5" />
             </div>
             <div className="text-center">
-              <p className="font-headline text-sm font-medium">Add Your First Server</p>
+              <p className="font-headline text-sm font-medium">{t("Add Your First Server")}</p>
               <p className="font-body text-xs text-[var(--fg-40)] mt-1">
-                Or scan existing configs to import
+                {t("Or scan existing configs to import")}
               </p>
             </div>
           </button>

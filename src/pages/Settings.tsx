@@ -4,6 +4,7 @@ import { cn, getErrorMessage } from "@/lib/utils";
 import { getApiRuntime, resetRuntime } from "@/lib/api/runtime";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { useSettings } from "@/hooks/useSettings";
+import { useI18n } from "@/hooks/useI18n";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,12 +64,13 @@ function SettingRow({ label, description, children }: SettingRowProps) {
 // --- Restart Banner ---
 
 function RestartBanner({ onRestart }: { onRestart: () => void }) {
+  const { t } = useI18n();
   return (
     <div className="flex items-center justify-between bg-cursor-orange/10 border border-cursor-orange/20 rounded-xl px-4 py-3">
       <div className="flex items-center gap-3">
         <AlertTriangle className="h-4 w-4 text-cursor-orange shrink-0" />
         <span className="font-headline text-sm text-cursor-dark">
-          Some changes require a restart to take effect
+          {t("Some changes require a restart to take effect")}
         </span>
       </div>
       <Button
@@ -77,7 +79,7 @@ function RestartBanner({ onRestart }: { onRestart: () => void }) {
         onClick={onRestart}
         className="bg-cursor-orange text-white hover:bg-cursor-orange/90 hover:text-white border-none"
       >
-        Restart Now
+        {t("Restart Now")}
       </Button>
     </div>
   );
@@ -122,6 +124,7 @@ function GroupNavItem({ icon: Icon, label, active, onClick }: GroupNavItemProps)
 
 function GeneralSection({ onError }: { onError: (message: string | null) => void }) {
   const { settings, updateSettings } = useSettings();
+  const { t } = useI18n();
 
   const handleSwitch = useCallback(
     async (key: keyof GeneralSettings, value: boolean) => {
@@ -162,8 +165,8 @@ function GeneralSection({ onError }: { onError: (message: string | null) => void
     <Card>
       <CardContent className="p-2 divide-y divide-[var(--fg-06)]">
         <SettingRow
-          label="Auto-start on Login"
-          description="Launch Moor automatically when you log in"
+          label={t("Auto-start on Login")}
+          description={t("Launch Moor automatically when you log in")}
         >
           <Switch
             checked={settings.general.autoStartOnLogin}
@@ -171,8 +174,8 @@ function GeneralSection({ onError }: { onError: (message: string | null) => void
           />
         </SettingRow>
         <SettingRow
-          label="Auto-start Servers on Launch"
-          description="Automatically start servers marked as auto-start when Moor opens"
+          label={t("Auto-start Servers on Launch")}
+          description={t("Automatically start servers marked as auto-start when Moor opens")}
         >
           <Switch
             checked={settings.general.autoStartServersOnLaunch}
@@ -180,8 +183,8 @@ function GeneralSection({ onError }: { onError: (message: string | null) => void
           />
         </SettingRow>
         <SettingRow
-          label="Minimize to Tray on Close"
-          description="Keep Moor running in the system tray when the window is closed"
+          label={t("Minimize to Tray on Close")}
+          description={t("Keep Moor running in the system tray when the window is closed")}
         >
           <Switch
             checked={settings.general.minimizeToTrayOnClose}
@@ -189,8 +192,8 @@ function GeneralSection({ onError }: { onError: (message: string | null) => void
           />
         </SettingRow>
         <SettingRow
-          label="Show Window on Launch"
-          description="Display the main window when Moor starts"
+          label={t("Show Window on Launch")}
+          description={t("Display the main window when Moor starts")}
         >
           <Switch
             checked={settings.general.showWindowOnLaunch}
@@ -210,6 +213,7 @@ function GeneralSection({ onError }: { onError: (message: string | null) => void
 
 function AppearanceSection({ onError }: { onError: (message: string | null) => void }) {
   const { settings, updateSettings } = useSettings();
+  const { language, setLanguage, t } = useI18n();
 
   const handleThemeChange = useCallback(
     async (value: string) => {
@@ -217,10 +221,17 @@ function AppearanceSection({ onError }: { onError: (message: string | null) => v
         onError(null);
         await updateSettings({ appearance: { theme: value as "light" | "dark" | "system" } });
       } catch (err) {
-        onError(getErrorMessage(err, "Failed to update theme"));
+        onError(getErrorMessage(err, t("Failed to update theme")));
       }
     },
-    [onError, updateSettings],
+    [onError, updateSettings, t],
+  );
+
+  const handleLanguageChange = useCallback(
+    (value: string) => {
+      setLanguage(value as "en" | "zh" | "system");
+    },
+    [setLanguage],
   );
 
   return (
@@ -228,7 +239,7 @@ function AppearanceSection({ onError }: { onError: (message: string | null) => v
       <CardContent className="p-2">
         <div className="flex items-center justify-between py-3.5 px-4">
           <div className="flex-1 min-w-0 mr-4">
-            <p className="font-headline text-sm text-cursor-dark">Theme</p>
+            <p className="font-headline text-sm text-cursor-dark">{t("Theme")}</p>
             <p className="font-body text-xs text-[var(--fg-45)] mt-0.5">
               Choose the application appearance
             </p>
@@ -237,9 +248,27 @@ function AppearanceSection({ onError }: { onError: (message: string | null) => v
             value={settings.appearance.theme}
             onValueChange={(v) => void handleThemeChange(v)}
             tabs={[
-              { value: "light", label: "Light" },
-              { value: "dark", label: "Dark" },
-              { value: "system", label: "System" },
+              { value: "light", label: t("Light") },
+              { value: "dark", label: t("Dark") },
+              { value: "system", label: t("System") },
+            ]}
+          />
+        </div>
+        <div className="border-t border-[var(--fg-08)]" />
+        <div className="flex items-center justify-between py-3.5 px-4">
+          <div className="flex-1 min-w-0 mr-4">
+            <p className="font-headline text-sm text-cursor-dark">{t("Language")}</p>
+            <p className="font-body text-xs text-[var(--fg-45)] mt-0.5">
+              Choose the application language
+            </p>
+          </div>
+          <Tabs
+            value={language}
+            onValueChange={handleLanguageChange}
+            tabs={[
+              { value: "en", label: "English" },
+              { value: "zh", label: "中文" },
+              { value: "system", label: t("System") },
             ]}
           />
         </div>

@@ -8,6 +8,7 @@ import { Plus, Trash2, Check, Code, FlaskConical, User, Home } from "lucide-reac
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import type { Profile } from "@moor/types";
+import { useI18n } from "@/hooks/useI18n";
 
 interface DisplayProfile {
   profile: Profile;
@@ -33,6 +34,7 @@ const profileAccents = [
 
 export function Profiles() {
   const { profiles, createProfile, activateProfile, deleteProfile } = useProfiles();
+  const { t } = useI18n();
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const navigate = useNavigate();
@@ -48,12 +50,12 @@ export function Profiles() {
   return (
     <div className="space-y-8 animate-fade-in-up">
       <PageHeader
-        title="Profiles"
-        subtitle="Manage server groupings and tool visibility"
+        title={t("Profiles")}
+        subtitle={t("Manage server groupings and tool visibility")}
         action={
           !creating && (
             <Button onClick={() => setCreating(true)}>
-              <Plus className="h-4 w-4 mr-2" /> New Profile
+              <Plus className="h-4 w-4 mr-2" /> {t("New Profile")}
             </Button>
           )
         }
@@ -64,14 +66,14 @@ export function Profiles() {
         <Card className="animate-scale-in border-cursor-orange/20">
           <CardContent className="p-4 flex items-center gap-3">
             <Input
-              placeholder="Profile name"
+              placeholder={t("Profile name")}
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleCreate()}
               autoFocus
               className="max-w-sm"
             />
-            <Button onClick={handleCreate}>Create</Button>
+            <Button onClick={handleCreate}>{t("Create")}</Button>
             <Button
               variant="outline"
               onClick={() => {
@@ -79,7 +81,7 @@ export function Profiles() {
                 setNewName("");
               }}
             >
-              Cancel
+              {t("Cancel")}
             </Button>
           </CardContent>
         </Card>
@@ -117,7 +119,7 @@ export function Profiles() {
                 </div>
                 <h3 className="font-headline text-base text-cursor-dark mb-1">{profile.name}</h3>
                 <p className="font-body text-xs text-[var(--fg-45)] mb-5">
-                  {profile.isActive ? "Currently active" : "Click to manage"}
+                  {profile.isActive ? t("Currently active") : t("Click to manage")}
                 </p>
                 <div className="flex items-center gap-2 pt-4 border-t border-[var(--fg-06)]">
                   <span
@@ -127,7 +129,7 @@ export function Profiles() {
                     )}
                   />
                   <span className="font-body text-xs text-[var(--fg-40)]">
-                    {profile.serverCount ?? 0} servers
+                    {t("{{count}} servers", { count: String(profile.serverCount ?? 0) })}
                   </span>
                 </div>
                 {/* Actions overlay */}
@@ -147,7 +149,7 @@ export function Profiles() {
                           activateProfile(profile.id);
                         }}
                       >
-                        Activate
+                        {t("Activate")}
                       </Button>
                       <Button
                         variant="ghost"
@@ -182,9 +184,11 @@ export function Profiles() {
             <Plus className="h-5 w-5" />
           </div>
           <h3 className="font-headline text-sm font-medium text-cursor-dark group-hover:text-cursor-orange transition-colors">
-            New Profile
+            {t("New Profile")}
           </h3>
-          <p className="font-body text-xs text-[var(--fg-40)] mt-1">Create a server grouping</p>
+          <p className="font-body text-xs text-[var(--fg-40)] mt-1">
+            {t("Create a server grouping")}
+          </p>
         </button>
       </div>
     </div>

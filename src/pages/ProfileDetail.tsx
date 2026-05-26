@@ -8,19 +8,21 @@ import { DetailPageHeader } from "@/components/shared/DetailPageHeader";
 import { PageLoading } from "@/components/shared/PageLoading";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/hooks/useI18n";
 
 export function ProfileDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { t } = useI18n();
   const { updateProfileServer } = useProfiles();
   const { profile, isLoading: loading, refresh } = useProfile(id);
 
   if (loading) {
-    return <PageLoading message="Loading profile..." />;
+    return <PageLoading message={t("Loading profile...")} />;
   }
 
   if (!profile || !id) {
-    return <EmptyState icon={FolderOpen} message="Profile not found" />;
+    return <EmptyState icon={FolderOpen} message={t("Profile not found")} />;
   }
 
   const toggleServer = async (serverId: string, enabled: boolean) => {
@@ -34,7 +36,10 @@ export function ProfileDetail() {
     <div className="space-y-6 animate-fade-in-up">
       <DetailPageHeader
         title={profile.name}
-        subtitle={`${enabledCount} of ${profile.servers.length} servers enabled`}
+        subtitle={t("{{enabled}} of {{total}} servers enabled", {
+          enabled: String(enabledCount),
+          total: String(profile.servers.length),
+        })}
         badge={
           profile.isActive ? (
             <Badge variant="success">
@@ -42,7 +47,7 @@ export function ProfileDetail() {
                 <span className="animate-ping-slow absolute inline-flex h-full w-full rounded-full bg-success-muted opacity-50" />
                 <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-success-muted" />
               </span>
-              Active
+              {t("Active")}
             </Badge>
           ) : undefined
         }
@@ -53,12 +58,12 @@ export function ProfileDetail() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
-            <Server className="h-4 w-4 text-[var(--fg-40)]" /> Server Selection
+            <Server className="h-4 w-4 text-[var(--fg-40)]" /> {t("Server Selection")}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-1">
           {profile.servers.length === 0 ? (
-            <EmptyState icon={Server} message="No servers available. Add servers first." />
+            <EmptyState icon={Server} message={t("No servers available. Add servers first.")} />
           ) : (
             profile.servers.map((server) => (
               <div
@@ -95,7 +100,7 @@ export function ProfileDetail() {
                 {server.profileServer.enabled && (
                   <div className="flex items-center gap-1.5">
                     <span className="h-1.5 w-1.5 rounded-full bg-success-muted" />
-                    <span className="font-body text-xs text-[var(--fg-40)]">Enabled</span>
+                    <span className="font-body text-xs text-[var(--fg-40)]">{t("Enabled")}</span>
                   </div>
                 )}
               </div>

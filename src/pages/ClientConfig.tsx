@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { routes } from "@/lib/api-routes";
 import { ConverterPanel } from "@/components/converter/ConverterPanel";
 import type { ClientSnippet } from "@moor/types";
+import { useI18n } from "@/hooks/useI18n";
 
 const FALLBACK_SNIPPETS: ClientSnippet[] = [
   {
@@ -44,6 +45,7 @@ const FALLBACK_SNIPPETS: ClientSnippet[] = [
 ];
 
 export function ClientConfig() {
+  const { t } = useI18n();
   const [activeTab, setActiveTab] = useState("snippets");
   const { data: snippets } = useQuery<ClientSnippet[]>({
     queryKey: ["snippets"],
@@ -55,16 +57,16 @@ export function ClientConfig() {
   return (
     <div className="space-y-6 animate-fade-in-up">
       <PageHeader
-        title="Client Configuration"
-        subtitle="Configure your AI agents to connect to Moor"
+        title={t("Client Configuration")}
+        subtitle={t("Configure your AI agents to connect to Moor")}
       />
 
       <Tabs
         value={activeTab}
         onValueChange={setActiveTab}
         tabs={[
-          { value: "snippets", label: "Snippets" },
-          { value: "converter", label: "Converter" },
+          { value: "snippets", label: t("Snippets") },
+          { value: "converter", label: t("Converter") },
         ]}
       />
 
