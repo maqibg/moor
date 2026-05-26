@@ -133,6 +133,38 @@ describe("SettingsService", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("advanced.mcpServerStartTimeoutMs"));
   });
 
+  it("falls back and warns when stored advanced integer settings are outside the supported range", async () => {
+    closeDb();
+    rmSync(dataDir, { recursive: true, force: true });
+    dataDir = mkdtempSync(path.join(tmpdir(), "moor-settings-"));
+    writeFileSync(
+      path.join(dataDir, "settings.json"),
+      JSON.stringify({
+        version: 0,
+        advanced: {
+          logRetentionDays: 366,
+          sidecarPort: 80,
+        },
+      }),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await initDb({ dataDir });
+    runMigrations();
+
+    settingsService.init(dataDir);
+
+    expect(settingsService.getSettings()).toMatchObject({
+      version: 1,
+      advanced: {
+        logRetentionDays: 30,
+        sidecarPort: 9223,
+      },
+    });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("version"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("advanced.logRetentionDays"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("advanced.sidecarPort"));
+  });
+
   it("keeps audit logs when retention is unlimited", () => {
     insertAuditLog("old", "2000-01-01T00:00:00.000Z");
     settingsService.updateSettings({ advanced: { logRetentionDays: 0 } });

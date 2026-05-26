@@ -6,6 +6,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{oneshot, watch, Mutex as AsyncMutex};
 
+use super::format_timeout_duration;
+
 type PendingMap = Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>;
 type StderrLines = Arc<Mutex<VecDeque<String>>>;
 
@@ -40,6 +42,7 @@ impl StdioClientTransport {
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
+            // 即使 close 路径未执行，Drop 也要兜底结束子进程。
             .kill_on_drop(true);
 
         if let Some(cwd) = cwd {
@@ -246,6 +249,7 @@ impl StdioClientTransport {
 
 impl Drop for StdioClientTransport {
     fn drop(&mut self) {
+        // 兜底停止 reader task，避免 close 未执行时后台读取继续挂住。
         if let Some(handle) = self.reader_handle.take() {
             handle.abort();
         }
@@ -281,14 +285,6 @@ fn summarize_stderr_line(line: &str) -> String {
 
 fn stderr_summary(lines: &VecDeque<String>) -> Option<String> {
     (!lines.is_empty()).then(|| lines.iter().cloned().collect::<Vec<_>>().join(" | "))
-}
-
-fn format_timeout_duration(timeout: Duration) -> String {
-    if timeout.as_millis() % 1000 == 0 {
-        format!("{}s", timeout.as_secs())
-    } else {
-        format!("{}ms", timeout.as_millis())
-    }
 }
 
 fn redact_sensitive_stderr_values(line: &str) -> String {

@@ -125,6 +125,14 @@ Build a local MCP console + gateway application running on macOS. Moor acts as a
 - **Why**: Better performance, smaller bundle size, simpler lifecycle management, and no Node.js SEA compatibility risks.
 - **Development**: Node.js sidecar (Hono) is still used for `pnpm dev:all` / `pnpm sidecar` for faster iteration.
 
+### AD-13: MCP Timeout Settings
+
+- **字段**: `advanced.mcpRequestTimeoutMs` 控制运行期 MCP JSON-RPC 请求超时，`advanced.mcpServerStartTimeoutMs` 控制 MCP server 启动总等待时间。
+- **范围与默认值**: 两个字段都使用毫秒，范围为 `5_000..300_000`，默认值为 `30_000`。
+- **启动语义**: 启动期 `initialize` / `tools/list` 使用 `mcpServerStartTimeoutMs`，并受同一个启动总等待时间约束。
+- **运行期语义**: `tools/call` 每次调用前读取最新 `mcpRequestTimeoutMs`；修改 request timeout 后无需重启运行中的 server。
+- **跨端一致性**: Node.js development sidecar 与 Rust production gateway 必须保持以上语义一致。
+
 ## Tech Stack (Confirmed)
 
 ```

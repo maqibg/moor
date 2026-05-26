@@ -36,7 +36,6 @@ export type {
   SettingsGroup,
   SettingsUpdatePayload,
   ThemeMode,
-  TimeoutSettings,
 } from "./settings.js";
 export type { SidecarInfo } from "./sidecar.js";
 export type { ApiErrorCode, ApiError } from "./error.js";

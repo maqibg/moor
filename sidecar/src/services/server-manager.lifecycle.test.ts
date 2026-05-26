@@ -13,6 +13,7 @@ import {
 } from "./stdio-env.js";
 import { resolveHttpHeaders } from "./http-headers.js";
 import { type ManagedServer, ServerRuntime, serverManager } from "./server-manager.js";
+import { settingsService } from "./settings.js";
 import type { Server } from "@moor/types";
 
 const fixturePath = fileURLToPath(
@@ -40,10 +41,19 @@ type TestServerSession = Awaited<ReturnType<TestSessionFactory>>;
 function createFakeSession(
   onClose: () => void = () => undefined,
   tools: Array<{ name: string; description?: string; inputSchema?: unknown }> = [],
+  onListTools: (_options: unknown[]) => void = () => undefined,
+  onCallTool: (_options: unknown[]) => void = () => undefined,
 ): TestServerSession {
   return {
     client: {
-      listTools: async () => ({ tools }),
+      listTools: async (...options: unknown[]) => {
+        onListTools(options);
+        return { tools };
+      },
+      callTool: async (...options: unknown[]) => {
+        onCallTool(options);
+        return { content: [{ type: "text", text: "ok" }] };
+      },
       close: async () => {
         onClose();
       },
@@ -207,6 +217,44 @@ describe("ServerManager MCP lifecycle", () => {
     releaseStart();
     await Promise.all([firstStart, secondStart]);
     expect(startCalls).toEqual(["Slow Fixture"]);
+  });
+
+  it("passes startup and latest request timeout settings to SDK requests", async () => {
+    const factoryTimeouts: unknown[] = [];
+    const listToolOptions: unknown[] = [];
+    const callToolOptions: unknown[] = [];
+    const manager = createTestManager(async (_config, timeouts) => {
+      factoryTimeouts.push(timeouts);
+      return createFakeSession(
+        () => undefined,
+        [{ name: "echo" }],
+        (options) => listToolOptions.push(options),
+        (options) => callToolOptions.push(options),
+      );
+    });
+    const server = serverManager.addServer({
+      name: "Timeout Fixture",
+      connectionType: "stdio",
+      command: process.execPath,
+    });
+    manager.registerServer(server.id);
+    addServerToActiveProfile(server);
+    settingsService.updateSettings({
+      advanced: {
+        mcpRequestTimeoutMs: 45_000,
+        mcpServerStartTimeoutMs: 60_000,
+      },
+    });
+
+    await manager.startServer(server.id);
+    settingsService.updateSettings({ advanced: { mcpRequestTimeoutMs: 15_000 } });
+    await manager.callToolByExposedName("timeout_fixture__echo", {});
+
+    expect(factoryTimeouts).toEqual([{ requestTimeoutMs: 45_000, startTimeoutMs: 60_000 }]);
+    expect(listToolOptions).toEqual([[undefined, { timeout: 60_000 }]]);
+    expect(callToolOptions).toEqual([
+      [{ name: "echo", arguments: {} }, undefined, { timeout: 15_000 }],
+    ]);
   });
 
   it("starts auto-start servers concurrently so a pending server does not block later servers", async () => {

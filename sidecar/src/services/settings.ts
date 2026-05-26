@@ -52,7 +52,13 @@ function mergeStoredSettings(raw: unknown): Settings {
   const theme = appearance.theme;
 
   return {
-    version: integerInRangeOrDefault(raw.version, 1, Number.MAX_SAFE_INTEGER, defaults.version),
+    version: integerInRangeOrDefault(
+      raw.version,
+      1,
+      Number.MAX_SAFE_INTEGER,
+      defaults.version,
+      "version",
+    ),
     general: {
       autoStartOnLogin: booleanOrDefault(
         general.autoStartOnLogin,
@@ -80,6 +86,7 @@ function mergeStoredSettings(raw: unknown): Settings {
         0,
         365,
         defaults.advanced.logRetentionDays,
+        "advanced.logRetentionDays",
       ),
       enableAuditLogging: booleanOrDefault(
         advanced.enableAuditLogging,
@@ -90,6 +97,7 @@ function mergeStoredSettings(raw: unknown): Settings {
         1024,
         65535,
         defaults.advanced.sidecarPort,
+        "advanced.sidecarPort",
       ),
       mcpRequestTimeoutMs: integerInRangeOrDefault(
         advanced.mcpRequestTimeoutMs,

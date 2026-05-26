@@ -269,6 +269,8 @@ function AdvancedSection({
   const [tokenVisible, setTokenVisible] = useState(false);
   const requestTimeoutState = parseTimeoutSecondsInput(localRequestTimeout);
   const startTimeoutState = parseTimeoutSecondsInput(localStartTimeout);
+  const requestTimeoutErrorId = "request-timeout-error";
+  const startTimeoutErrorId = "server-start-timeout-error";
   const portStatus = getAdvancedPortStatus({
     runtimeInfo,
     configuredPort: settings.advanced.sidecarPort,
@@ -308,10 +310,13 @@ function AdvancedSection({
 
   type TimeoutKey = "mcpRequestTimeoutMs" | "mcpServerStartTimeoutMs";
 
-  const applyTimeout = async (key: TimeoutKey, localValue: string, label: string) => {
+  const applyTimeout = async (
+    key: TimeoutKey,
+    parsed: typeof requestTimeoutState,
+    label: string,
+  ) => {
     try {
       onError(null);
-      const parsed = parseTimeoutSecondsInput(localValue);
       if (!parsed.valid) {
         onError(parsed.message);
         return;
@@ -352,7 +357,7 @@ function AdvancedSection({
           </SettingRow>
           <SettingRow
             label="Request Timeout"
-            description="Timeout for MCP JSON-RPC requests in seconds (5–300). Applies to new connections; restart running servers to use the new value."
+            description="Timeout for MCP JSON-RPC requests in seconds (5-300). Applies to the next MCP request."
           >
             <div className="flex flex-col items-end gap-1">
               <div className="flex items-center gap-2">
@@ -363,6 +368,7 @@ function AdvancedSection({
                   step={1}
                   value={localRequestTimeout}
                   aria-invalid={!requestTimeoutState.valid}
+                  aria-describedby={requestTimeoutState.valid ? undefined : requestTimeoutErrorId}
                   onChange={(e) => setLocalRequestTimeout(e.target.value)}
                   className="w-20 h-8 text-center text-xs"
                 />
@@ -371,14 +377,14 @@ function AdvancedSection({
                   size="sm"
                   disabled={!requestTimeoutState.valid}
                   onClick={() =>
-                    void applyTimeout("mcpRequestTimeoutMs", localRequestTimeout, "request timeout")
+                    void applyTimeout("mcpRequestTimeoutMs", requestTimeoutState, "request timeout")
                   }
                 >
                   Apply
                 </Button>
               </div>
               {!requestTimeoutState.valid && (
-                <p className="font-body text-[11px] text-error-warm">
+                <p id={requestTimeoutErrorId} className="font-body text-[11px] text-error-warm">
                   {requestTimeoutState.message}
                 </p>
               )}
@@ -386,7 +392,7 @@ function AdvancedSection({
           </SettingRow>
           <SettingRow
             label="Server Start Timeout"
-            description="Total startup wait for MCP servers in seconds (5–300). Applies to the next server start."
+            description="Total startup wait for MCP servers in seconds (5-300). Applies to the next server start."
           >
             <div className="flex flex-col items-end gap-1">
               <div className="flex items-center gap-2">
@@ -397,6 +403,7 @@ function AdvancedSection({
                   step={1}
                   value={localStartTimeout}
                   aria-invalid={!startTimeoutState.valid}
+                  aria-describedby={startTimeoutState.valid ? undefined : startTimeoutErrorId}
                   onChange={(e) => setLocalStartTimeout(e.target.value)}
                   className="w-20 h-8 text-center text-xs"
                 />
@@ -407,7 +414,7 @@ function AdvancedSection({
                   onClick={() =>
                     void applyTimeout(
                       "mcpServerStartTimeoutMs",
-                      localStartTimeout,
+                      startTimeoutState,
                       "server start timeout",
                     )
                   }
@@ -416,7 +423,9 @@ function AdvancedSection({
                 </Button>
               </div>
               {!startTimeoutState.valid && (
-                <p className="font-body text-[11px] text-error-warm">{startTimeoutState.message}</p>
+                <p id={startTimeoutErrorId} className="font-body text-[11px] text-error-warm">
+                  {startTimeoutState.message}
+                </p>
               )}
             </div>
           </SettingRow>

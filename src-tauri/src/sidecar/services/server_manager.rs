@@ -14,7 +14,7 @@ use crate::sidecar::services::tool_catalog::{ToolCatalogService, ToolDetail};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
@@ -23,6 +23,8 @@ struct ServerSlot {
     status: ServerStatus,
     auto_start: bool,
     start_token: u64,
+    start_deadline: Option<Instant>,
+    start_timeout_ms: Option<u32>,
     session: Option<Arc<tokio::sync::Mutex<McpClient>>>,
 }
 
@@ -62,12 +64,6 @@ struct ServerTimeouts {
     start_ms: u32,
 }
 
-impl ServerTimeouts {
-    fn startup_request_ms(self) -> u32 {
-        self.request_ms.max(self.start_ms)
-    }
-}
-
 impl ServerManager {
     pub fn new(db: Arc<Database>, event_bus: Arc<EventBus>) -> Self {
         Self {
@@ -92,6 +88,8 @@ impl ServerManager {
                     status: ServerStatus::Stopped,
                     auto_start: row.auto_start,
                     start_token: 0,
+                    start_deadline: None,
+                    start_timeout_ms: None,
                     session: None,
                 },
             );
@@ -116,6 +114,8 @@ impl ServerManager {
                 status: ServerStatus::Stopped,
                 auto_start: server.auto_start,
                 start_token: 0,
+                start_deadline: None,
+                start_timeout_ms: None,
                 session: None,
             },
         );
@@ -158,26 +158,42 @@ impl ServerManager {
     }
 
     pub async fn start_server(&self, id: &str) -> Result<(), String> {
-        let (should_wait, start_token) = {
+        let timeouts = self.get_timeout_settings();
+        let (should_wait, start_token, start_deadline, start_timeout_ms) = {
             let mut slots = self.slots.lock().await;
             let Some(slot) = slots.get_mut(id) else {
                 return Err(format!("Server {id} not found"));
             };
             match &slot.status {
                 ServerStatus::Running => return Ok(()),
-                ServerStatus::Starting => (true, slot.start_token),
+                ServerStatus::Starting => (
+                    true,
+                    slot.start_token,
+                    slot.start_deadline,
+                    slot.start_timeout_ms,
+                ),
                 _ => {
                     slot.status = ServerStatus::Starting;
                     slot.start_token = slot.start_token.wrapping_add(1);
-                    (false, slot.start_token)
+                    let wait_deadline = Instant::now()
+                        + Duration::from_millis(timeouts.start_ms as u64)
+                        + Duration::from_secs(1);
+                    slot.start_deadline = Some(wait_deadline);
+                    slot.start_timeout_ms = Some(timeouts.start_ms);
+                    (
+                        false,
+                        slot.start_token,
+                        slot.start_deadline,
+                        slot.start_timeout_ms,
+                    )
                 }
             }
         };
 
-        let timeouts = self.get_timeout_settings();
-
         if should_wait {
-            return self.wait_for_start(id, timeouts.start_ms).await;
+            return self
+                .wait_for_start(id, start_deadline, start_timeout_ms)
+                .await;
         }
 
         self.persist_server_status(id, "starting", None);
@@ -213,6 +229,8 @@ impl ServerManager {
                             && slot.start_token == start_token
                         {
                             slot.status = ServerStatus::Running;
+                            slot.start_deadline = None;
+                            slot.start_timeout_ms = None;
                             let client = client
                                 .take()
                                 .expect("client should be available before session is accepted");
@@ -245,6 +263,8 @@ impl ServerManager {
                             && slot.start_token == start_token
                         {
                             slot.status = ServerStatus::Error(public_msg.clone());
+                            slot.start_deadline = None;
+                            slot.start_timeout_ms = None;
                             slot.session = None;
                             true
                         } else {
@@ -264,10 +284,14 @@ impl ServerManager {
         }
     }
 
-    async fn wait_for_start(&self, id: &str, start_timeout_ms: u32) -> Result<(), String> {
-        let timeout_ms = start_timeout_ms.saturating_add(1_000);
-        let poll_count = timeout_ms.div_ceil(100);
-        for _ in 0..poll_count {
+    async fn wait_for_start(
+        &self,
+        id: &str,
+        start_deadline: Option<Instant>,
+        start_timeout_ms: Option<u32>,
+    ) -> Result<(), String> {
+        let deadline = start_deadline.unwrap_or_else(|| Instant::now() + Duration::from_secs(31));
+        loop {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             let slots = self.slots.lock().await;
             match slots.get(id) {
@@ -279,7 +303,13 @@ impl ServerManager {
                 },
                 None => return Err(format!("Server {id} not found")),
             }
+            if Instant::now() >= deadline {
+                break;
+            }
         }
+        let timeout_ms = start_timeout_ms
+            .unwrap_or(settings::MCP_TIMEOUT_MS_DEFAULT)
+            .saturating_add(1_000);
         Err(format!(
             "Server start wait timed out after {}",
             format_timeout_ms(timeout_ms)
@@ -322,7 +352,7 @@ impl ServerManager {
             args,
             cwd: config.working_dir.clone(),
             env,
-            request_timeout_ms: timeouts.startup_request_ms(),
+            request_timeout_ms: timeouts.start_ms,
         })
         .await?;
 
@@ -358,7 +388,7 @@ impl ServerManager {
             server_name: config.name.clone(),
             url: url.to_string(),
             headers,
-            request_timeout_ms: timeouts.startup_request_ms(),
+            request_timeout_ms: timeouts.start_ms,
         })
         .await?;
 
@@ -379,6 +409,8 @@ impl ServerManager {
             }
             slot.status = ServerStatus::Stopped;
             slot.start_token = slot.start_token.wrapping_add(1);
+            slot.start_deadline = None;
+            slot.start_timeout_ms = None;
             slot.session.take()
         };
 
@@ -436,7 +468,9 @@ impl ServerManager {
                 .ok_or_else(|| format!("Server \"{}\" is not running", owner.server_name))
         }?;
 
-        let client = session_arc.lock().await;
+        let request_timeout_ms = self.get_timeout_settings().request_ms;
+        let mut client = session_arc.lock().await;
+        client.set_request_timeout_ms(request_timeout_ms);
         client.call_tool(&owner.tool_name, args).await
     }
 
@@ -920,8 +954,8 @@ process.stdin.on("data", (chunk) => {{
     }
 
     #[tokio::test]
-    async fn startup_uses_larger_start_timeout_then_restores_request_timeout() {
-        let data_dir = temp_data_dir("startup-request-timeout");
+    async fn runtime_request_timeout_changes_apply_without_restart() {
+        let data_dir = temp_data_dir("runtime-request-timeout");
         std::fs::create_dir_all(&data_dir).expect("failed to create temp dir");
         let marker = data_dir.join("starts.log");
         let script = write_phase_delay_mcp_server(
@@ -940,7 +974,7 @@ process.stdin.on("data", (chunk) => {{
             &db,
             serde_json::json!({
                 "advanced": {
-                    "mcpRequestTimeoutMs": settings::MCP_TIMEOUT_MS_MIN,
+                    "mcpRequestTimeoutMs": 7_000,
                     "mcpServerStartTimeoutMs": 7_000
                 }
             }),
@@ -964,8 +998,18 @@ process.stdin.on("data", (chunk) => {{
             manager.start_server(&server_id),
         )
         .await
-        .expect("startup should not be cut off by request timeout")
-        .expect("startup should succeed with the larger startup timeout");
+        .expect("startup should return before the outer timeout")
+        .expect("startup should succeed with the configured startup timeout");
+
+        settings::update_settings(
+            &db,
+            serde_json::json!({
+                "advanced": {
+                    "mcpRequestTimeoutMs": settings::MCP_TIMEOUT_MS_MIN
+                }
+            }),
+        )
+        .expect("settings update should succeed");
 
         let err = tokio::time::timeout(
             std::time::Duration::from_millis(6_500),
@@ -975,6 +1019,78 @@ process.stdin.on("data", (chunk) => {{
         .expect("tool call should return before the outer timeout")
         .expect_err("runtime requests should restore the configured request timeout");
         assert!(err.contains("timed out after 5s"));
+
+        manager.stop_server(&server_id).await.expect("stop failed");
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn concurrent_start_wait_uses_original_start_deadline() {
+        let data_dir = temp_data_dir("concurrent-start-deadline");
+        std::fs::create_dir_all(&data_dir).expect("failed to create temp dir");
+        let marker = data_dir.join("starts.log");
+        let script = write_phase_delay_mcp_server(
+            &data_dir,
+            &marker,
+            "deadline-delay.mjs",
+            "deadline",
+            0,
+            7_000,
+            0,
+        );
+
+        let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
+        db.run_migrations().expect("failed to run migrations");
+        settings::update_settings(
+            &db,
+            serde_json::json!({
+                "advanced": {
+                    "mcpRequestTimeoutMs": 10_000,
+                    "mcpServerStartTimeoutMs": 10_000
+                }
+            }),
+        )
+        .expect("settings update should succeed");
+        let profile_repo = ProfileRepository::new(&db);
+        profile_repo.seed_default().expect("failed to seed profile");
+
+        let server_id = uuid::Uuid::new_v4().to_string();
+        insert_stdio_server(&db, &server_id, "deadline", script, false, 0);
+        profile_repo
+            .assign_to_active_profile(std::slice::from_ref(&server_id))
+            .expect("failed to assign server");
+
+        let event_bus = Arc::new(EventBus::new(16));
+        let manager = Arc::new(ServerManager::new(db.clone(), event_bus));
+        manager.load_from_db().await;
+
+        let first = {
+            let manager = manager.clone();
+            let server_id = server_id.clone();
+            tokio::spawn(async move { manager.start_server(&server_id).await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        settings::update_settings(
+            &db,
+            serde_json::json!({
+                "advanced": {
+                    "mcpServerStartTimeoutMs": settings::MCP_TIMEOUT_MS_MIN
+                }
+            }),
+        )
+        .expect("settings update should succeed");
+
+        tokio::time::timeout(
+            std::time::Duration::from_millis(8_500),
+            manager.start_server(&server_id),
+        )
+        .await
+        .expect("second start should follow the original start deadline")
+        .expect("second start should observe the successful in-flight start");
+        first
+            .await
+            .expect("first start task should join")
+            .expect("first start should succeed");
 
         manager.stop_server(&server_id).await.expect("stop failed");
         let _ = std::fs::remove_dir_all(data_dir);

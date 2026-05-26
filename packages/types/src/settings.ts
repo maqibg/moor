@@ -15,15 +15,12 @@ export interface AppearanceSettings {
   theme: ThemeMode;
 }
 
-export interface TimeoutSettings {
-  mcpRequestTimeoutMs: number;
-  mcpServerStartTimeoutMs: number;
-}
-
-export interface AdvancedSettings extends TimeoutSettings {
+export interface AdvancedSettings {
   logRetentionDays: number;
   enableAuditLogging: boolean;
   sidecarPort: number;
+  mcpRequestTimeoutMs: number;
+  mcpServerStartTimeoutMs: number;
 }
 
 export interface Settings {

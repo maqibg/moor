@@ -4,7 +4,10 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::sync::Mutex;
 
+use super::format_timeout_duration;
+
 static ENV_PATTERN: OnceLock<regex_lite::Regex> = OnceLock::new();
+const SSE_EVENT_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// MCP Client over HTTP transport (Streamable HTTP or SSE).
 /// Uses reqwest to communicate with HTTP-based MCP servers.
@@ -61,6 +64,23 @@ impl HttpClientTransport {
         method: &str,
         params: Option<Value>,
     ) -> Result<Value, String> {
+        let timeout = self.request_timeout;
+        tokio::time::timeout(timeout, self.send_request_inner(id, method, params))
+            .await
+            .map_err(|_| {
+                format!(
+                    "HTTP request timed out after {}",
+                    format_timeout_duration(timeout)
+                )
+            })?
+    }
+
+    async fn send_request_inner(
+        &self,
+        id: i64,
+        method: &str,
+        params: Option<Value>,
+    ) -> Result<Value, String> {
         let mut mode = self.mode.lock().await;
         match &mut *mode {
             HttpMode::Streamable => self
@@ -95,78 +115,69 @@ impl HttpClientTransport {
         method: &str,
         params: Option<Value>,
     ) -> Result<Value, StreamableError> {
-        let timeout = self.request_timeout;
-        tokio::time::timeout(timeout, async {
-            let request_body = serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "method": method,
-                "params": params.unwrap_or(Value::Null),
-            });
+        let request_body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params.unwrap_or(Value::Null),
+        });
 
-            let mut builder = self.client.post(&self.url);
-            for (key, value) in &self.headers {
-                builder = builder.header(key, value);
-            }
-            builder = builder
-                .header("accept", "application/json, text/event-stream")
-                .header("mcp-protocol-version", "2024-11-05");
+        let mut builder = self.client.post(&self.url);
+        for (key, value) in &self.headers {
+            builder = builder.header(key, value);
+        }
+        builder = builder
+            .header("accept", "application/json, text/event-stream")
+            .header("mcp-protocol-version", "2024-11-05");
 
-            let response =
-                builder.json(&request_body).send().await.map_err(|e| {
-                    StreamableError::Unsupported(format!("HTTP request failed: {e}"))
-                })?;
+        let response = builder
+            .json(&request_body)
+            .send()
+            .await
+            .map_err(|e| StreamableError::Unsupported(format!("HTTP request failed: {e}")))?;
 
-            let status = response.status();
-            if !status.is_success() {
-                return if is_streamable_unsupported_status(status) {
-                    Err(StreamableError::Unsupported(format!(
-                        "Streamable HTTP unsupported: {status}"
-                    )))
-                } else {
-                    Err(StreamableError::Failed(format!(
-                        "HTTP request failed: {status}"
-                    )))
-                };
-            }
-
-            let content_type = response
-                .headers()
-                .get("content-type")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("")
-                .to_string();
-
-            if content_type.contains("text/event-stream") {
-                let mut response = response;
-                let mut buffer = String::new();
-                read_sse_jsonrpc_response(&mut response, &mut buffer, Some(id), timeout)
-                    .await
-                    .map_err(StreamableError::Failed)
+        let status = response.status();
+        if !status.is_success() {
+            return if is_streamable_unsupported_status(status) {
+                Err(StreamableError::Unsupported(format!(
+                    "Streamable HTTP unsupported: {status}"
+                )))
             } else {
-                let body = response.json::<Value>().await.map_err(|e| {
-                    StreamableError::Unsupported(format!(
-                        "Failed to parse JSON response ({status}): {e}"
-                    ))
-                })?;
+                Err(StreamableError::Failed(format!(
+                    "HTTP request failed: {status}"
+                )))
+            };
+        }
 
-                if let Some(error) = body.get("error") {
-                    let msg = error
-                        .get("message")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("Unknown error");
-                    return Err(StreamableError::Failed(msg.to_string()));
-                }
-                Ok(body.get("result").cloned().unwrap_or(Value::Null))
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+
+        if content_type.contains("text/event-stream") {
+            let mut response = response;
+            let mut buffer = String::new();
+            read_sse_jsonrpc_response(&mut response, &mut buffer, Some(id))
+                .await
+                .map_err(StreamableError::Failed)
+        } else {
+            let body = response.json::<Value>().await.map_err(|e| {
+                StreamableError::Unsupported(format!(
+                    "Failed to parse JSON response ({status}): {e}"
+                ))
+            })?;
+
+            if let Some(error) = body.get("error") {
+                let msg = error
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown error");
+                return Err(StreamableError::Failed(msg.to_string()));
             }
-        })
-        .await
-        .map_err(|_| {
-            StreamableError::Failed(format!(
-                "HTTP request timed out after {}",
-                format_timeout_duration(timeout)
-            ))
-        })?
+            Ok(body.get("result").cloned().unwrap_or(Value::Null))
+        }
     }
 
     pub async fn send_notification(
@@ -260,9 +271,7 @@ impl HttpClientTransport {
             buffer: String::new(),
         };
         loop {
-            let event =
-                read_next_sse_event(&mut state.response, &mut state.buffer, self.request_timeout)
-                    .await?;
+            let event = read_next_sse_event(&mut state.response, &mut state.buffer).await?;
             if event.event.as_deref() == Some("endpoint") {
                 state.endpoint = resolve_sse_endpoint(&self.url, &event.data)?;
                 return Ok(state);
@@ -284,13 +293,7 @@ impl HttpClientTransport {
             "params": params.unwrap_or(Value::Null),
         });
         self.post_sse_message(state, &request_body).await?;
-        read_sse_jsonrpc_response(
-            &mut state.response,
-            &mut state.buffer,
-            Some(id),
-            self.request_timeout,
-        )
-        .await
+        read_sse_jsonrpc_response(&mut state.response, &mut state.buffer, Some(id)).await
     }
 
     async fn send_sse_notification(
@@ -343,10 +346,9 @@ async fn read_sse_jsonrpc_response(
     response: &mut reqwest::Response,
     buffer: &mut String,
     expected_id: Option<i64>,
-    timeout: Duration,
 ) -> Result<Value, String> {
     loop {
-        let event = read_next_sse_event(response, buffer, timeout).await?;
+        let event = read_next_sse_event(response, buffer).await?;
         if event
             .event
             .as_deref()
@@ -375,18 +377,17 @@ async fn read_sse_jsonrpc_response(
 async fn read_next_sse_event(
     response: &mut reqwest::Response,
     buffer: &mut String,
-    timeout: Duration,
 ) -> Result<SseEvent, String> {
     loop {
         if let Some(event) = take_sse_event(buffer) {
             return Ok(event);
         }
-        let chunk = tokio::time::timeout(timeout, response.chunk())
+        let chunk = tokio::time::timeout(SSE_EVENT_IDLE_TIMEOUT, response.chunk())
             .await
             .map_err(|_| {
                 format!(
                     "SSE response timed out after {}",
-                    format_timeout_duration(timeout)
+                    format_timeout_duration(SSE_EVENT_IDLE_TIMEOUT)
                 )
             })?
             .map_err(|e| format!("Failed to read SSE response: {e}"))?;
@@ -433,14 +434,6 @@ fn parse_sse_event(raw: &str) -> Option<SseEvent> {
             event,
             data: data.join("\n"),
         })
-    }
-}
-
-fn format_timeout_duration(timeout: Duration) -> String {
-    if timeout.as_millis() % 1000 == 0 {
-        format!("{}s", timeout.as_secs())
-    } else {
-        format!("{}ms", timeout.as_millis())
     }
 }
 
@@ -576,6 +569,30 @@ mod tests {
                 "result": { "ok": true }
             }))
             .expect("sse response should be queued");
+        StatusCode::ACCEPTED
+    }
+
+    async fn delayed_progress_message_endpoint(
+        State(state): State<SseTestState>,
+        Json(body): Json<Value>,
+    ) -> impl IntoResponse {
+        let id = body.get("id").cloned().unwrap_or(Value::Null);
+        let sender = state.sender.clone();
+        tokio::spawn(async move {
+            for _ in 0..20 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                let _ = sender.send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": -1,
+                    "result": { "keepalive": true }
+                }));
+            }
+            let _ = sender.send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": { "ok": true }
+            }));
+        });
         StatusCode::ACCEPTED
     }
 
@@ -730,6 +747,41 @@ mod tests {
             .expect_err("slow JSON response should time out");
 
         assert!(err.contains("timed out"));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn sse_fallback_request_uses_overall_request_timeout() {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        let state = SseTestState {
+            sender,
+            receiver: Arc::new(Mutex::new(Some(receiver))),
+        };
+        let app = Router::new()
+            .route("/sse", get(sse_endpoint).post(streamable_unsupported))
+            .route("/messages", post(delayed_progress_message_endpoint))
+            .with_state(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to bind test server");
+        let addr = listener.local_addr().expect("failed to read local addr");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server failed");
+        });
+
+        let transport = HttpClientTransport::new(
+            &format!("http://{addr}/sse"),
+            HashMap::new(),
+            Duration::from_millis(50),
+        );
+        let err = transport
+            .send_request(1, "initialize", Some(serde_json::json!({})))
+            .await
+            .expect_err("SSE fallback request should use the overall request timeout");
+
+        assert!(err.contains("timed out after 50ms"));
         server.abort();
     }
 }
