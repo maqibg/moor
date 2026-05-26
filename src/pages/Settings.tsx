@@ -17,6 +17,7 @@ import {
   getGeneralSettingRuntimeAction,
   getPortBannerState,
   getSettingsPageLoadState,
+  parseTimeoutSecondsInput,
 } from "./settings-state";
 
 declare const __APP_VERSION__: string;
@@ -259,7 +260,15 @@ function AdvancedSection({
   const { settings, updateSettings } = useSettings();
   const [localRetention, setLocalRetention] = useState(String(settings.advanced.logRetentionDays));
   const [localPort, setLocalPort] = useState(String(settings.advanced.sidecarPort));
+  const [localRequestTimeout, setLocalRequestTimeout] = useState(
+    String(settings.advanced.mcpRequestTimeoutMs / 1000),
+  );
+  const [localStartTimeout, setLocalStartTimeout] = useState(
+    String(settings.advanced.mcpServerStartTimeoutMs / 1000),
+  );
   const [tokenVisible, setTokenVisible] = useState(false);
+  const requestTimeoutState = parseTimeoutSecondsInput(localRequestTimeout);
+  const startTimeoutState = parseTimeoutSecondsInput(localStartTimeout);
   const portStatus = getAdvancedPortStatus({
     runtimeInfo,
     configuredPort: settings.advanced.sidecarPort,
@@ -268,7 +277,14 @@ function AdvancedSection({
   useEffect(() => {
     setLocalRetention(String(settings.advanced.logRetentionDays));
     setLocalPort(String(settings.advanced.sidecarPort));
-  }, [settings.advanced.logRetentionDays, settings.advanced.sidecarPort]);
+    setLocalRequestTimeout(String(settings.advanced.mcpRequestTimeoutMs / 1000));
+    setLocalStartTimeout(String(settings.advanced.mcpServerStartTimeoutMs / 1000));
+  }, [
+    settings.advanced.logRetentionDays,
+    settings.advanced.sidecarPort,
+    settings.advanced.mcpRequestTimeoutMs,
+    settings.advanced.mcpServerStartTimeoutMs,
+  ]);
 
   const applyRetention = async () => {
     try {
@@ -287,6 +303,22 @@ function AdvancedSection({
       onPortApplied(nextPort);
     } catch (err) {
       onError(getErrorMessage(err, "Failed to update sidecar port"));
+    }
+  };
+
+  type TimeoutKey = "mcpRequestTimeoutMs" | "mcpServerStartTimeoutMs";
+
+  const applyTimeout = async (key: TimeoutKey, localValue: string, label: string) => {
+    try {
+      onError(null);
+      const parsed = parseTimeoutSecondsInput(localValue);
+      if (!parsed.valid) {
+        onError(parsed.message);
+        return;
+      }
+      await updateSettings({ advanced: { [key]: parsed.milliseconds } });
+    } catch (err) {
+      onError(getErrorMessage(err, `Failed to update ${label}`));
     }
   };
 
@@ -317,6 +349,76 @@ function AdvancedSection({
               checked={settings.advanced.enableAuditLogging}
               onCheckedChange={(v) => void updateSettings({ advanced: { enableAuditLogging: v } })}
             />
+          </SettingRow>
+          <SettingRow
+            label="Request Timeout"
+            description="Timeout for MCP JSON-RPC requests in seconds (5–300). Applies to new connections; restart running servers to use the new value."
+          >
+            <div className="flex flex-col items-end gap-1">
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={5}
+                  max={300}
+                  step={1}
+                  value={localRequestTimeout}
+                  aria-invalid={!requestTimeoutState.valid}
+                  onChange={(e) => setLocalRequestTimeout(e.target.value)}
+                  className="w-20 h-8 text-center text-xs"
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={!requestTimeoutState.valid}
+                  onClick={() =>
+                    void applyTimeout("mcpRequestTimeoutMs", localRequestTimeout, "request timeout")
+                  }
+                >
+                  Apply
+                </Button>
+              </div>
+              {!requestTimeoutState.valid && (
+                <p className="font-body text-[11px] text-error-warm">
+                  {requestTimeoutState.message}
+                </p>
+              )}
+            </div>
+          </SettingRow>
+          <SettingRow
+            label="Server Start Timeout"
+            description="Total startup wait for MCP servers in seconds (5–300). Applies to the next server start."
+          >
+            <div className="flex flex-col items-end gap-1">
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={5}
+                  max={300}
+                  step={1}
+                  value={localStartTimeout}
+                  aria-invalid={!startTimeoutState.valid}
+                  onChange={(e) => setLocalStartTimeout(e.target.value)}
+                  className="w-20 h-8 text-center text-xs"
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={!startTimeoutState.valid}
+                  onClick={() =>
+                    void applyTimeout(
+                      "mcpServerStartTimeoutMs",
+                      localStartTimeout,
+                      "server start timeout",
+                    )
+                  }
+                >
+                  Apply
+                </Button>
+              </div>
+              {!startTimeoutState.valid && (
+                <p className="font-body text-[11px] text-error-warm">{startTimeoutState.message}</p>
+              )}
+            </div>
           </SettingRow>
         </CardContent>
       </Card>

@@ -1,6 +1,7 @@
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{oneshot, watch, Mutex as AsyncMutex};
@@ -22,6 +23,7 @@ pub struct StdioClientTransport {
     next_id: Arc<Mutex<i64>>,
     reader_handle: Option<tokio::task::JoinHandle<()>>,
     alive_rx: watch::Receiver<bool>,
+    request_timeout: Duration,
 }
 
 impl StdioClientTransport {
@@ -30,13 +32,15 @@ impl StdioClientTransport {
         args: &[String],
         cwd: Option<&str>,
         env: HashMap<String, String>,
+        request_timeout: Duration,
     ) -> Result<Self, String> {
         let mut cmd = Command::new(command);
         cmd.args(args)
             .envs(&env)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
 
         if let Some(cwd) = cwd {
             cmd.current_dir(cwd);
@@ -112,6 +116,7 @@ impl StdioClientTransport {
             next_id: Arc::new(Mutex::new(1)),
             reader_handle: Some(reader_handle),
             alive_rx,
+            request_timeout,
         })
     }
 
@@ -157,7 +162,7 @@ impl StdioClientTransport {
                 .map_err(|e| format!("stdin flush failed: {e}"))?;
         }
 
-        match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+        match tokio::time::timeout(self.request_timeout, rx).await {
             Ok(Ok(response)) => {
                 if let Some(error) = response.get("error") {
                     let msg = error
@@ -172,7 +177,10 @@ impl StdioClientTransport {
             Err(_) => {
                 let mut map = self.pending.lock().unwrap();
                 map.remove(&id);
-                Err("request timed out (30s)".into())
+                Err(format!(
+                    "request timed out after {}",
+                    format_timeout_duration(self.request_timeout)
+                ))
             }
         }
     }
@@ -230,6 +238,18 @@ impl StdioClientTransport {
     pub fn alive_receiver(&self) -> watch::Receiver<bool> {
         self.alive_rx.clone()
     }
+
+    pub fn set_request_timeout(&mut self, request_timeout: Duration) {
+        self.request_timeout = request_timeout;
+    }
+}
+
+impl Drop for StdioClientTransport {
+    fn drop(&mut self) {
+        if let Some(handle) = self.reader_handle.take() {
+            handle.abort();
+        }
+    }
 }
 
 #[cfg(any(windows, test))]
@@ -263,9 +283,17 @@ fn stderr_summary(lines: &VecDeque<String>) -> Option<String> {
     (!lines.is_empty()).then(|| lines.iter().cloned().collect::<Vec<_>>().join(" | "))
 }
 
+fn format_timeout_duration(timeout: Duration) -> String {
+    if timeout.as_millis() % 1000 == 0 {
+        format!("{}s", timeout.as_secs())
+    } else {
+        format!("{}ms", timeout.as_millis())
+    }
+}
+
 fn redact_sensitive_stderr_values(line: &str) -> String {
-    let redacted =
-        sensitive_stderr_key_regex().replace_all(line, |caps: &regex_lite::Captures<'_>| {
+    let redacted = sensitive_stderr_key_regex()
+        .replace_all(line, |caps: &regex_lite::Captures<'_>| {
             format!("{}{}{}", &caps[1], &caps[2], STDERR_REDACTED)
         });
     authorization_stderr_regex()

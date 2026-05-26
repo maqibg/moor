@@ -1,4 +1,5 @@
 use crate::sidecar::http::{error_from_code, internal_error, ApiErrorResponse, AppState};
+use crate::sidecar::services::server_manager::public_server_start_error_message;
 use crate::sidecar::services::server_service::{
     CreateServerInput, ServerService, ServerServiceError, UpdateServerInput,
 };
@@ -152,7 +153,7 @@ async fn start(
         .server_manager
         .start_server(&id)
         .await
-        .map_err(internal_error)?;
+        .map_err(|err| internal_error(public_server_start_error_message(&err)))?;
     Ok(Json(serde_json::json!({ "status": "started" })))
 }
 

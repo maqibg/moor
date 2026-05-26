@@ -9,10 +9,12 @@ use crate::sidecar::mcp::transport::stdio_client::{
     build_stdio_environment, find_executable_on_path,
 };
 use crate::sidecar::services::event_bus::EventBus;
+use crate::sidecar::services::settings;
 use crate::sidecar::services::tool_catalog::{ToolCatalogService, ToolDetail};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
@@ -52,6 +54,18 @@ pub struct ServerManager {
     slots: Arc<Mutex<HashMap<String, ServerSlot>>>,
     db: Arc<Database>,
     event_bus: Arc<EventBus>,
+}
+
+#[derive(Clone, Copy)]
+struct ServerTimeouts {
+    request_ms: u32,
+    start_ms: u32,
+}
+
+impl ServerTimeouts {
+    fn startup_request_ms(self) -> u32 {
+        self.request_ms.max(self.start_ms)
+    }
 }
 
 impl ServerManager {
@@ -160,20 +174,33 @@ impl ServerManager {
             }
         };
 
+        let timeouts = self.get_timeout_settings();
+
         if should_wait {
-            return self.wait_for_start(id).await;
+            return self.wait_for_start(id, timeouts.start_ms).await;
         }
 
         self.persist_server_status(id, "starting", None);
 
-        let result = match self.get_stored_config(id) {
-            Ok(config) => match config.connection_type.as_str() {
-                "stdio" => self.connect_stdio(&config).await,
-                "http" => self.connect_http(&config).await,
-                other => Err(format!("Unknown connection type: {other}")),
-            },
-            Err(err) => Err(err),
-        };
+        let result =
+            match tokio::time::timeout(Duration::from_millis(timeouts.start_ms as u64), async {
+                match self.get_stored_config(id) {
+                    Ok(config) => match config.connection_type.as_str() {
+                        "stdio" => self.connect_stdio(&config, timeouts).await,
+                        "http" => self.connect_http(&config, timeouts).await,
+                        other => Err(format!("Unknown connection type: {other}")),
+                    },
+                    Err(err) => Err(err),
+                }
+            })
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => Err(format!(
+                    "Server start timed out after {}",
+                    format_timeout_ms(timeouts.start_ms)
+                )),
+            };
 
         match result {
             Ok((tools, client)) => {
@@ -210,7 +237,7 @@ impl ServerManager {
                 Ok(())
             }
             Err(e) => {
-                let public_msg = get_public_error_message(&e);
+                let public_msg = public_server_start_error_message(&e);
                 let should_persist = {
                     let mut slots = self.slots.lock().await;
                     if let Some(slot) = slots.get_mut(id) {
@@ -237,8 +264,10 @@ impl ServerManager {
         }
     }
 
-    async fn wait_for_start(&self, id: &str) -> Result<(), String> {
-        for _ in 0..300 {
+    async fn wait_for_start(&self, id: &str, start_timeout_ms: u32) -> Result<(), String> {
+        let timeout_ms = start_timeout_ms.saturating_add(1_000);
+        let poll_count = timeout_ms.div_ceil(100);
+        for _ in 0..poll_count {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             let slots = self.slots.lock().await;
             match slots.get(id) {
@@ -251,12 +280,16 @@ impl ServerManager {
                 None => return Err(format!("Server {id} not found")),
             }
         }
-        Err(format!("Timed out while waiting for server {id} to start"))
+        Err(format!(
+            "Server start wait timed out after {}",
+            format_timeout_ms(timeout_ms)
+        ))
     }
 
     async fn connect_stdio(
         &self,
         config: &StoredServerConfig,
+        timeouts: ServerTimeouts,
     ) -> Result<(Vec<ToolInsert>, McpClient), String> {
         let command = config
             .command
@@ -283,16 +316,18 @@ impl ServerManager {
             })
             .unwrap_or_default();
 
-        let client = McpClient::connect_stdio(StdioConnectConfig {
+        let mut client = McpClient::connect_stdio(StdioConnectConfig {
             server_name: config.name.clone(),
             command: command.to_string(),
             args,
             cwd: config.working_dir.clone(),
             env,
+            request_timeout_ms: timeouts.startup_request_ms(),
         })
         .await?;
 
         let tools = client.list_tools().await?;
+        client.set_request_timeout_ms(timeouts.request_ms);
 
         Ok((tools, client))
     }
@@ -300,6 +335,7 @@ impl ServerManager {
     async fn connect_http(
         &self,
         config: &StoredServerConfig,
+        timeouts: ServerTimeouts,
     ) -> Result<(Vec<ToolInsert>, McpClient), String> {
         let url = config.url.as_deref().ok_or("http server requires url")?;
 
@@ -318,14 +354,16 @@ impl ServerManager {
             Some(&env),
         );
 
-        let client = McpClient::connect_http(HttpConnectConfig {
+        let mut client = McpClient::connect_http(HttpConnectConfig {
             server_name: config.name.clone(),
             url: url.to_string(),
             headers,
+            request_timeout_ms: timeouts.startup_request_ms(),
         })
         .await?;
 
         let tools = client.list_tools().await?;
+        client.set_request_timeout_ms(timeouts.request_ms);
 
         Ok((tools, client))
     }
@@ -502,6 +540,18 @@ impl ServerManager {
             working_dir: server.working_dir,
         })
     }
+
+    fn get_timeout_settings(&self) -> ServerTimeouts {
+        settings::get_settings(&self.db)
+            .map(|settings| ServerTimeouts {
+                request_ms: settings.advanced.mcp_request_timeout_ms,
+                start_ms: settings.advanced.mcp_server_start_timeout_ms,
+            })
+            .unwrap_or(ServerTimeouts {
+                request_ms: settings::MCP_TIMEOUT_MS_DEFAULT,
+                start_ms: settings::MCP_TIMEOUT_MS_DEFAULT,
+            })
+    }
 }
 
 struct StoredServerConfig {
@@ -533,7 +583,7 @@ fn verify_command_available(command: &str, env: &HashMap<String, String>) -> Res
     Ok(())
 }
 
-fn get_public_error_message(err: &str) -> String {
+pub fn public_server_start_error_message(err: &str) -> String {
     if let Some(cmd) = extract_missing_command(err) {
         return format!("Command \"{cmd}\" was not found. Configure an absolute command path or update this server environment.");
     }
@@ -544,6 +594,14 @@ fn get_public_error_message(err: &str) -> String {
         return format!("Server failed to start: {summary}");
     }
     "Server failed to start. Check logs for details.".to_string()
+}
+
+fn format_timeout_ms(timeout_ms: u32) -> String {
+    if timeout_ms % 1000 == 0 {
+        format!("{}s", timeout_ms / 1000)
+    } else {
+        format!("{timeout_ms}ms")
+    }
 }
 
 fn extract_missing_command(err: &str) -> Option<String> {
@@ -614,6 +672,62 @@ process.stdin.on("data", (chunk) => {{
             ),
         )
         .expect("failed to write delayed MCP server");
+        script.to_string_lossy().to_string()
+    }
+
+    fn write_phase_delay_mcp_server(
+        data_dir: &std::path::Path,
+        marker: &std::path::Path,
+        script_name: &str,
+        server_name: &str,
+        initialize_delay_ms: u64,
+        list_tools_delay_ms: u64,
+        tool_call_delay_ms: u64,
+    ) -> String {
+        let script = data_dir.join(script_name);
+        std::fs::write(
+            &script,
+            format!(
+                r#"
+import fs from "node:fs";
+fs.appendFileSync({marker:?}, {server_name:?} + "\n");
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {{
+  buffer += chunk;
+  const lines = buffer.split("\n");
+  buffer = lines.pop() ?? "";
+  for (const line of lines) {{
+    if (!line.trim()) continue;
+    const request = JSON.parse(line);
+    if (request.id === undefined) continue;
+    const delays = {{
+      initialize: {initialize_delay_ms},
+      "tools/list": {list_tools_delay_ms},
+      "tools/call": {tool_call_delay_ms},
+    }};
+    setTimeout(() => {{
+      let result = {{}};
+      if (request.method === "initialize") {{
+        result = {{ protocolVersion: "2024-11-05", capabilities: {{ tools: {{}} }}, serverInfo: {{ name: "phase", version: "1.0.0" }} }};
+      }} else if (request.method === "tools/list") {{
+        result = {{ tools: [{{ name: "echo", description: "Echo", inputSchema: {{ type: "object" }} }}] }};
+      }} else if (request.method === "tools/call") {{
+        result = {{ content: [{{ type: "text", text: "ok" }}] }};
+      }}
+      process.stdout.write(JSON.stringify({{ jsonrpc: "2.0", id: request.id, result }}) + "\n");
+    }}, delays[request.method] ?? 0);
+  }}
+}});
+"#,
+                marker = marker.to_string_lossy(),
+                server_name = server_name,
+                initialize_delay_ms = initialize_delay_ms,
+                list_tools_delay_ms = list_tools_delay_ms,
+                tool_call_delay_ms = tool_call_delay_ms
+            ),
+        )
+        .expect("failed to write phase-delay MCP server");
         script.to_string_lossy().to_string()
     }
 
@@ -716,8 +830,8 @@ process.stdin.on("data", (chunk) => {{
     #[test]
     fn public_error_prefers_stdio_stderr_summary() {
         assert_eq!(
-            get_public_error_message(
-                "request timed out (30s). stdio stderr: npm ERR! package not found"
+            public_server_start_error_message(
+                "request timed out after 30s. stdio stderr: npm ERR! package not found"
             ),
             "Server failed to start: npm ERR! package not found"
         );
@@ -726,7 +840,7 @@ process.stdin.on("data", (chunk) => {{
     #[test]
     fn public_error_falls_back_without_stdio_stderr_summary() {
         assert_eq!(
-            get_public_error_message("request timed out (30s)"),
+            public_server_start_error_message("request timed out after 30s"),
             "Server failed to start. Check logs for details."
         );
     }
@@ -802,6 +916,128 @@ process.stdin.on("data", (chunk) => {{
         assert_eq!(starts.lines().count(), 1);
 
         manager.stop_server(&server_id).await.expect("stop failed");
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn startup_uses_larger_start_timeout_then_restores_request_timeout() {
+        let data_dir = temp_data_dir("startup-request-timeout");
+        std::fs::create_dir_all(&data_dir).expect("failed to create temp dir");
+        let marker = data_dir.join("starts.log");
+        let script = write_phase_delay_mcp_server(
+            &data_dir,
+            &marker,
+            "phase-delay.mjs",
+            "phase",
+            5_500,
+            0,
+            5_500,
+        );
+
+        let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
+        db.run_migrations().expect("failed to run migrations");
+        settings::update_settings(
+            &db,
+            serde_json::json!({
+                "advanced": {
+                    "mcpRequestTimeoutMs": settings::MCP_TIMEOUT_MS_MIN,
+                    "mcpServerStartTimeoutMs": 7_000
+                }
+            }),
+        )
+        .expect("settings update should succeed");
+        let profile_repo = ProfileRepository::new(&db);
+        profile_repo.seed_default().expect("failed to seed profile");
+
+        let server_id = uuid::Uuid::new_v4().to_string();
+        insert_stdio_server(&db, &server_id, "phase", script, false, 0);
+        profile_repo
+            .assign_to_active_profile(std::slice::from_ref(&server_id))
+            .expect("failed to assign server");
+
+        let event_bus = Arc::new(EventBus::new(16));
+        let manager = Arc::new(ServerManager::new(db.clone(), event_bus));
+        manager.load_from_db().await;
+
+        tokio::time::timeout(
+            std::time::Duration::from_millis(6_500),
+            manager.start_server(&server_id),
+        )
+        .await
+        .expect("startup should not be cut off by request timeout")
+        .expect("startup should succeed with the larger startup timeout");
+
+        let err = tokio::time::timeout(
+            std::time::Duration::from_millis(6_500),
+            manager.call_tool("phase__echo", serde_json::json!({})),
+        )
+        .await
+        .expect("tool call should return before the outer timeout")
+        .expect_err("runtime requests should restore the configured request timeout");
+        assert!(err.contains("timed out after 5s"));
+
+        manager.stop_server(&server_id).await.expect("stop failed");
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn first_start_respects_configured_server_start_timeout() {
+        let data_dir = temp_data_dir("first-start-timeout");
+        std::fs::create_dir_all(&data_dir).expect("failed to create temp dir");
+        let marker = data_dir.join("starts.log");
+        let script =
+            write_delayed_mcp_server(&data_dir, &marker, "very-slow-start.mjs", "slow", 20_000);
+
+        let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
+        db.run_migrations().expect("failed to run migrations");
+        settings::update_settings(
+            &db,
+            serde_json::json!({
+                "advanced": {
+                    "mcpRequestTimeoutMs": 300_000,
+                    "mcpServerStartTimeoutMs": 5_000
+                }
+            }),
+        )
+        .expect("settings update should succeed");
+        let profile_repo = ProfileRepository::new(&db);
+        profile_repo.seed_default().expect("failed to seed profile");
+
+        let server_id = uuid::Uuid::new_v4().to_string();
+        insert_stdio_server(&db, &server_id, "slow", script, false, 0);
+        profile_repo
+            .assign_to_active_profile(std::slice::from_ref(&server_id))
+            .expect("failed to assign server");
+
+        let event_bus = Arc::new(EventBus::new(16));
+        let manager = Arc::new(ServerManager::new(db.clone(), event_bus));
+        manager.load_from_db().await;
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(6_500),
+            manager.start_server(&server_id),
+        )
+        .await
+        .expect("server start should return before the outer timeout");
+        let err = result.expect_err("slow first start should fail");
+
+        assert!(err.contains("Server start timed out after 5s"));
+        let runtime = manager
+            .get_server(&server_id)
+            .await
+            .expect("server should remain registered");
+        assert_eq!(runtime.status, "error");
+
+        let stored = ServerRepository::new(&db)
+            .find_by_id(&server_id)
+            .expect("server should load")
+            .expect("server should exist");
+        assert_eq!(stored.status, "error");
+        assert_eq!(
+            stored.error_message.as_deref(),
+            Some("Server failed to start. Check logs for details.")
+        );
+
         let _ = std::fs::remove_dir_all(data_dir);
     }
 

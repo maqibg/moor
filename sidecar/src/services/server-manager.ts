@@ -7,6 +7,7 @@ import type { Server, ServerUpdateInput, ToolCatalogEntry } from "@moor/types";
 import { eventBus } from "./event-bus.js";
 import { profileService } from "./profiles.js";
 import { getDatabase } from "../db/index.js";
+import { settingsService } from "./settings.js";
 
 export type { ServerSession, SessionFactory };
 
@@ -28,6 +29,11 @@ export interface ManagedServer {
   connectionType: "stdio" | "http";
   status: "stopped" | "starting" | "running" | "error";
   autoStart: boolean;
+}
+
+interface McpTimeoutSettings {
+  requestTimeoutMs: number;
+  startTimeoutMs: number;
 }
 
 export function getPublicServerStartErrorMessage(err: unknown): string {
@@ -186,9 +192,12 @@ export class ServerRuntime {
     try {
       const server = getServerRepository().findById(id);
       if (!server) throw new Error(`Server ${id} not found`);
-      const session = await this.sessionManager.createSession(id, server);
+      const timeouts = this.getMcpTimeoutSettings();
+      const session = await this.sessionManager.createSession(id, server, timeouts);
 
-      const toolsResult = await session.client.listTools();
+      const toolsResult = await session.client.listTools(undefined, {
+        timeout: timeouts.startTimeoutMs,
+      });
       this.cacheTools(
         id,
         toolsResult.tools.map((tool) => ({
@@ -235,10 +244,15 @@ export class ServerRuntime {
 
     const session = this.sessionManager.getSession(owner.serverId);
     if (!session) throw new Error(`Server "${owner.serverName}" is not running`);
-    return session.client.callTool({
-      name: owner.toolName,
-      arguments: args as Record<string, unknown>,
-    });
+    const { requestTimeoutMs } = this.getMcpTimeoutSettings();
+    return session.client.callTool(
+      {
+        name: owner.toolName,
+        arguments: args as Record<string, unknown>,
+      },
+      undefined,
+      { timeout: requestTimeoutMs },
+    );
   }
 
   findToolOwner(exposedName: string): ToolCatalogEntry | null {
@@ -259,6 +273,14 @@ export class ServerRuntime {
       }
     }
     return ids;
+  }
+
+  private getMcpTimeoutSettings(): McpTimeoutSettings {
+    const advanced = settingsService.getSettings().advanced;
+    return {
+      requestTimeoutMs: advanced.mcpRequestTimeoutMs,
+      startTimeoutMs: advanced.mcpServerStartTimeoutMs,
+    };
   }
 
   getActiveProfileServers(): Array<{ serverId: string; server: ManagedServer }> {

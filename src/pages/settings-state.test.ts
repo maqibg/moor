@@ -5,7 +5,9 @@ import {
   getGeneralSettingRuntimeAction,
   getPortBannerState,
   getSettingsPageLoadState,
+  parseTimeoutSecondsInput,
 } from "./settings-state";
+import { MCP_TIMEOUT_MS_MAX, MCP_TIMEOUT_MS_MIN } from "@moor/types";
 
 const runtimeInfo = (port: number): SidecarInfo => ({
   port,
@@ -89,6 +91,33 @@ describe("settings page state helpers", () => {
       autoStartServersOnLaunch: "settingsOnly",
       minimizeToTrayOnClose: "windowRuntime",
       showWindowOnLaunch: "windowRuntime",
+    });
+  });
+
+  it("accepts only integer timeout seconds inside the supported range", () => {
+    expect(parseTimeoutSecondsInput("5")).toEqual({
+      valid: true,
+      milliseconds: MCP_TIMEOUT_MS_MIN,
+    });
+    expect(parseTimeoutSecondsInput("300")).toEqual({
+      valid: true,
+      milliseconds: MCP_TIMEOUT_MS_MAX,
+    });
+    expect(parseTimeoutSecondsInput("")).toEqual({
+      valid: false,
+      message: "Enter a whole number between 5 and 300.",
+    });
+    expect(parseTimeoutSecondsInput("5.7")).toEqual({
+      valid: false,
+      message: "Enter a whole number between 5 and 300.",
+    });
+    expect(parseTimeoutSecondsInput("4")).toEqual({
+      valid: false,
+      message: "Enter a whole number between 5 and 300.",
+    });
+    expect(parseTimeoutSecondsInput("301")).toEqual({
+      valid: false,
+      message: "Enter a whole number between 5 and 300.",
     });
   });
 });

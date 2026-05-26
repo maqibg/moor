@@ -3,7 +3,13 @@ import path from "node:path";
 import { getSettingsRepository } from "../db/settings-repository.js";
 import { getAuditLogRepository } from "../db/audit-log-repository.js";
 import { eventBus } from "./event-bus.js";
-import { createDefaultSettings, type Settings, type SettingsUpdatePayload } from "@moor/types";
+import {
+  MCP_TIMEOUT_MS_MAX,
+  MCP_TIMEOUT_MS_MIN,
+  createDefaultSettings,
+  type Settings,
+  type SettingsUpdatePayload,
+} from "@moor/types";
 
 const SETTINGS_FILE = "settings.json";
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
@@ -23,10 +29,17 @@ function integerInRangeOrDefault(
   min: number,
   max: number,
   fallback: number,
+  key?: string,
 ): number {
-  return typeof value === "number" && Number.isInteger(value) && value >= min && value <= max
-    ? value
-    : fallback;
+  if (typeof value === "number" && Number.isInteger(value) && value >= min && value <= max) {
+    return value;
+  }
+  if (value !== undefined && key) {
+    console.warn(
+      `Ignoring invalid stored setting ${key}: expected an integer between ${min} and ${max}, received ${JSON.stringify(value)}. Falling back to ${fallback}.`,
+    );
+  }
+  return fallback;
 }
 
 function mergeStoredSettings(raw: unknown): Settings {
@@ -78,6 +91,20 @@ function mergeStoredSettings(raw: unknown): Settings {
         65535,
         defaults.advanced.sidecarPort,
       ),
+      mcpRequestTimeoutMs: integerInRangeOrDefault(
+        advanced.mcpRequestTimeoutMs,
+        MCP_TIMEOUT_MS_MIN,
+        MCP_TIMEOUT_MS_MAX,
+        defaults.advanced.mcpRequestTimeoutMs,
+        "advanced.mcpRequestTimeoutMs",
+      ),
+      mcpServerStartTimeoutMs: integerInRangeOrDefault(
+        advanced.mcpServerStartTimeoutMs,
+        MCP_TIMEOUT_MS_MIN,
+        MCP_TIMEOUT_MS_MAX,
+        defaults.advanced.mcpServerStartTimeoutMs,
+        "advanced.mcpServerStartTimeoutMs",
+      ),
     },
   };
 }
@@ -92,6 +119,8 @@ function settingsToDbEntries(settings: Settings): Array<[string, string]> {
     ["advanced.logRetentionDays", JSON.stringify(settings.advanced.logRetentionDays)],
     ["advanced.enableAuditLogging", JSON.stringify(settings.advanced.enableAuditLogging)],
     ["advanced.sidecarPort", JSON.stringify(settings.advanced.sidecarPort)],
+    ["advanced.mcpRequestTimeoutMs", JSON.stringify(settings.advanced.mcpRequestTimeoutMs)],
+    ["advanced.mcpServerStartTimeoutMs", JSON.stringify(settings.advanced.mcpServerStartTimeoutMs)],
   ];
 }
 

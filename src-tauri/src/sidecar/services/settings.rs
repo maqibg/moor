@@ -4,6 +4,9 @@ use serde_json::{Map, Value};
 use std::{fs, path::Path};
 
 const SETTINGS_FILE: &str = "settings.json";
+pub const MCP_TIMEOUT_MS_MIN: u32 = 5_000;
+pub const MCP_TIMEOUT_MS_MAX: u32 = 300_000;
+pub const MCP_TIMEOUT_MS_DEFAULT: u32 = 30_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -26,6 +29,8 @@ pub struct AdvancedSettings {
     pub log_retention_days: u16,
     pub enable_audit_logging: bool,
     pub sidecar_port: u16,
+    pub mcp_request_timeout_ms: u32,
+    pub mcp_server_start_timeout_ms: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -58,6 +63,8 @@ struct PartialAdvancedSettings {
     log_retention_days: Option<u16>,
     enable_audit_logging: Option<bool>,
     sidecar_port: Option<u16>,
+    mcp_request_timeout_ms: Option<u32>,
+    mcp_server_start_timeout_ms: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -85,6 +92,8 @@ pub fn default_settings() -> Settings {
             log_retention_days: 30,
             enable_audit_logging: true,
             sidecar_port: 9223,
+            mcp_request_timeout_ms: MCP_TIMEOUT_MS_DEFAULT,
+            mcp_server_start_timeout_ms: MCP_TIMEOUT_MS_DEFAULT,
         },
     }
 }
@@ -144,6 +153,16 @@ fn settings_to_db_entries(settings: &Settings) -> Result<Vec<(&'static str, Stri
         (
             "advanced.sidecarPort",
             serde_json::to_string(&settings.advanced.sidecar_port).map_err(|e| e.to_string())?,
+        ),
+        (
+            "advanced.mcpRequestTimeoutMs",
+            serde_json::to_string(&settings.advanced.mcp_request_timeout_ms)
+                .map_err(|e| e.to_string())?,
+        ),
+        (
+            "advanced.mcpServerStartTimeoutMs",
+            serde_json::to_string(&settings.advanced.mcp_server_start_timeout_ms)
+                .map_err(|e| e.to_string())?,
         ),
     ])
 }
@@ -256,6 +275,12 @@ pub fn merge_settings_value(mut base: Settings, value: Value) -> Result<Settings
         if let Some(value) = advanced.sidecar_port {
             base.advanced.sidecar_port = value;
         }
+        if let Some(value) = advanced.mcp_request_timeout_ms {
+            base.advanced.mcp_request_timeout_ms = value;
+        }
+        if let Some(value) = advanced.mcp_server_start_timeout_ms {
+            base.advanced.mcp_server_start_timeout_ms = value;
+        }
     }
     validate_settings(&base)?;
     Ok(base)
@@ -276,6 +301,20 @@ fn validate_settings(settings: &Settings) -> Result<(), String> {
     }
     if settings.advanced.sidecar_port < 1024 {
         return Err("advanced.sidecarPort must be between 1024 and 65535".to_string());
+    }
+    if settings.advanced.mcp_request_timeout_ms < MCP_TIMEOUT_MS_MIN
+        || settings.advanced.mcp_request_timeout_ms > MCP_TIMEOUT_MS_MAX
+    {
+        return Err(format!(
+            "advanced.mcpRequestTimeoutMs must be between {MCP_TIMEOUT_MS_MIN} and {MCP_TIMEOUT_MS_MAX}"
+        ));
+    }
+    if settings.advanced.mcp_server_start_timeout_ms < MCP_TIMEOUT_MS_MIN
+        || settings.advanced.mcp_server_start_timeout_ms > MCP_TIMEOUT_MS_MAX
+    {
+        return Err(format!(
+            "advanced.mcpServerStartTimeoutMs must be between {MCP_TIMEOUT_MS_MIN} and {MCP_TIMEOUT_MS_MAX}"
+        ));
     }
     Ok(())
 }
@@ -374,6 +413,39 @@ mod tests {
         .expect_err("invalid port should fail");
         assert!(err.contains("advanced.sidecarPort"));
         let _ = fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn merges_mcp_timeout_settings() {
+        let updated = merge_settings_value(
+            default_settings(),
+            serde_json::json!({
+                "advanced": {
+                    "mcpRequestTimeoutMs": MCP_TIMEOUT_MS_MIN,
+                    "mcpServerStartTimeoutMs": MCP_TIMEOUT_MS_MAX
+                }
+            }),
+        )
+        .expect("timeout settings should merge");
+
+        assert_eq!(updated.advanced.mcp_request_timeout_ms, MCP_TIMEOUT_MS_MIN);
+        assert_eq!(
+            updated.advanced.mcp_server_start_timeout_ms,
+            MCP_TIMEOUT_MS_MAX
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_mcp_timeout_settings() {
+        let mut settings = default_settings();
+        settings.advanced.mcp_request_timeout_ms = MCP_TIMEOUT_MS_MIN - 1;
+        let err = validate_settings(&settings).expect_err("request timeout should fail");
+        assert!(err.contains("advanced.mcpRequestTimeoutMs"));
+
+        let mut settings = default_settings();
+        settings.advanced.mcp_server_start_timeout_ms = MCP_TIMEOUT_MS_MAX + 1;
+        let err = validate_settings(&settings).expect_err("start timeout should fail");
+        assert!(err.contains("advanced.mcpServerStartTimeoutMs"));
     }
 
     #[test]

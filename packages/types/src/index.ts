@@ -36,7 +36,13 @@ export type {
   SettingsGroup,
   SettingsUpdatePayload,
   ThemeMode,
+  TimeoutSettings,
 } from "./settings.js";
 export type { SidecarInfo } from "./sidecar.js";
 export type { ApiErrorCode, ApiError } from "./error.js";
-export { createDefaultSettings } from "./settings.js";
+export {
+  MCP_TIMEOUT_MS_DEFAULT,
+  MCP_TIMEOUT_MS_MAX,
+  MCP_TIMEOUT_MS_MIN,
+  createDefaultSettings,
+} from "./settings.js";

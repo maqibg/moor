@@ -3,6 +3,7 @@ use crate::sidecar::mcp::transport::http_client::HttpClientTransport;
 use crate::sidecar::mcp::transport::stdio_client::StdioClientTransport;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::time::Duration;
 
 pub struct McpClient {
     transport: McpTransport,
@@ -20,12 +21,14 @@ pub struct StdioConnectConfig {
     pub args: Vec<String>,
     pub cwd: Option<String>,
     pub env: HashMap<String, String>,
+    pub request_timeout_ms: u32,
 }
 
 pub struct HttpConnectConfig {
     pub server_name: String,
     pub url: String,
     pub headers: HashMap<String, String>,
+    pub request_timeout_ms: u32,
 }
 
 impl McpClient {
@@ -35,6 +38,7 @@ impl McpClient {
             &config.args,
             config.cwd.as_deref(),
             config.env,
+            Duration::from_millis(config.request_timeout_ms as u64),
         )
         .await?;
         let mut client = Self {
@@ -46,7 +50,11 @@ impl McpClient {
     }
 
     pub async fn connect_http(config: HttpConnectConfig) -> Result<Self, String> {
-        let transport = HttpClientTransport::new(&config.url, config.headers);
+        let transport = HttpClientTransport::new(
+            &config.url,
+            config.headers,
+            Duration::from_millis(config.request_timeout_ms as u64),
+        );
         let mut client = Self {
             transport: McpTransport::Http(transport),
             server_name: config.server_name,
@@ -91,6 +99,14 @@ impl McpClient {
         match &mut self.transport {
             McpTransport::Stdio(t) => t.close().await,
             McpTransport::Http(_) => Ok(()),
+        }
+    }
+
+    pub fn set_request_timeout_ms(&mut self, request_timeout_ms: u32) {
+        let request_timeout = Duration::from_millis(request_timeout_ms as u64);
+        match &mut self.transport {
+            McpTransport::Stdio(t) => t.set_request_timeout(request_timeout),
+            McpTransport::Http(t) => t.set_request_timeout(request_timeout),
         }
     }
 

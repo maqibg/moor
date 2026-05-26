@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MCP_TIMEOUT_MS_MAX, MCP_TIMEOUT_MS_MIN } from "@moor/types";
 
 export const createServerSchema = z.discriminatedUnion("connectionType", [
   z.object({
@@ -88,6 +89,18 @@ const advancedSettingsUpdateSchema = z
     logRetentionDays: z.number().int().min(0).max(365).optional(),
     enableAuditLogging: z.boolean().optional(),
     sidecarPort: z.number().int().min(1024).max(65535).optional(),
+    mcpRequestTimeoutMs: z
+      .number()
+      .int()
+      .min(MCP_TIMEOUT_MS_MIN)
+      .max(MCP_TIMEOUT_MS_MAX)
+      .optional(),
+    mcpServerStartTimeoutMs: z
+      .number()
+      .int()
+      .min(MCP_TIMEOUT_MS_MIN)
+      .max(MCP_TIMEOUT_MS_MAX)
+      .optional(),
   })
   .strict();
 

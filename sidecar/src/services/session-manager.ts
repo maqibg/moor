@@ -21,7 +21,11 @@ export interface ServerSession {
   transport: Transport;
 }
 
-export type SessionFactory = (server: Server) => Promise<ServerSession>;
+export interface SessionTimeouts {
+  startTimeoutMs: number;
+}
+
+export type SessionFactory = (server: Server, timeouts: SessionTimeouts) => Promise<ServerSession>;
 
 export class SessionManager {
   private sessions: Map<string, ServerSession> = new Map();
@@ -48,8 +52,12 @@ export class SessionManager {
     return this.sessions.get(id);
   }
 
-  async createSession(id: string, server: Server): Promise<ServerSession> {
-    const session = await this.sessionFactory(server);
+  async createSession(
+    id: string,
+    server: Server,
+    timeouts: SessionTimeouts,
+  ): Promise<ServerSession> {
+    const session = await this.sessionFactory(server, timeouts);
     this.sessions.set(id, session);
     return session;
   }
@@ -66,7 +74,7 @@ export class SessionManager {
   }
 }
 
-async function createTransport(server: Server): Promise<Transport> {
+async function createTransport(server: Server, timeouts: SessionTimeouts): Promise<Transport> {
   if (server.connectionType === "stdio") {
     if (!server.command) throw new Error("stdio server requires command");
     const env = buildStdioEnvironment(
@@ -92,7 +100,7 @@ async function createTransport(server: Server): Promise<Transport> {
       { name: `moor-probe-${server.name}`, version: getAppVersion() },
       { capabilities: {} },
     );
-    await probe.connect(transport);
+    await probe.connect(transport, { timeout: timeouts.startTimeoutMs });
     await probe.close();
     return new StreamableHTTPClientTransport(url, { requestInit });
   } catch {
@@ -100,10 +108,10 @@ async function createTransport(server: Server): Promise<Transport> {
   }
 }
 
-async function createSession(server: Server): Promise<ServerSession> {
+async function createSession(server: Server, timeouts: SessionTimeouts): Promise<ServerSession> {
   const version = getAppVersion();
   const client = new Client({ name: `moor-${server.name}`, version }, { capabilities: {} });
-  const transport = await createTransport(server);
-  await client.connect(transport);
+  const transport = await createTransport(server, timeouts);
+  await client.connect(transport, { timeout: timeouts.startTimeoutMs });
   return { client, transport };
 }

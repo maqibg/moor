@@ -1,10 +1,11 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { closeDb, initDb, queryAll, run, runMigrations } from "../db/index.js";
 import { settings } from "../api/settings.js";
 import { settingsService } from "./settings.js";
+import { MCP_TIMEOUT_MS_DEFAULT, MCP_TIMEOUT_MS_MAX, MCP_TIMEOUT_MS_MIN } from "@moor/types";
 
 let dataDir: string;
 
@@ -37,6 +38,7 @@ describe("SettingsService", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     settingsService.stopLogCleanupInterval();
     closeDb();
     rmSync(dataDir, { recursive: true, force: true });
@@ -67,6 +69,8 @@ describe("SettingsService", () => {
         logRetentionDays: 30,
         enableAuditLogging: true,
         sidecarPort: 9223,
+        mcpRequestTimeoutMs: 30_000,
+        mcpServerStartTimeoutMs: 30_000,
       },
     });
   });
@@ -81,6 +85,52 @@ describe("SettingsService", () => {
     );
     expect(rows).toEqual([{ key: "general.minimizeToTrayOnClose", value: "false" }]);
     expect(updated.general.minimizeToTrayOnClose).toBe(false);
+  });
+
+  it("persists MCP timeout settings to the database", () => {
+    const updated = settingsService.updateSettings({
+      advanced: {
+        mcpRequestTimeoutMs: 45_000,
+        mcpServerStartTimeoutMs: 60_000,
+      },
+    });
+
+    const rows = queryAll(
+      "SELECT key, value FROM settings WHERE key IN ('advanced.mcpRequestTimeoutMs', 'advanced.mcpServerStartTimeoutMs') ORDER BY key",
+    );
+    expect(rows).toEqual([
+      { key: "advanced.mcpRequestTimeoutMs", value: "45000" },
+      { key: "advanced.mcpServerStartTimeoutMs", value: "60000" },
+    ]);
+    expect(updated.advanced.mcpRequestTimeoutMs).toBe(45_000);
+    expect(updated.advanced.mcpServerStartTimeoutMs).toBe(60_000);
+  });
+
+  it("falls back and warns when stored MCP timeout settings are outside the supported range", async () => {
+    closeDb();
+    rmSync(dataDir, { recursive: true, force: true });
+    dataDir = mkdtempSync(path.join(tmpdir(), "moor-settings-"));
+    writeFileSync(
+      path.join(dataDir, "settings.json"),
+      JSON.stringify({
+        advanced: {
+          mcpRequestTimeoutMs: MCP_TIMEOUT_MS_MIN - 1,
+          mcpServerStartTimeoutMs: MCP_TIMEOUT_MS_MAX + 1,
+        },
+      }),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await initDb({ dataDir });
+    runMigrations();
+
+    settingsService.init(dataDir);
+
+    expect(settingsService.getSettings().advanced).toMatchObject({
+      mcpRequestTimeoutMs: MCP_TIMEOUT_MS_DEFAULT,
+      mcpServerStartTimeoutMs: MCP_TIMEOUT_MS_DEFAULT,
+    });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("advanced.mcpRequestTimeoutMs"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("advanced.mcpServerStartTimeoutMs"));
   });
 
   it("keeps audit logs when retention is unlimited", () => {
@@ -129,6 +179,28 @@ describe("settings API validation", () => {
     expect(invalidPort.status).toBe(400);
     await expect(invalidPort.json()).resolves.toEqual({
       error: { code: "VALIDATION_ERROR", message: expect.stringContaining("advanced.sidecarPort") },
+    });
+
+    const invalidRequestTimeout = await patchSettings({
+      advanced: { mcpRequestTimeoutMs: 4_999 },
+    });
+    expect(invalidRequestTimeout.status).toBe(400);
+    await expect(invalidRequestTimeout.json()).resolves.toEqual({
+      error: {
+        code: "VALIDATION_ERROR",
+        message: expect.stringContaining("advanced.mcpRequestTimeoutMs"),
+      },
+    });
+
+    const invalidStartTimeout = await patchSettings({
+      advanced: { mcpServerStartTimeoutMs: 300_001 },
+    });
+    expect(invalidStartTimeout.status).toBe(400);
+    await expect(invalidStartTimeout.json()).resolves.toEqual({
+      error: {
+        code: "VALIDATION_ERROR",
+        message: expect.stringContaining("advanced.mcpServerStartTimeoutMs"),
+      },
     });
   });
 

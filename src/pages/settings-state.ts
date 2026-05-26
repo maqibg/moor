@@ -1,4 +1,9 @@
-import type { GeneralSettings, SidecarInfo } from "@moor/types";
+import {
+  MCP_TIMEOUT_MS_MAX,
+  MCP_TIMEOUT_MS_MIN,
+  type GeneralSettings,
+  type SidecarInfo,
+} from "@moor/types";
 
 export type SettingsPageLoadState =
   | { kind: "loading"; canRenderControls: false }
@@ -10,6 +15,14 @@ export type PortBannerState = { kind: "restart" };
 export type AdvancedPortStatus = { kind: "mismatch"; currentPort: number; configuredPort: number };
 
 export type GeneralSettingRuntimeAction = "loginAutostart" | "settingsOnly" | "windowRuntime";
+
+export type TimeoutSecondsInputState =
+  | { valid: true; milliseconds: number }
+  | { valid: false; message: string };
+
+const timeoutSecondsMin = MCP_TIMEOUT_MS_MIN / 1000;
+const timeoutSecondsMax = MCP_TIMEOUT_MS_MAX / 1000;
+const timeoutInputError = `Enter a whole number between ${timeoutSecondsMin} and ${timeoutSecondsMax}.`;
 
 export function getSettingsPageLoadState({
   isLoading,
@@ -71,4 +84,15 @@ export function getGeneralSettingRuntimeAction(
     return "settingsOnly";
   }
   return "windowRuntime";
+}
+
+export function parseTimeoutSecondsInput(value: string): TimeoutSecondsInputState {
+  if (!/^\d+$/.test(value.trim())) {
+    return { valid: false, message: timeoutInputError };
+  }
+  const seconds = Number(value);
+  if (seconds < timeoutSecondsMin || seconds > timeoutSecondsMax) {
+    return { valid: false, message: timeoutInputError };
+  }
+  return { valid: true, milliseconds: seconds * 1000 };
 }
