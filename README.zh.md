@@ -64,18 +64,18 @@
 
 ### macOS 应用
 
-从 [Releases](https://github.com/varandrew/moor/releases) 下载 `.dmg`，拖拽到 Applications 文件夹即可。应用内嵌 Rust HTTP 服务器——无需预装 Node.js 运行时。
+从 [Releases](https://github.com/maqibg/moor/releases) 下载 `.dmg`，拖拽到 Applications 文件夹即可。应用内嵌 Rust HTTP 服务器——无需预装 Node.js 运行时。
 
 ### Windows 应用
 
-从 [Releases](https://github.com/varandrew/moor/releases) 下载 Windows 安装包并运行即可。应用内嵌 Rust HTTP 服务器——无需预装 Node.js 运行时。
+从 [Releases](https://github.com/maqibg/moor/releases) 下载 Windows 安装包并运行即可。应用内嵌 Rust HTTP 服务器——无需预装 Node.js 运行时。
 
 ### 从源码构建
 
 需要 macOS（Apple Silicon / Intel）或 Windows x64、Node.js >= 22、pnpm >= 10 和 Rust >= 1.77。
 
 ```bash
-git clone https://github.com/varandrew/moor.git
+git clone https://github.com/maqibg/moor.git
 cd moor
 pnpm install
 ```

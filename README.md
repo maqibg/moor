@@ -64,18 +64,18 @@
 
 ### macOS App
 
-Download the `.dmg` from [Releases](https://github.com/varandrew/moor/releases), drag to Applications, done. The app bundles the HTTP server as an in-process Rust binary — no pre-installed Node.js runtime required.
+Download the `.dmg` from [Releases](https://github.com/maqibg/moor/releases), drag to Applications, done. The app bundles the HTTP server as an in-process Rust binary — no pre-installed Node.js runtime required.
 
 ### Windows App
 
-Download the Windows installer from [Releases](https://github.com/varandrew/moor/releases) and run it. The app bundles the HTTP server as an in-process Rust binary — no pre-installed Node.js runtime required.
+Download the Windows installer from [Releases](https://github.com/maqibg/moor/releases) and run it. The app bundles the HTTP server as an in-process Rust binary — no pre-installed Node.js runtime required.
 
 ### Build from Source
 
 Requires macOS (Apple Silicon / Intel) or Windows x64, Node.js >= 22, pnpm >= 10, and Rust >= 1.77.
 
 ```bash
-git clone https://github.com/varandrew/moor.git
+git clone https://github.com/maqibg/moor.git
 cd moor
 pnpm install
 ```

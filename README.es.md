@@ -66,18 +66,18 @@
 
 ### Aplicación macOS
 
-Descarga el `.dmg` desde [Releases](https://github.com/varandrew/moor/releases), arrástralo a Applications, listo. La aplicación incluye el servidor HTTP Rust en proceso — no se requiere Node.js preinstalado.
+Descarga el `.dmg` desde [Releases](https://github.com/maqibg/moor/releases), arrástralo a Applications, listo. La aplicación incluye el servidor HTTP Rust en proceso — no se requiere Node.js preinstalado.
 
 ### Aplicación Windows
 
-Descarga el instalador de Windows desde [Releases](https://github.com/varandrew/moor/releases) y ejecútalo. La aplicación incluye el servidor HTTP Rust en proceso — no se requiere Node.js preinstalado.
+Descarga el instalador de Windows desde [Releases](https://github.com/maqibg/moor/releases) y ejecútalo. La aplicación incluye el servidor HTTP Rust en proceso — no se requiere Node.js preinstalado.
 
 ### Compilar desde el código fuente
 
 Requiere macOS (Apple Silicon / Intel) o Windows x64, Node.js >= 22, pnpm >= 10 y Rust >= 1.77.
 
 ```bash
-git clone https://github.com/varandrew/moor.git
+git clone https://github.com/maqibg/moor.git
 cd moor
 pnpm install
 ```

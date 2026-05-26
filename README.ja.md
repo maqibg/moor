@@ -66,18 +66,18 @@
 
 ### macOS アプリ
 
-[Releases](https://github.com/varandrew/moor/releases) から `.dmg` をダウンロードし、Applications フォルダにドラッグするだけです。アプリには Rust インプロセス HTTP サーバーがバンドルされているため、Node.js ランタイムの事前インストールは不要です。
+[Releases](https://github.com/maqibg/moor/releases) から `.dmg` をダウンロードし、Applications フォルダにドラッグするだけです。アプリには Rust インプロセス HTTP サーバーがバンドルされているため、Node.js ランタイムの事前インストールは不要です。
 
 ### Windows アプリ
 
-[Releases](https://github.com/varandrew/moor/releases) から Windows インストーラーをダウンロードして実行します。アプリには Rust インプロセス HTTP サーバーがバンドルされているため、Node.js ランタイムの事前インストールは不要です。
+[Releases](https://github.com/maqibg/moor/releases) から Windows インストーラーをダウンロードして実行します。アプリには Rust インプロセス HTTP サーバーがバンドルされているため、Node.js ランタイムの事前インストールは不要です。
 
 ### ソースからビルド
 
 macOS（Apple Silicon / Intel）または Windows x64、Node.js >= 22、pnpm >= 10、Rust >= 1.77 が必要です。
 
 ```bash
-git clone https://github.com/varandrew/moor.git
+git clone https://github.com/maqibg/moor.git
 cd moor
 pnpm install
 ```
