@@ -23,9 +23,26 @@ export interface ServerSession {
 
 export interface SessionTimeouts {
   startTimeoutMs: number;
+  startDeadlineMs?: number;
 }
 
 export type SessionFactory = (server: Server, timeouts: SessionTimeouts) => Promise<ServerSession>;
+
+function formatTimeoutMs(timeoutMs: number): string {
+  return timeoutMs % 1000 === 0 ? `${timeoutMs / 1000}s` : `${timeoutMs}ms`;
+}
+
+export function getRemainingStartTimeoutMs(timeouts: SessionTimeouts): number {
+  if (timeouts.startDeadlineMs === undefined) {
+    return timeouts.startTimeoutMs;
+  }
+
+  const remainingMs = timeouts.startDeadlineMs - Date.now();
+  if (remainingMs <= 0) {
+    throw new Error(`Server start timed out after ${formatTimeoutMs(timeouts.startTimeoutMs)}`);
+  }
+  return remainingMs;
+}
 
 export class SessionManager {
   private sessions: Map<string, ServerSession> = new Map();
@@ -94,13 +111,14 @@ async function createTransport(server: Server, timeouts: SessionTimeouts): Promi
   if (!server.url) throw new Error("http server requires url");
   const url = new URL(server.url);
   const requestInit = { headers: resolveHttpHeaders(server.headers ?? null, server.env ?? null) };
+  const probeTimeoutMs = getRemainingStartTimeoutMs(timeouts);
   try {
     const transport = new StreamableHTTPClientTransport(url, { requestInit });
     const probe = new Client(
       { name: `moor-probe-${server.name}`, version: getAppVersion() },
       { capabilities: {} },
     );
-    await probe.connect(transport, { timeout: timeouts.startTimeoutMs });
+    await probe.connect(transport, { timeout: probeTimeoutMs });
     await probe.close();
     return new StreamableHTTPClientTransport(url, { requestInit });
   } catch {
@@ -112,6 +130,6 @@ async function createSession(server: Server, timeouts: SessionTimeouts): Promise
   const version = getAppVersion();
   const client = new Client({ name: `moor-${server.name}`, version }, { capabilities: {} });
   const transport = await createTransport(server, timeouts);
-  await client.connect(transport, { timeout: timeouts.startTimeoutMs });
+  await client.connect(transport, { timeout: getRemainingStartTimeoutMs(timeouts) });
   return { client, transport };
 }

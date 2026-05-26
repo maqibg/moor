@@ -27,6 +27,7 @@ interface TestManager {
   getToolCatalog: typeof serverManager.getToolCatalog;
   getServer: typeof serverManager.getServer;
   loadFromDb: typeof serverManager.loadFromDb;
+  callToolByExposedName: typeof serverManager.callToolByExposedName;
   startAutoStartServers: typeof serverManager.startAutoStartServers;
   startServer: typeof serverManager.startServer;
   stopServer: typeof serverManager.stopServer;
@@ -250,8 +251,19 @@ describe("ServerManager MCP lifecycle", () => {
     settingsService.updateSettings({ advanced: { mcpRequestTimeoutMs: 15_000 } });
     await manager.callToolByExposedName("timeout_fixture__echo", {});
 
-    expect(factoryTimeouts).toEqual([{ requestTimeoutMs: 45_000, startTimeoutMs: 60_000 }]);
-    expect(listToolOptions).toEqual([[undefined, { timeout: 60_000 }]]);
+    expect(factoryTimeouts).toHaveLength(1);
+    expect(factoryTimeouts[0]).toEqual(
+      expect.objectContaining({
+        requestTimeoutMs: 45_000,
+        startTimeoutMs: 60_000,
+        startDeadlineMs: expect.any(Number),
+      }),
+    );
+    expect(listToolOptions).toHaveLength(1);
+    expect(listToolOptions[0]).toEqual([undefined, { timeout: expect.any(Number) }]);
+    const listToolsTimeout = (listToolOptions[0] as [undefined, { timeout: number }])[1].timeout;
+    expect(listToolsTimeout).toBeGreaterThan(0);
+    expect(listToolsTimeout).toBeLessThanOrEqual(60_000);
     expect(callToolOptions).toEqual([
       [{ name: "echo", arguments: {} }, undefined, { timeout: 15_000 }],
     ]);

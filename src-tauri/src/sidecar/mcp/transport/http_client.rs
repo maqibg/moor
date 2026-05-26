@@ -7,7 +7,6 @@ use tokio::sync::Mutex;
 use super::format_timeout_duration;
 
 static ENV_PATTERN: OnceLock<regex_lite::Regex> = OnceLock::new();
-const SSE_EVENT_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// MCP Client over HTTP transport (Streamable HTTP or SSE).
 /// Uses reqwest to communicate with HTTP-based MCP servers.
@@ -159,7 +158,7 @@ impl HttpClientTransport {
         if content_type.contains("text/event-stream") {
             let mut response = response;
             let mut buffer = String::new();
-            read_sse_jsonrpc_response(&mut response, &mut buffer, Some(id))
+            read_sse_jsonrpc_response(&mut response, &mut buffer, Some(id), self.request_timeout)
                 .await
                 .map_err(StreamableError::Failed)
         } else {
@@ -271,7 +270,9 @@ impl HttpClientTransport {
             buffer: String::new(),
         };
         loop {
-            let event = read_next_sse_event(&mut state.response, &mut state.buffer).await?;
+            let event =
+                read_next_sse_event(&mut state.response, &mut state.buffer, self.request_timeout)
+                    .await?;
             if event.event.as_deref() == Some("endpoint") {
                 state.endpoint = resolve_sse_endpoint(&self.url, &event.data)?;
                 return Ok(state);
@@ -293,7 +294,13 @@ impl HttpClientTransport {
             "params": params.unwrap_or(Value::Null),
         });
         self.post_sse_message(state, &request_body).await?;
-        read_sse_jsonrpc_response(&mut state.response, &mut state.buffer, Some(id)).await
+        read_sse_jsonrpc_response(
+            &mut state.response,
+            &mut state.buffer,
+            Some(id),
+            self.request_timeout,
+        )
+        .await
     }
 
     async fn send_sse_notification(
@@ -346,9 +353,10 @@ async fn read_sse_jsonrpc_response(
     response: &mut reqwest::Response,
     buffer: &mut String,
     expected_id: Option<i64>,
+    idle_timeout: Duration,
 ) -> Result<Value, String> {
     loop {
-        let event = read_next_sse_event(response, buffer).await?;
+        let event = read_next_sse_event(response, buffer, idle_timeout).await?;
         if event
             .event
             .as_deref()
@@ -377,17 +385,18 @@ async fn read_sse_jsonrpc_response(
 async fn read_next_sse_event(
     response: &mut reqwest::Response,
     buffer: &mut String,
+    idle_timeout: Duration,
 ) -> Result<SseEvent, String> {
     loop {
         if let Some(event) = take_sse_event(buffer) {
             return Ok(event);
         }
-        let chunk = tokio::time::timeout(SSE_EVENT_IDLE_TIMEOUT, response.chunk())
+        let chunk = tokio::time::timeout(idle_timeout, response.chunk())
             .await
             .map_err(|_| {
                 format!(
                     "SSE response timed out after {}",
-                    format_timeout_duration(SSE_EVENT_IDLE_TIMEOUT)
+                    format_timeout_duration(idle_timeout)
                 )
             })?
             .map_err(|e| format!("Failed to read SSE response: {e}"))?;

@@ -122,6 +122,12 @@ http://127.0.0.1:9223/mcp
 
 Moor 会处理剩下的一切——聚合 `tools/list`、路由 `tools/call`、并根据激活的 Profile 进行过滤。
 
+### 调整 MCP 超时
+
+如果 stdio Server 通过 `npx`、`pnpm dlx` 或远程包管理器冷启动，首次 `initialize` / `tools/list` 可能超过默认 30 秒。进入 **Settings** → **Advanced**，调大 **Server Start Timeout** 可延长 Server 启动等待时间，调大 **Request Timeout** 可延长运行期 `tools/call` 等待时间。
+
+更稳定的做法是将常用 Server 预安装到本地、使用绝对命令路径，并开启 Auto-start 让 Moor 提前拉起慢启动 Server。
+
 ## 功能特性
 
 ### MCP 网关聚合

@@ -1,7 +1,7 @@
 import { getServerRepository } from "../db/server-repository.js";
 import { getToolDiscoveryRepository } from "../db/tool-discovery-repository.js";
 import { toolCatalogService } from "./tool-catalog-service.js";
-import { SessionManager } from "./session-manager.js";
+import { getRemainingStartTimeoutMs, SessionManager } from "./session-manager.js";
 import type { ServerSession, SessionFactory } from "./session-manager.js";
 import type { Server, ServerUpdateInput, ToolCatalogEntry } from "@moor/types";
 import { eventBus } from "./event-bus.js";
@@ -193,10 +193,14 @@ export class ServerRuntime {
       const server = getServerRepository().findById(id);
       if (!server) throw new Error(`Server ${id} not found`);
       const timeouts = this.getMcpTimeoutSettings();
-      const session = await this.sessionManager.createSession(id, server, timeouts);
+      const startTimeouts = {
+        ...timeouts,
+        startDeadlineMs: Date.now() + timeouts.startTimeoutMs,
+      };
+      const session = await this.sessionManager.createSession(id, server, startTimeouts);
 
       const toolsResult = await session.client.listTools(undefined, {
-        timeout: timeouts.startTimeoutMs,
+        timeout: getRemainingStartTimeoutMs(startTimeouts),
       });
       this.cacheTools(
         id,
