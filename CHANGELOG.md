@@ -1,28 +1,41 @@
 # moor-sidecar
 
+## 0.5.6
+
+### Patch Changes
+
+- Add configurable MCP request timeout and server startup timeout settings
+  - Consolidate timeout settings into advanced config (`mcpRequestTimeoutMs`, `mcpServerStartTimeoutMs`)
+  - Support dynamic timeout reading without server restart
+  - Range: 5,000–300,000 ms, default 30,000 ms
+  - Update Linux build dependencies and cache settings
+  - Improve CI/CD specifications and installation documentation
+
 ## 0.5.5
 
 ### Patch Changes
 
-- Add ServerUpdateInput type for standardized server updates, introduce ToolCategoryBadge component and useEditSession hook with typed SSE event handling, and add Linux build configuration for Tauri app.
+- Add Linux build configuration for Tauri app (deb/rpm/AppImage)
+- Standardize server update payloads with `ServerUpdateInput` type
+- Introduce `ToolCategoryBadge` component for tool categorization
+- Add `useEditSession` hook for managing server edit sessions with typed SSE events
 
 ## 0.5.4
 
 ### Patch Changes
 
-- Enhance SSE endpoint resolution and add `{env:VAR}` placeholder support in HTTP headers (reads per-server env vars with process env fallback).
-
-  Add duplicate key detection and unsaved changes confirmation to server forms.
-
-  Introduce AlertDialog, KeyValueEditor (with duplicate key visual feedback), and UnsavedChangesDialog components.
-
-  Improve Sonner Toast styling with rounded corners and better close button integration.
+- Fix inability to edit parameters and variables after adding an MCP server
+  - Add duplicate key detection and visual feedback in key-value editors
+  - Add unsaved changes confirmation when navigating away from server forms
+  - Introduce `AlertDialog` and `UnsavedChangesDialog` components
+- Improve SSE endpoint resolution with `{env:VAR}` placeholder support in HTTP headers
+- Enhance Sonner Toast styling with rounded corners and better close button integration
 
 ## 0.5.3
 
 ### Patch Changes
 
-- d8c7d31: 重构 MCP 客户端架构，统一 Stdio/HTTP 传输层抽象，改进服务器生命周期管理和前端状态管理。
+- Refactor MCP client architecture: unify Stdio/HTTP transport abstraction, improve server lifecycle management and frontend state management
 
 ## 0.5.2
 
