@@ -5,6 +5,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { AlertTriangle, Check, FileJson, WandSparkles, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { useConfigImport } from "@/hooks/useConfigImport";
+import { useI18n } from "@/hooks/useI18n";
 
 const JsonImportEditor = lazy(() =>
   import("@/components/shared/JsonImportEditor").then((module) => ({
@@ -34,6 +35,7 @@ export function ConfigImportPanel({
   showJsonImport,
   onCloseJsonImport,
 }: ConfigImportPanelProps) {
+  const { t } = useI18n();
   const {
     scanCandidates,
     selectedImports,
@@ -60,7 +62,7 @@ export function ConfigImportPanel({
         <Card className="animate-scale-in border-[var(--fg-08)]">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Import MCP JSON</CardTitle>
+              <CardTitle className="text-base">{t("Import MCP JSON")}</CardTitle>
               <Button
                 variant="ghost"
                 size="icon"
@@ -84,7 +86,7 @@ export function ConfigImportPanel({
                 disabled={!jsonImport.trim()}
               >
                 <WandSparkles className="h-3.5 w-3.5 mr-2" />
-                Format JSON
+                {t("Format JSON")}
               </Button>
             </div>
             <Suspense
@@ -127,13 +129,13 @@ export function ConfigImportPanel({
             )}
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={onCloseJsonImport}>
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button
                 onClick={() => void parseJson()}
                 disabled={!jsonImport.trim() || jsonImportDiagnostics.length > 0}
               >
-                Preview Import
+                {t("Preview Import")}
               </Button>
             </div>
           </CardContent>
@@ -145,7 +147,7 @@ export function ConfigImportPanel({
         <Card className="animate-scale-in">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Config Import</CardTitle>
+              <CardTitle className="text-base">{t("Config Import")}</CardTitle>
               <Button
                 variant="ghost"
                 size="icon"
@@ -184,7 +186,7 @@ export function ConfigImportPanel({
             {importPreview && importPreview.unsupported.length > 0 && (
               <div className="rounded-lg border border-[var(--fg-08)] bg-surface-300/40 px-3 py-2">
                 <p className="font-headline text-xs text-[var(--fg-55)] mb-1.5">
-                  Unsupported ({importPreview.unsupported.length})
+                  {t("Unsupported")} ({importPreview.unsupported.length})
                 </p>
                 <div className="space-y-1">
                   {importPreview.unsupported.map((server) => (
@@ -202,7 +204,9 @@ export function ConfigImportPanel({
             {importPreview && importPreview.duplicates.length > 0 && (
               <div className="rounded-lg border border-[var(--fg-08)] bg-surface-300/30 px-3 py-2">
                 <p className="font-body text-xs text-[var(--fg-48)]">
-                  Skipping {importPreview.duplicates.length} duplicate server
+                  {t("Skipping {{count}} duplicate server", {
+                    count: String(importPreview.duplicates.length),
+                  })}
                   {importPreview.duplicates.length > 1 ? "s" : ""} by name.
                 </p>
               </div>
@@ -229,7 +233,7 @@ export function ConfigImportPanel({
             {scanCandidates.length > 0 && (
               <div className="flex justify-end pt-1">
                 <Button onClick={() => void executeImport()} disabled={selectedImports.size === 0}>
-                  Import Selected ({selectedImports.size})
+                  {t("Import Selected")} ({selectedImports.size})
                 </Button>
               </div>
             )}

@@ -16,6 +16,7 @@ import { useNavigate } from "react-router-dom";
 import type { Server } from "@moor/types";
 import type { ServerAction } from "@/hooks/server-patch-utils";
 import { cn, getErrorMessage } from "@/lib/utils";
+import { useI18n } from "@/hooks/useI18n";
 
 type RemoveFeedback =
   | { kind: "confirm"; message: string }
@@ -28,16 +29,22 @@ function getRemoveFeedback({
   confirmingRemove,
   isRemoving,
   removeError,
+  t,
 }: {
   serverName: string;
   confirmingRemove: boolean;
   isRemoving: boolean;
   removeError: string | null;
+  t: (key: string, vars?: Record<string, string>) => string;
 }): RemoveFeedback {
-  if (isRemoving) return { kind: "removing", message: `Removing ${serverName}...` };
+  if (isRemoving)
+    return { kind: "removing", message: t("Removing {{serverName}}...", { serverName }) };
   if (removeError) return { kind: "error", message: removeError };
   if (confirmingRemove)
-    return { kind: "confirm", message: `Remove "${serverName}"? This cannot be undone.` };
+    return {
+      kind: "confirm",
+      message: t('Remove "{{serverName}}"? This cannot be undone.', { serverName }),
+    };
   return null;
 }
 
@@ -83,6 +90,7 @@ function ServerIdentity({
   commandPreview: string;
   displayStatus: string;
 }) {
+  const { t } = useI18n();
   return (
     <div className="min-w-0 flex-1">
       <div className="flex items-center gap-2 mb-0.5">
@@ -90,7 +98,7 @@ function ServerIdentity({
           {server.name}
         </span>
         {server.autoStart && (
-          <span title="Auto Start" className="inline-flex shrink-0">
+          <span title={t("Auto Start")} className="inline-flex shrink-0">
             <Zap className="h-3 w-3 text-gold" />
           </span>
         )}
@@ -120,6 +128,7 @@ function LifecycleButton({
   onStart: (id: string) => Promise<void>;
   onStop: (id: string) => Promise<void>;
 }) {
+  const { t } = useI18n();
   if (isRunning) {
     return (
       <Button
@@ -128,7 +137,7 @@ function LifecycleButton({
         className="text-[var(--fg-45)] hover:text-error-warm hover:bg-error-warm/10 active:bg-error-warm/20 transition-all duration-150"
         disabled={isBusy}
         onClick={() => void onStop(serverId)}
-        title={isStopping ? "Stopping server" : "Stop server"}
+        title={isStopping ? t("Stopping server") : t("Stop server")}
       >
         {isStopping ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
       </Button>
@@ -142,7 +151,7 @@ function LifecycleButton({
       className="text-[var(--fg-45)] hover:text-success-muted hover:bg-success-muted/10 active:bg-success-muted/20 transition-all duration-150"
       disabled={isBusy}
       onClick={() => void onStart(serverId)}
-      title={isStarting ? "Starting server" : "Start server"}
+      title={isStarting ? t("Starting server") : t("Start server")}
     >
       {isStarting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
     </Button>
@@ -169,6 +178,7 @@ function ServerControls({
   onRequestRemove: () => void;
 }) {
   const navigate = useNavigate();
+  const { t } = useI18n();
   const controlsDisabled = isBusy || isRemoving;
 
   return (
@@ -188,8 +198,8 @@ function ServerControls({
         className="text-[var(--fg-45)] hover:text-cursor-dark hover:bg-surface-400 active:bg-surface-500 transition-all duration-150"
         disabled={controlsDisabled}
         onClick={() => navigate(`/servers/${server.id}`)}
-        title="Server details"
-        aria-label={`Open details for ${server.name}`}
+        title={t("Server details")}
+        aria-label={t("Open details for {{name}}", { name: server.name })}
       >
         <PanelRightOpen className="h-4 w-4" />
       </Button>
@@ -199,8 +209,8 @@ function ServerControls({
         className="text-[var(--fg-45)] hover:text-error-warm hover:bg-error-warm/10 active:bg-error-warm/20 transition-all duration-150"
         disabled={controlsDisabled}
         onClick={onRequestRemove}
-        title="Remove server"
-        aria-label={`Remove ${server.name}`}
+        title={t("Remove server")}
+        aria-label={t("Remove {{name}}", { name: server.name })}
       >
         {isRemoving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
       </Button>
@@ -217,6 +227,7 @@ function RemoveFeedbackRow({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const { t } = useI18n();
   const isError = feedback.kind === "error";
   const isRemoving = feedback.kind === "removing";
 
@@ -248,7 +259,7 @@ function RemoveFeedbackRow({
       {feedback.kind === "confirm" && (
         <div className="flex shrink-0 items-center gap-1.5">
           <Button variant="ghost" size="sm" onClick={onCancel}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button
             variant="ghost"
@@ -256,13 +267,13 @@ function RemoveFeedbackRow({
             className="text-error-warm hover:bg-error-warm/10 hover:text-error-warm"
             onClick={onConfirm}
           >
-            Remove
+            {t("Remove")}
           </Button>
         </div>
       )}
       {feedback.kind === "error" && (
         <Button variant="ghost" size="sm" onClick={onCancel}>
-          Dismiss
+          {t("Dismiss")}
         </Button>
       )}
     </div>
@@ -289,6 +300,7 @@ export function ServerCard({
   onStop,
   onRemove,
 }: ServerCardProps) {
+  const { t } = useI18n();
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
@@ -303,6 +315,7 @@ export function ServerCard({
     confirmingRemove,
     isRemoving,
     removeError,
+    t,
   });
 
   const handleRemove = async () => {
@@ -312,7 +325,7 @@ export function ServerCard({
       await onRemove(server.id);
       setConfirmingRemove(false);
     } catch (err) {
-      setRemoveError(getErrorMessage(err, "Unable to remove server"));
+      setRemoveError(getErrorMessage(err, t("Unable to remove server")));
     } finally {
       setIsRemoving(false);
     }

@@ -19,6 +19,7 @@ import { ArrowRight, AlertTriangle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { routes } from "@/lib/api-routes";
 import type { ConvertResult, Server } from "@moor/types";
+import { useI18n } from "@/hooks/useI18n";
 
 const CLIENTS = [
   { id: "claude-code", name: "Claude Code" },
@@ -48,6 +49,7 @@ function clientPath(clientId: string, fallback: string): string {
 }
 
 export function ConverterPanel() {
+  const { t } = useI18n();
   const [inputSource, setInputSource] = useState<InputSource>("moor");
   const [targetClient, setTargetClient] = useState<ClientId>("claude-code");
   const [result, setResult] = useState<ConvertResult | null>(null);
@@ -102,7 +104,7 @@ export function ConverterPanel() {
       const res = await apiPost<ConvertResult>(routes.import.convert(), body);
       setResult(res);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Conversion failed");
+      setError(err instanceof Error ? err.message : t("Conversion failed"));
     } finally {
       setLoading(false);
     }
@@ -137,18 +139,21 @@ export function ConverterPanel() {
       {/* Left: Input Panel */}
       <Card className="border-[var(--fg-08)]">
         <CardContent className="p-5 space-y-4">
-          <h3 className="font-headline text-sm font-medium text-cursor-dark">Source</h3>
+          <h3 className="font-headline text-sm font-medium text-cursor-dark">{t("Source")}</h3>
 
           <Tabs
             value={inputSource}
             onValueChange={(v) => setInputSource(v as InputSource)}
-            tabs={Object.entries(SOURCE_LABELS).map(([value, label]) => ({ value, label }))}
+            tabs={Object.entries(SOURCE_LABELS).map(([value, label]) => ({
+              value,
+              label: t(label),
+            }))}
           />
 
           {inputSource === "moor" && (
             <div className="space-y-2 max-h-80 overflow-y-auto">
               {servers.length === 0 ? (
-                <p className="text-xs text-[var(--fg-40)]">No servers available</p>
+                <p className="text-xs text-[var(--fg-40)]">{t("No servers available.")}</p>
               ) : (
                 servers.map((s) => (
                   <label
@@ -177,11 +182,11 @@ export function ConverterPanel() {
           {inputSource === "scan" && (
             <div className="space-y-3">
               <p className="text-xs text-[var(--fg-45)]">
-                Automatically scan local config file for the selected client
+                {t("Automatically scan local config file for the selected client")}
               </p>
               <Select value={scanClient} onValueChange={handleScanClientChange}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select client" />
+                  <SelectValue placeholder={t("Select client")} />
                 </SelectTrigger>
                 <SelectContent>
                   {CLIENTS.map((c) => (
@@ -197,10 +202,10 @@ export function ConverterPanel() {
           {inputSource === "paste" && (
             <div className="space-y-3">
               <div className="flex items-center gap-3">
-                <Label className="mb-0">Format:</Label>
+                <Label className="mb-0">{t("Format")}:</Label>
                 <Select value={pasteClient} onValueChange={handlePasteClientChange}>
                   <SelectTrigger className="w-auto min-w-[160px]">
-                    <SelectValue placeholder="Select client" />
+                    <SelectValue placeholder={t("Select client")} />
                   </SelectTrigger>
                   <SelectContent>
                     {CLIENTS.map((c) => (
@@ -214,7 +219,7 @@ export function ConverterPanel() {
               <Textarea
                 value={pasteContent}
                 onChange={(e) => setPasteContent(e.target.value)}
-                placeholder="Paste MCP configuration here..."
+                placeholder={t("Paste MCP configuration here...")}
                 className="h-48 bg-surface-inverted text-text-inverted font-mono text-[11px] placeholder:text-text-inverted-muted border-[var(--fg-15)] focus:border-cursor-orange/30 focus:shadow-none rounded-xl"
               />
             </div>
@@ -225,11 +230,11 @@ export function ConverterPanel() {
       {/* Right: Output Panel */}
       <Card className="border-[var(--fg-08)]">
         <CardContent className="p-5 space-y-4">
-          <h3 className="font-headline text-sm font-medium text-cursor-dark">Target</h3>
+          <h3 className="font-headline text-sm font-medium text-cursor-dark">{t("Target")}</h3>
 
           <Select value={targetClient} onValueChange={handleTargetClientChange}>
             <SelectTrigger>
-              <SelectValue placeholder="Select target client" />
+              <SelectValue placeholder={t("Select target client")} />
             </SelectTrigger>
             <SelectContent>
               {CLIENTS.map((c) => (
@@ -250,7 +255,7 @@ export function ConverterPanel() {
             ) : (
               <ArrowRight className="h-4 w-4" />
             )}
-            {loading ? "Converting..." : "Convert"}
+            {loading ? t("Converting...") : t("Convert")}
           </Button>
 
           {error && (
@@ -264,7 +269,7 @@ export function ConverterPanel() {
               <CodeBlock code={result.content} />
 
               <div className="flex items-start gap-2 text-xs text-[var(--fg-45)]">
-                <span>Target file:</span>
+                <span>{t("Target file:")}</span>
                 <code className="font-mono text-[11px] bg-surface-300 px-1.5 py-0.5 rounded text-[var(--fg-70)]">
                   {clientPath(result.targetClient, result.targetPath)}
                 </code>

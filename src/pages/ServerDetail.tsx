@@ -20,6 +20,7 @@ import { useServerActions, useServer, useServerTools } from "@/hooks/useServers"
 import { useEditSession } from "@/hooks/useEditSession";
 import { findDuplicateHeaderKeys, type EditForm } from "@/lib/server-form";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/hooks/useI18n";
 import type { ConnectionType } from "@moor/types";
 
 interface ServerEditFieldsProps {
@@ -29,36 +30,39 @@ interface ServerEditFieldsProps {
 }
 
 export function ServerEditFields({ form, connectionType, onChange }: ServerEditFieldsProps) {
+  const { t } = useI18n();
   return (
     <>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label>Name</Label>
+          <Label>{t("Name")}</Label>
           <Input value={form.name} onChange={(e) => onChange({ ...form, name: e.target.value })} />
         </div>
         <div className="space-y-1.5">
-          <Label>Connection Type</Label>
+          <Label>{t("Connection Type")}</Label>
           <Input
             value={connectionType}
             readOnly
             aria-disabled="true"
             className="capitalize bg-surface-300/50 cursor-not-allowed"
           />
-          <p className="text-[11px] text-[var(--fg-40)]">Type cannot be changed after creation.</p>
+          <p className="text-[11px] text-[var(--fg-40)]">
+            {t("Type cannot be changed after creation.")}
+          </p>
         </div>
       </div>
       {connectionType === "stdio" ? (
         <>
           <div className="space-y-1.5">
-            <Label>Command</Label>
+            <Label>{t("Command")}</Label>
             <Input
-              placeholder="e.g., npx -y @modelcontextprotocol/server-github"
+              placeholder={t("e.g., npx -y @modelcontextprotocol/server-github")}
               value={form.command}
               onChange={(e) => onChange({ ...form, command: e.target.value })}
             />
           </div>
           <div className="space-y-1.5">
-            <Label>Arguments (one per line)</Label>
+            <Label>{t("Arguments (one per line)")}</Label>
             <Textarea
               placeholder={"-y\n@modelcontextprotocol/server-github"}
               value={form.args}
@@ -67,9 +71,9 @@ export function ServerEditFields({ form, connectionType, onChange }: ServerEditF
             />
           </div>
           <div className="space-y-1.5">
-            <Label>Working Directory</Label>
+            <Label>{t("Working Directory")}</Label>
             <Input
-              placeholder="e.g., /path/to/project"
+              placeholder={t("e.g., /path/to/project")}
               value={form.workingDir}
               onChange={(e) => onChange({ ...form, workingDir: e.target.value })}
             />
@@ -78,34 +82,34 @@ export function ServerEditFields({ form, connectionType, onChange }: ServerEditF
       ) : (
         <>
           <div className="space-y-1.5">
-            <Label>URL</Label>
+            <Label>{t("URL")}</Label>
             <Input
-              placeholder="e.g., http://localhost:3000/mcp"
+              placeholder={t("e.g., http://localhost:3000/mcp")}
               value={form.url}
               onChange={(e) => onChange({ ...form, url: e.target.value })}
             />
           </div>
           <div className="space-y-1.5">
-            <Label>HTTP Headers</Label>
+            <Label>{t("HTTP Headers")}</Label>
             <KeyValueEditor
               entries={form.headers}
               onChange={(headers) => onChange({ ...form, headers })}
               duplicateKeyFinder={findDuplicateHeaderKeys}
-              keyLabel="Header"
-              keyPlaceholder="Authorization"
-              valuePlaceholder="Bearer {env:MCP_TOKEN}"
+              keyLabel={t("Header")}
+              keyPlaceholder={t("Authorization")}
+              valuePlaceholder={t("Bearer {env:MCP_TOKEN}")}
             />
           </div>
         </>
       )}
       <div className="space-y-1.5">
-        <Label>Environment Variables</Label>
+        <Label>{t("Environment Variables")}</Label>
         <KeyValueEditor
           entries={form.env}
           onChange={(env) => onChange({ ...form, env })}
-          keyLabel="Variable"
-          keyPlaceholder="API_KEY"
-          valuePlaceholder="your-api-key"
+          keyLabel={t("Variable")}
+          keyPlaceholder={t("API_KEY")}
+          valuePlaceholder={t("your-api-key")}
         />
       </div>
     </>
@@ -115,6 +119,7 @@ export function ServerEditFields({ form, connectionType, onChange }: ServerEditF
 export function ServerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { t } = useI18n();
   const { startServer, stopServer, updateServer } = useServerActions();
   const { profiles, updateProfileServer } = useProfiles();
   const activeProfile = profiles.find((profile) => profile.isActive);
@@ -142,7 +147,7 @@ export function ServerDetail() {
   } = useEditSession({ server, serverId: id, updateServer });
 
   if (loading || !server?.id) {
-    return <PageLoading message="Loading server details..." />;
+    return <PageLoading message={t("Loading server details...")} />;
   }
 
   const handleDiscoverTools = async () => {
@@ -198,9 +203,11 @@ export function ServerDetail() {
       />
       <UnsavedChangesDialog
         open={overwriteOpen}
-        title="Overwrite external changes?"
-        description="This server configuration changed while you were editing. Saving now will overwrite the latest saved configuration."
-        actionLabel="Overwrite changes"
+        title={t("Overwrite external changes?")}
+        description={t(
+          "This server configuration changed while you were editing. Saving now will overwrite the latest saved configuration.",
+        )}
+        actionLabel={t("Overwrite changes")}
         onCancel={() => setOverwriteOpen(false)}
         onConfirm={confirmOverwrite}
       />
@@ -232,7 +239,7 @@ export function ServerDetail() {
                 <StatusBadge status={server.status} />
               </div>
               <p className="font-mono text-[11px] text-[var(--fg-40)] mt-0.5 truncate">
-                {commandText || "No command configured"}
+                {commandText || t("No command configured")}
               </p>
             </div>
           </div>
@@ -241,24 +248,24 @@ export function ServerDetail() {
           {isEditing ? (
             <>
               <Button variant="outline" onClick={requestCancelEdit}>
-                <X className="h-4 w-4 mr-2" /> Cancel
+                <X className="h-4 w-4 mr-2" /> {t("Cancel")}
               </Button>
               <Button onClick={() => void saveEdit()} disabled={!dirty || saving}>
-                <Check className="h-4 w-4 mr-2" /> {saving ? "Saving..." : "Save"}
+                <Check className="h-4 w-4 mr-2" /> {saving ? t("Saving...") : t("Save")}
               </Button>
             </>
           ) : (
             <>
               <Button variant="outline" onClick={enterEdit}>
-                <Pencil className="h-4 w-4 mr-2" /> Edit
+                <Pencil className="h-4 w-4 mr-2" /> {t("Edit")}
               </Button>
               {server.status === "running" ? (
                 <Button variant="outline" onClick={() => stopServer(id!)}>
-                  <Square className="h-4 w-4 mr-2" /> Stop
+                  <Square className="h-4 w-4 mr-2" /> {t("Stop")}
                 </Button>
               ) : (
                 <Button onClick={() => startServer(id!)}>
-                  <Play className="h-4 w-4 mr-2" /> Start
+                  <Play className="h-4 w-4 mr-2" /> {t("Start")}
                 </Button>
               )}
             </>
@@ -269,7 +276,7 @@ export function ServerDetail() {
       {/* Configuration */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Configuration</CardTitle>
+          <CardTitle className="text-base">{t("Configuration")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           {isEditing && editForm ? (
@@ -283,7 +290,7 @@ export function ServerDetail() {
               {commandText && (
                 <div>
                   <label className="font-headline text-xs text-[var(--fg-50)] mb-2 block uppercase tracking-wider">
-                    {server.connectionType === "stdio" ? "Command" : "URL"}
+                    {server.connectionType === "stdio" ? t("Command") : t("URL")}
                   </label>
                   <div className="bg-surface-inverted rounded-xl border border-[var(--fg-15)] p-4 relative group">
                     <pre className="font-mono text-xs text-text-inverted overflow-x-auto whitespace-pre-wrap pr-10">
@@ -309,10 +316,10 @@ export function ServerDetail() {
                 <div className="flex items-center justify-between">
                   <div>
                     <label className="font-headline text-xs text-[var(--fg-50)] mb-1.5 block">
-                      Auto Start
+                      {t("Auto Start")}
                     </label>
                     <p className="text-[11px] text-[var(--fg-40)]">
-                      Start automatically when Moor launches
+                      {t("Start automatically when Moor launches")}
                     </p>
                   </div>
                   <Switch
@@ -346,7 +353,7 @@ export function ServerDetail() {
                   <label className="font-headline text-xs text-[var(--fg-50)] mb-2 block">
                     HTTP Headers
                   </label>
-                  <KeyValueTable entries={headerEntries} keyLabel="Header" />
+                  <KeyValueTable entries={headerEntries} keyLabel={t("Header")} />
                 </div>
               )}
             </>
@@ -354,7 +361,9 @@ export function ServerDetail() {
 
           {server.errorMessage && (
             <div className="rounded-xl bg-error-warm/8 border border-error-warm/20 p-4">
-              <label className="font-headline text-xs text-error-warm mb-1.5 block">Error</label>
+              <label className="font-headline text-xs text-error-warm mb-1.5 block">
+                {t("Error")}
+              </label>
               <p className="font-mono text-xs text-error-warm">{server.errorMessage}</p>
             </div>
           )}
@@ -366,7 +375,7 @@ export function ServerDetail() {
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <CardTitle className="text-base">Discovered Tools</CardTitle>
+              <CardTitle className="text-base">{t("Discovered Tools")}</CardTitle>
               <Badge variant="subtle">{tools.length}</Badge>
             </div>
             <Button variant="ghost" size="sm" onClick={handleDiscoverTools}>
@@ -378,7 +387,7 @@ export function ServerDetail() {
           {tools.length === 0 ? (
             <EmptyState
               icon={Terminal}
-              message="No tools discovered. Start the server to discover tools."
+              message={t("No tools discovered. Start the server to discover tools.")}
             />
           ) : (
             <div className="space-y-2">

@@ -22,6 +22,7 @@ import {
   findDuplicateKeys,
   headerEntriesToRecordOrUndefined,
 } from "@/lib/server-form";
+import { useI18n } from "@/hooks/useI18n";
 
 const CONNECTION_TYPES = [
   { value: "stdio", label: "stdio" },
@@ -56,6 +57,7 @@ interface AddServerFormProps {
 }
 
 export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
+  const { t } = useI18n();
   const [form, setForm] = useState(createInitialForm);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -76,11 +78,11 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
     setFormError(null);
 
     if (findDuplicateKeys(form.env).size > 0) {
-      setFormError("Environment variable keys must be unique.");
+      setFormError(t("Environment variable keys must be unique."));
       return;
     }
     if (form.connectionType === "http" && findDuplicateHeaderKeys(form.headers).size > 0) {
-      setFormError("HTTP header keys must be unique.");
+      setFormError(t("HTTP header keys must be unique."));
       return;
     }
 
@@ -112,7 +114,7 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
       );
       onClose();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Failed to add server");
+      setFormError(err instanceof Error ? err.message : t("Failed to add server"));
     } finally {
       setSubmitting(false);
     }
@@ -127,7 +129,7 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
       />
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base">Add New Server</CardTitle>
+          <CardTitle className="text-base">{t("Add New Server")}</CardTitle>
           <Button
             variant="ghost"
             size="icon"
@@ -141,15 +143,15 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
       <CardContent className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1.5">
-            <Label>Name</Label>
+            <Label>{t("Name")}</Label>
             <Input
-              placeholder="e.g., github"
+              placeholder={t("e.g., github")}
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             />
           </div>
           <div className="space-y-1.5">
-            <Label>Type</Label>
+            <Label>{t("Type")}</Label>
             <Select
               value={form.connectionType}
               onValueChange={(value) =>
@@ -157,7 +159,7 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
               }
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select type" />
+                <SelectValue placeholder={t("Select type")} />
               </SelectTrigger>
               <SelectContent>
                 {CONNECTION_TYPES.map((t) => (
@@ -172,15 +174,15 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
         {form.connectionType === "stdio" ? (
           <>
             <div className="space-y-1.5">
-              <Label>Command</Label>
+              <Label>{t("Command")}</Label>
               <Input
-                placeholder="e.g., npx -y @modelcontextprotocol/server-github"
+                placeholder={t("e.g., npx -y @modelcontextprotocol/server-github")}
                 value={form.command}
                 onChange={(e) => setForm((f) => ({ ...f, command: e.target.value }))}
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Arguments (one per line)</Label>
+              <Label>{t("Arguments (one per line)")}</Label>
               <Textarea
                 placeholder={"-y\n@modelcontextprotocol/server-github"}
                 value={form.args}
@@ -192,31 +194,31 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
         ) : (
           <>
             <div className="space-y-1.5">
-              <Label>URL</Label>
+              <Label>{t("URL")}</Label>
               <Input
-                placeholder="e.g., http://localhost:3000/mcp"
+                placeholder={t("e.g., http://localhost:3000/mcp")}
                 value={form.url}
                 onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
               />
             </div>
             <div className="space-y-1.5">
-              <Label>HTTP Headers</Label>
+              <Label>{t("HTTP Headers")}</Label>
               <KeyValueEditor
                 entries={form.headers}
                 onChange={(headers) => setForm((f) => ({ ...f, headers }))}
                 duplicateKeyFinder={findDuplicateHeaderKeys}
-                keyLabel="Header"
-                keyPlaceholder="Authorization"
-                valuePlaceholder="Bearer {env:MCP_TOKEN}"
+                keyLabel={t("Header")}
+                keyPlaceholder={t("Authorization")}
+                valuePlaceholder={t("Bearer {env:MCP_TOKEN}")}
               />
             </div>
           </>
         )}
         <div className="flex items-center justify-between py-2">
           <div className="space-y-0.5">
-            <Label>Auto Start</Label>
+            <Label>{t("Auto Start")}</Label>
             <p className="text-[11px] text-[var(--fg-40)]">
-              Automatically start this server when Moor launches
+              {t("Automatically start this server when Moor launches")}
             </p>
           </div>
           <Switch
@@ -225,13 +227,13 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
           />
         </div>
         <div className="space-y-1.5">
-          <Label>Environment Variables</Label>
+          <Label>{t("Environment Variables")}</Label>
           <KeyValueEditor
             entries={form.env}
             onChange={(env) => setForm((f) => ({ ...f, env }))}
-            keyLabel="Variable"
-            keyPlaceholder="API_KEY"
-            valuePlaceholder="your-api-key"
+            keyLabel={t("Variable")}
+            keyPlaceholder={t("API_KEY")}
+            valuePlaceholder={t("your-api-key")}
           />
         </div>
         {formError && (
@@ -242,10 +244,10 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
         )}
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="outline" onClick={requestClose}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button onClick={handleSubmit} disabled={!form.name.trim() || submitting}>
-            Add Server
+            {t("Add Server")}
           </Button>
         </div>
       </CardContent>

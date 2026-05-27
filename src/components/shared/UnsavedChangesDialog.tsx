@@ -8,6 +8,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useI18n } from "@/hooks/useI18n";
 
 interface UnsavedChangesDialogProps {
   open: boolean;
@@ -26,20 +27,21 @@ export function UnsavedChangesDialog({
   onCancel,
   onConfirm,
 }: UnsavedChangesDialogProps) {
+  const { t } = useI18n();
   return (
     <AlertDialog open={open}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{description}</AlertDialogDescription>
+          <AlertDialogTitle>{t(title)}</AlertDialogTitle>
+          <AlertDialogDescription>{t(description)}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel onClick={onCancel}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel onClick={onCancel}>{t("Cancel")}</AlertDialogCancel>
           <AlertDialogAction
             className="bg-error-warm text-surface-200 hover:bg-error-warm/90"
             onClick={onConfirm}
           >
-            {actionLabel}
+            {t(actionLabel)}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

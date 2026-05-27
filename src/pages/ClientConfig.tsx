@@ -89,14 +89,14 @@ export function ClientConfig() {
                     <div>
                       <CardTitle className="text-base">{s.client}</CardTitle>
                       <p className="font-body text-xs text-[var(--fg-45)] mt-0.5">
-                        {s.description}
+                        {t(s.description)}
                       </p>
                     </div>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <CodeBlock code={s.snippet} label="Configuration" />
-                  {s.cliCommand && <CodeBlock code={s.cliCommand} label="CLI Command" />}
+                  <CodeBlock code={s.snippet} label={t("Configuration")} />
+                  {s.cliCommand && <CodeBlock code={s.cliCommand} label={t("CLI Command")} />}
                 </CardContent>
               </Card>
             ))}

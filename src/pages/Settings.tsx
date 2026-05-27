@@ -48,10 +48,11 @@ interface SettingRowProps {
 }
 
 function SettingRow({ label, description, children }: SettingRowProps) {
+  const { t } = useI18n();
   return (
     <div className="flex items-center justify-between py-3.5 px-4">
       <div className="flex-1 min-w-0 mr-4">
-        <p className="font-headline text-sm text-cursor-dark">{label}</p>
+        <p className="font-headline text-sm text-cursor-dark">{t(label)}</p>
         {description && (
           <p className="font-body text-xs text-[var(--fg-45)] mt-0.5">{description}</p>
         )}
@@ -104,6 +105,7 @@ interface GroupNavItemProps {
 }
 
 function GroupNavItem({ icon: Icon, label, active, onClick }: GroupNavItemProps) {
+  const { t } = useI18n();
   return (
     <button
       onClick={onClick}
@@ -115,7 +117,7 @@ function GroupNavItem({ icon: Icon, label, active, onClick }: GroupNavItemProps)
       )}
     >
       <Icon className="h-4 w-4" />
-      {label}
+      {t(label)}
     </button>
   );
 }
@@ -141,7 +143,7 @@ function GeneralSection({ onError }: { onError: (message: string | null) => void
               await applyLoginAutostartSetting(!value);
             } catch (rollbackErr) {
               throw createErrorWithCause(
-                `${getErrorMessage(err, "Failed to save login auto-start setting")}. Rollback failed: ${getErrorMessage(rollbackErr, "unknown error")}`,
+                `${getErrorMessage(err, t("Failed to save login auto-start setting"))}. Rollback failed: ${getErrorMessage(rollbackErr, t("unknown error"))}`,
                 rollbackErr,
               );
             }
@@ -155,7 +157,7 @@ function GeneralSection({ onError }: { onError: (message: string | null) => void
           await syncRuntimeSettings();
         }
       } catch (err) {
-        onError(getErrorMessage(err, "Failed to update runtime settings"));
+        onError(getErrorMessage(err, t("Failed to update runtime settings")));
       }
     },
     [onError, updateSettings],
@@ -203,7 +205,7 @@ function GeneralSection({ onError }: { onError: (message: string | null) => void
         </SettingRow>
         {!settings.general.minimizeToTrayOnClose && (
           <p className="px-4 py-2 font-body text-xs text-[var(--fg-35)]">
-            Enable "Minimize to Tray on Close" to configure window visibility on launch
+            {t('Enable "Minimize to Tray on Close" to configure window visibility on launch')}
           </p>
         )}
       </CardContent>
@@ -287,6 +289,7 @@ function AdvancedSection({
   onPortApplied: (port: number) => void;
 }) {
   const { settings, updateSettings } = useSettings();
+  const { t } = useI18n();
   const [localRetention, setLocalRetention] = useState(String(settings.advanced.logRetentionDays));
   const [localPort, setLocalPort] = useState(String(settings.advanced.sidecarPort));
   const [localRequestTimeout, setLocalRequestTimeout] = useState(
@@ -322,7 +325,7 @@ function AdvancedSection({
       onError(null);
       await updateSettings({ advanced: { logRetentionDays: Number(localRetention) } });
     } catch (err) {
-      onError(getErrorMessage(err, "Failed to update log retention"));
+      onError(getErrorMessage(err, t("Failed to update log retention")));
     }
   };
 
@@ -333,7 +336,7 @@ function AdvancedSection({
       await updateSettings({ advanced: { sidecarPort: nextPort } });
       onPortApplied(nextPort);
     } catch (err) {
-      onError(getErrorMessage(err, "Failed to update sidecar port"));
+      onError(getErrorMessage(err, t("Failed to update sidecar port")));
     }
   };
 
@@ -352,7 +355,7 @@ function AdvancedSection({
       }
       await updateSettings({ advanced: { [key]: parsed.milliseconds } });
     } catch (err) {
-      onError(getErrorMessage(err, `Failed to update ${label}`));
+      onError(getErrorMessage(err, t("Failed to update {{t(label)}}", { label })));
     }
   };
 
@@ -361,8 +364,8 @@ function AdvancedSection({
       <Card>
         <CardContent className="p-2 divide-y divide-[var(--fg-06)]">
           <SettingRow
-            label="Log Retention"
-            description="Number of days to keep audit logs (0 for unlimited)"
+            label={t("Log Retention")}
+            description={t("Number of days to keep audit logs (0 for unlimited)")}
           >
             <div className="flex items-center gap-2">
               <Input
@@ -378,15 +381,20 @@ function AdvancedSection({
               </Button>
             </div>
           </SettingRow>
-          <SettingRow label="Audit Logging" description="Record tool calls in the audit log">
+          <SettingRow
+            label={t("Audit Logging")}
+            description={t("Record tool calls in the audit log")}
+          >
             <Switch
               checked={settings.advanced.enableAuditLogging}
               onCheckedChange={(v) => void updateSettings({ advanced: { enableAuditLogging: v } })}
             />
           </SettingRow>
           <SettingRow
-            label="Request Timeout"
-            description="Timeout for MCP JSON-RPC requests in seconds (5-300). Applies to the next MCP request."
+            label={t("Request Timeout")}
+            description={t(
+              "Timeout for MCP JSON-RPC requests in seconds (5-300). Applies to the next MCP request.",
+            )}
           >
             <div className="flex flex-col items-end gap-1">
               <div className="flex items-center gap-2">
@@ -420,8 +428,10 @@ function AdvancedSection({
             </div>
           </SettingRow>
           <SettingRow
-            label="Server Start Timeout"
-            description="Total startup wait for MCP servers in seconds (5-300). Applies to the next server start."
+            label={t("Server Start Timeout")}
+            description={t(
+              "Total startup wait for MCP servers in seconds (5-300). Applies to the next server start.",
+            )}
           >
             <div className="flex flex-col items-end gap-1">
               <div className="flex items-center gap-2">
@@ -465,8 +475,8 @@ function AdvancedSection({
         <CardContent className="p-2 divide-y divide-[var(--fg-06)]">
           <div>
             <SettingRow
-              label="Sidecar Port"
-              description="Port for the Moor API server (requires restart)"
+              label={t("Sidecar Port")}
+              description={t("Port for the Moor API server (requires restart)")}
             >
               <div className="flex items-center gap-2">
                 <Input
@@ -505,7 +515,7 @@ function AdvancedSection({
                   ? tokenVisible
                     ? runtimeInfo.apiToken
                     : "•".repeat(20)
-                  : "Loading..."}
+                  : t("Loading...")}
               </code>
               <Button variant="ghost" size="icon" onClick={() => setTokenVisible(!tokenVisible)}>
                 {tokenVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -547,6 +557,7 @@ const groups: { key: SettingsGroup; label: string; icon: React.ElementType }[] =
 ];
 
 export function SettingsPage() {
+  const { t } = useI18n();
   const [activeGroup, setActiveGroup] = useState<SettingsGroup>("general");
   const [runtimeInfo, setRuntimeInfo] = useState<SidecarInfo | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -578,12 +589,12 @@ export function SettingsPage() {
       setPortChangeApplied(false);
     } catch (err) {
       console.error("Failed to restart sidecar:", err);
-      setErrorMessage(getErrorMessage(err, "Failed to restart sidecar"));
+      setErrorMessage(getErrorMessage(err, t("Failed to restart sidecar")));
     }
   };
 
   const handleReset = async () => {
-    if (!window.confirm("Reset all settings to their default values?")) return;
+    if (!window.confirm(t("Reset all settings to their default values?"))) return;
     try {
       setErrorMessage(null);
       const previousAutoStartOnLogin = settings.general.autoStartOnLogin;
@@ -599,7 +610,7 @@ export function SettingsPage() {
       await refreshRuntimeInfo();
       setPortChangeApplied(false);
     } catch (err) {
-      setErrorMessage(getErrorMessage(err, "Failed to reset settings"));
+      setErrorMessage(getErrorMessage(err, t("Failed to reset settings")));
     }
   };
 
@@ -614,8 +625,8 @@ export function SettingsPage() {
   return (
     <div className="space-y-6 animate-fade-in-up">
       <PageHeader
-        title="Settings"
-        subtitle="Configure Moor to your preferences"
+        title={t("Settings")}
+        subtitle={t("Configure Moor to your preferences")}
         action={
           loadState.canRenderControls ? (
             <Button variant="outline" size="sm" onClick={handleReset}>
@@ -636,7 +647,7 @@ export function SettingsPage() {
               <GroupNavItem
                 key={key}
                 icon={icon}
-                label={label}
+                label={t(label)}
                 active={activeGroup === key}
                 onClick={() => setActiveGroup(key)}
               />
