@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { StatusBadge } from "./StatusBadge";
+import { StatusBadge } from "@/components/shared/StatusBadge";
+import { ErrorBanner } from "@/components/shared/ErrorBanner";
 import {
   AlertTriangle,
   Loader2,
@@ -269,17 +270,6 @@ function RemoveFeedbackRow({
   );
 }
 
-function ServerErrorMessage({ message }: { message: string }) {
-  return (
-    <div className="mt-3 flex items-center gap-2 rounded-lg border border-error-warm/15 bg-error-warm/8 px-3 py-2">
-      <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-error-warm" />
-      <p className="truncate font-mono text-[11px] text-error-warm" title={message}>
-        {message}
-      </p>
-    </div>
-  );
-}
-
 export function ServerCard({
   server,
   action,
@@ -367,7 +357,9 @@ export function ServerCard({
               onConfirm={() => void handleRemove()}
             />
           )}
-          {isError && server.errorMessage && <ServerErrorMessage message={server.errorMessage} />}
+          {isError && server.errorMessage && (
+            <ErrorBanner message={server.errorMessage} className="mt-3" />
+          )}
         </div>
       </CardContent>
     </Card>

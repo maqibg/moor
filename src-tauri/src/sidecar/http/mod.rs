@@ -1,3 +1,4 @@
+pub mod app_error;
 mod auth;
 pub mod routes;
 
@@ -16,76 +17,6 @@ pub struct AppState {
     pub port: u16,
     pub event_bus: Arc<EventBus>,
     pub server_manager: Arc<ServerManager>,
-}
-
-pub type ApiResult<T> = Result<Json<T>, ApiErrorResponse>;
-
-#[derive(Debug, Clone)]
-pub struct ApiErrorResponse {
-    status: StatusCode,
-    code: String,
-    message: String,
-}
-
-impl ApiErrorResponse {
-    pub fn new(status: StatusCode, code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            status,
-            code: code.into(),
-            message: message.into(),
-        }
-    }
-}
-
-impl IntoResponse for ApiErrorResponse {
-    fn into_response(self) -> axum::response::Response {
-        (
-            self.status,
-            Json(json!({
-                "error": {
-                    "code": self.code,
-                    "message": self.message,
-                }
-            })),
-        )
-            .into_response()
-    }
-}
-
-pub fn api_error(
-    status: StatusCode,
-    code: impl Into<String>,
-    message: impl Into<String>,
-) -> ApiErrorResponse {
-    ApiErrorResponse::new(status, code, message)
-}
-
-pub fn validation_error(message: impl Into<String>) -> ApiErrorResponse {
-    api_error(StatusCode::BAD_REQUEST, "VALIDATION_ERROR", message)
-}
-
-pub fn internal_error(message: impl Into<String>) -> ApiErrorResponse {
-    api_error(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", message)
-}
-
-pub fn error_from_code(code: &str, message: impl Into<String>) -> ApiErrorResponse {
-    let message = message.into();
-    match code {
-        "VALIDATION_ERROR" | "ORDER_INVALID" | "ACTIVE_PROFILE" => {
-            ApiErrorResponse::new(StatusCode::BAD_REQUEST, code, message)
-        }
-        "NOT_FOUND" => ApiErrorResponse::new(StatusCode::NOT_FOUND, code, message),
-        "PAYLOAD_TOO_LARGE" => ApiErrorResponse::new(StatusCode::PAYLOAD_TOO_LARGE, code, message),
-        _ => ApiErrorResponse::new(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", message),
-    }
-}
-
-pub fn json_error_response(
-    status: StatusCode,
-    code: impl Into<String>,
-    message: impl Into<String>,
-) -> axum::response::Response {
-    ApiErrorResponse::new(status, code, message).into_response()
 }
 
 pub fn create_app(state: Arc<AppState>) -> Router {
@@ -112,6 +43,18 @@ pub fn create_app(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
+pub fn json_error_response(
+    status: StatusCode,
+    code: &'static str,
+    message: impl Into<String>,
+) -> axum::response::Response {
+    (
+        status,
+        Json(json!({ "error": { "code": code, "message": message.into() } })),
+    )
+        .into_response()
+}
+
 pub async fn start_server(state: Arc<AppState>, host: &str, port: u16) -> Result<(), String> {
     let addr = format!("{host}:{port}");
     let listener = TcpListener::bind(&addr)
@@ -121,17 +64,4 @@ pub async fn start_server(state: Arc<AppState>, host: &str, port: u16) -> Result
     axum::serve(listener, app)
         .await
         .map_err(|e| format!("Server error: {e}"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::response::IntoResponse;
-
-    #[test]
-    fn api_errors_use_frontend_compatible_envelope_and_status() {
-        let response =
-            validation_error("advanced.sidecarPort must be between 1024 and 65535").into_response();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    }
 }

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { getSidecarInfo } from "@/lib/tauri";
 import type { SidecarInfo } from "@moor/types";
 
 const defaultRuntime = (): SidecarInfo => ({
@@ -9,9 +9,9 @@ const defaultRuntime = (): SidecarInfo => ({
 
 async function getRuntimeInfo(): Promise<SidecarInfo> {
   try {
-    return await invoke<SidecarInfo>("get_sidecar_info");
+    return await getSidecarInfo();
   } catch {
-    // Browser dev mode does not have Tauri commands.
+    // Fall through to HTTP discovery
   }
 
   const fallback = defaultRuntime();

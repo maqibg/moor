@@ -1,4 +1,5 @@
-use crate::sidecar::http::{internal_error, validation_error, ApiResult, AppState};
+use crate::sidecar::http::app_error::AppError;
+use crate::sidecar::http::AppState;
 use crate::sidecar::services::settings as settings_store;
 use axum::{
     extract::State,
@@ -6,7 +7,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::sync::Arc;
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -15,19 +16,21 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/api/settings/reset", post(reset_settings))
 }
 
-async fn get_settings(State(state): State<Arc<AppState>>) -> ApiResult<Value> {
-    let settings = settings_store::get_settings(&state.db).map_err(internal_error)?;
+async fn get_settings(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
+    let settings = settings_store::get_settings(&state.db)?;
     Ok(Json(
-        serde_json::to_value(settings).unwrap_or_else(|_| json!({})),
+        serde_json::to_value(settings).map_err(|e| AppError::internal(e.to_string()))?,
     ))
 }
 
 async fn update_settings(
     State(state): State<Arc<AppState>>,
     axum::Json(body): axum::Json<Value>,
-) -> ApiResult<Value> {
-    let settings = settings_store::update_settings(&state.db, body).map_err(validation_error)?;
-    let settings_value = serde_json::to_value(&settings).unwrap_or_else(|_| json!({}));
+) -> Result<Json<Value>, AppError> {
+    let settings = settings_store::update_settings(&state.db, body)
+        .map_err(|e| AppError::validation(e.to_string()))?;
+    let settings_value =
+        serde_json::to_value(&settings).map_err(|e| AppError::internal(e.to_string()))?;
 
     state
         .event_bus
@@ -35,9 +38,10 @@ async fn update_settings(
     Ok(Json(settings_value))
 }
 
-async fn reset_settings(State(state): State<Arc<AppState>>) -> ApiResult<Value> {
-    let defaults = settings_store::reset_settings(&state.db).map_err(internal_error)?;
-    let defaults_value = serde_json::to_value(&defaults).unwrap_or_else(|_| json!({}));
+async fn reset_settings(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
+    let defaults = settings_store::reset_settings(&state.db)?;
+    let defaults_value =
+        serde_json::to_value(&defaults).map_err(|e| AppError::internal(e.to_string()))?;
     state
         .event_bus
         .emit("settings:changed", defaults_value.clone());

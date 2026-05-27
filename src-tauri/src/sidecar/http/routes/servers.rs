@@ -1,4 +1,6 @@
-use crate::sidecar::http::{error_from_code, internal_error, ApiErrorResponse, AppState};
+use crate::sidecar::db::server_repo::Server;
+use crate::sidecar::http::app_error::AppError;
+use crate::sidecar::http::AppState;
 use crate::sidecar::services::server_manager::public_server_start_error_message;
 use crate::sidecar::services::server_service::{
     CreateServerInput, ServerService, ServerServiceError, UpdateServerInput,
@@ -23,9 +25,9 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/api/servers/{id}/tools", get(tools))
 }
 
-async fn list(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ApiErrorResponse> {
-    let servers = ServerService::list_servers(&state.db).map_err(internal_error)?;
-    Ok(Json(serde_json::to_value(servers).unwrap()))
+async fn list(State(state): State<Arc<AppState>>) -> Result<Json<Vec<Server>>, AppError> {
+    let servers = ServerService::list_servers(&state.db)?;
+    Ok(Json(servers))
 }
 
 #[derive(Deserialize)]
@@ -45,7 +47,7 @@ struct CreateServerBody {
 async fn create(
     State(state): State<Arc<AppState>>,
     axum::Json(body): axum::Json<CreateServerBody>,
-) -> Result<(axum::http::StatusCode, Json<Value>), ApiErrorResponse> {
+) -> Result<(axum::http::StatusCode, Json<Server>), AppError> {
     let input = CreateServerInput {
         name: body.name,
         connection_type: body.connection_type,
@@ -57,26 +59,27 @@ async fn create(
         working_dir: body.working_dir,
         auto_start: body.auto_start.unwrap_or(false),
     };
-    input
-        .validate()
-        .map_err(|e| error_from_code("VALIDATION_ERROR", e))?;
+    input.validate().map_err(AppError::validation)?;
 
     let server = ServerService::insert_server(&state.db, &state.server_manager, &input)
         .await
-        .map_err(internal_error)?;
+        .map_err(AppError::internal)?;
 
     if server.auto_start {
         let sm = state.server_manager.clone();
         let server_id = server.id.clone();
         tokio::spawn(async move {
-            let _ = sm.start_server(&server_id).await;
+            if let Err(err) = sm.start_server(&server_id).await {
+                tracing::warn!(
+                    server_id = %server_id,
+                    error = %err,
+                    "auto-start server failed after creation"
+                );
+            }
         });
     }
 
-    Ok((
-        axum::http::StatusCode::CREATED,
-        Json(serde_json::to_value(&server).unwrap()),
-    ))
+    Ok((axum::http::StatusCode::CREATED, Json(server)))
 }
 
 #[derive(Deserialize)]
@@ -88,84 +91,87 @@ struct ReorderBody {
 async fn reorder(
     State(state): State<Arc<AppState>>,
     axum::Json(body): axum::Json<ReorderBody>,
-) -> Result<Json<Value>, ApiErrorResponse> {
+) -> Result<Json<Vec<Server>>, AppError> {
     if body.server_ids.is_empty() {
-        return Err(error_from_code(
-            "ORDER_INVALID",
+        return Err(AppError::order_invalid(
             "Server order must include every existing server exactly once.",
         ));
     }
-    let servers =
-        ServerService::reorder(&state.db, &body.server_ids).map_err(server_service_error)?;
-    Ok(Json(serde_json::to_value(servers).unwrap()))
+    let servers = ServerService::reorder(&state.db, &body.server_ids).map_err(|e| match e {
+        ServerServiceError::NotFound(m) => AppError::not_found(m),
+        ServerServiceError::Validation(m) => AppError::validation(m),
+        ServerServiceError::InvalidOrder(m) => AppError::order_invalid(m),
+        ServerServiceError::Internal(m) => AppError::internal(m),
+    })?;
+    Ok(Json(servers))
 }
 
 async fn get_one(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> Result<Json<Value>, ApiErrorResponse> {
-    let mut server = ServerService::get_server(&state.db, &id)
-        .map_err(internal_error)?
-        .ok_or_else(|| error_from_code("NOT_FOUND", "Server not found"))?;
+) -> Result<Json<Server>, AppError> {
+    let mut server = ServerService::get_server(&state.db, &id)?
+        .ok_or_else(|| AppError::not_found("Server not found"))?;
 
     if let Some(managed) = state.server_manager.get_server(&id).await {
         server.status = managed.status;
     }
 
-    Ok(Json(serde_json::to_value(server).unwrap()))
+    Ok(Json(server))
 }
 
 async fn update(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     axum::Json(body): axum::Json<UpdateServerInput>,
-) -> Result<Json<Value>, ApiErrorResponse> {
+) -> Result<Json<Server>, AppError> {
     let server = ServerService::update_server(&state.db, &state.server_manager, &id, &body)
         .await
-        .map_err(server_service_error)?;
-    Ok(Json(serde_json::to_value(server).unwrap()))
+        .map_err(|e| match e {
+            ServerServiceError::NotFound(m) => AppError::not_found(m),
+            ServerServiceError::Validation(m) => AppError::validation(m),
+            ServerServiceError::InvalidOrder(m) => AppError::order_invalid(m),
+            ServerServiceError::Internal(m) => AppError::internal(m),
+        })?;
+    Ok(Json(server))
 }
 
 async fn remove(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> Result<Json<Value>, ApiErrorResponse> {
+) -> Result<Json<Value>, AppError> {
     ServerService::delete_server(&state.db, &state.server_manager, &id)
         .await
-        .map_err(server_service_error)?;
+        .map_err(|e| match e {
+            ServerServiceError::NotFound(m) => AppError::not_found(m),
+            ServerServiceError::Validation(m) => AppError::validation(m),
+            ServerServiceError::InvalidOrder(m) => AppError::order_invalid(m),
+            ServerServiceError::Internal(m) => AppError::internal(m),
+        })?;
     Ok(Json(serde_json::json!({ "success": true })))
-}
-
-fn server_service_error(error: ServerServiceError) -> ApiErrorResponse {
-    match error {
-        ServerServiceError::NotFound(message) => error_from_code("NOT_FOUND", message),
-        ServerServiceError::Validation(message) => error_from_code("VALIDATION_ERROR", message),
-        ServerServiceError::InvalidOrder(message) => error_from_code("ORDER_INVALID", message),
-        ServerServiceError::Internal(message) => internal_error(message),
-    }
 }
 
 async fn start(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> Result<Json<Value>, ApiErrorResponse> {
+) -> Result<Json<Value>, AppError> {
     state
         .server_manager
         .start_server(&id)
         .await
-        .map_err(|err| internal_error(public_server_start_error_message(&err)))?;
+        .map_err(|err| AppError::internal(public_server_start_error_message(&err)))?;
     Ok(Json(serde_json::json!({ "status": "started" })))
 }
 
 async fn stop(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> Result<Json<Value>, ApiErrorResponse> {
+) -> Result<Json<Value>, AppError> {
     state
         .server_manager
         .stop_server(&id)
         .await
-        .map_err(internal_error)?;
+        .map_err(AppError::internal)?;
     Ok(Json(serde_json::json!({ "status": "stopped" })))
 }
 
@@ -178,12 +184,14 @@ async fn tools(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Query(query): Query<ToolsQuery>,
-) -> Result<Json<Value>, ApiErrorResponse> {
+) -> Result<Json<Value>, AppError> {
     let tools = state
         .server_manager
         .get_tool_details(&id, query.profile_id.as_deref())
         .await;
-    Ok(Json(serde_json::to_value(tools).unwrap()))
+    Ok(Json(
+        serde_json::to_value(tools).map_err(|e| AppError::internal(e.to_string()))?,
+    ))
 }
 
 #[cfg(test)]

@@ -1,5 +1,6 @@
 use crate::sidecar::db::audit_log_repo::AuditLogRepository;
-use crate::sidecar::http::{internal_error, ApiErrorResponse, AppState};
+use crate::sidecar::http::app_error::AppError;
+use crate::sidecar::http::AppState;
 use axum::{
     extract::{Query, State},
     response::Json,
@@ -29,25 +30,27 @@ struct LogQuery {
 async fn list(
     State(state): State<Arc<AppState>>,
     Query(query): Query<LogQuery>,
-) -> Result<Json<Value>, ApiErrorResponse> {
+) -> Result<Json<Value>, AppError> {
     let repo = AuditLogRepository::new(&state.db);
-    let logs = repo
-        .query_logs(
-            query.server_id.as_deref(),
-            query.tool_name.as_deref(),
-            query.from.as_deref(),
-            query.to.as_deref(),
-            query.limit,
-            query.offset,
-        )
-        .map_err(internal_error)?;
-    Ok(Json(serde_json::to_value(logs).unwrap()))
+    let logs = repo.query_logs(
+        query.server_id.as_deref(),
+        query.tool_name.as_deref(),
+        query.from.as_deref(),
+        query.to.as_deref(),
+        query.limit,
+        query.offset,
+    )?;
+    Ok(Json(
+        serde_json::to_value(logs).map_err(|e| AppError::internal(e.to_string()))?,
+    ))
 }
 
-async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ApiErrorResponse> {
+async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
     let repo = AuditLogRepository::new(&state.db);
-    let stats = repo.get_stats().map_err(internal_error)?;
-    Ok(Json(serde_json::to_value(stats).unwrap()))
+    let stats = repo.get_stats()?;
+    Ok(Json(
+        serde_json::to_value(stats).map_err(|e| AppError::internal(e.to_string()))?,
+    ))
 }
 
 #[cfg(test)]
