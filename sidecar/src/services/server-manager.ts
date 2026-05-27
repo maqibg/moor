@@ -1,15 +1,11 @@
-import { getServerRepository } from "../db/server-repository.js";
-import { getToolDiscoveryRepository } from "../db/tool-discovery-repository.js";
-import { toolCatalogService } from "./tool-catalog-service.js";
-import { getRemainingStartTimeoutMs, SessionManager } from "./session-manager.js";
+import { serverService } from "./server-service.js";
+import { ServerLifecycle } from "./server-lifecycle.js";
+import { getPublicServerStartErrorMessage } from "./server-start-error.js";
 import type { ServerSession, SessionFactory } from "./session-manager.js";
 import type { Server, ServerUpdateInput, ToolCatalogEntry } from "@moor/types";
-import { eventBus } from "./event-bus.js";
-import { profileService } from "./profiles.js";
-import { getDatabase } from "../db/index.js";
-import { settingsService } from "./settings.js";
 
 export type { ServerSession, SessionFactory };
+export { getPublicServerStartErrorMessage };
 
 export interface ServerConfig {
   name: string;
@@ -31,301 +27,119 @@ export interface ManagedServer {
   autoStart: boolean;
 }
 
-interface McpTimeoutSettings {
-  requestTimeoutMs: number;
-  startTimeoutMs: number;
-}
-
-export function getPublicServerStartErrorMessage(err: unknown): string {
-  const message = err instanceof Error ? err.message : String(err);
-  const missingCommand =
-    /^Command "([^"]+)" was not found on PATH while starting this stdio server\./.exec(message);
-  if (missingCommand) {
-    return `Command "${missingCommand[1]}" was not found. Configure an absolute command path or update this server environment.`;
-  }
-
-  const missingAbsoluteCommand =
-    /^Command "([^"]+)" is not executable while starting this stdio server\./.exec(message);
-  if (missingAbsoluteCommand) {
-    return `Command "${missingAbsoluteCommand[1]}" is not executable. Check that the absolute path exists and has execute permission.`;
-  }
-
-  return "Server failed to start. Check logs for details.";
-}
-
 export class ServerRuntime {
-  private servers: Map<string, ManagedServer> = new Map();
-  private sessionManager: SessionManager;
+  private lifecycle: ServerLifecycle;
 
   constructor(sessionFactory?: SessionFactory) {
-    this.sessionManager = new SessionManager(sessionFactory);
+    this.lifecycle = new ServerLifecycle(serverService, sessionFactory);
   }
 
   addServer(config: ServerConfig): Server {
-    const id = crypto.randomUUID();
-    const now = new Date().toISOString();
-    const repo = getServerRepository();
-    repo.insert({
-      id,
-      name: config.name,
-      connectionType: config.connectionType,
-      command: config.command ?? null,
-      args: config.args ? JSON.stringify(config.args) : null,
-      url: config.url ?? null,
-      env: config.env ? JSON.stringify(config.env) : null,
-      headers: config.headers ? JSON.stringify(config.headers) : null,
-      workingDir: config.workingDir ?? null,
-      autoStart: config.autoStart ? 1 : 0,
-      sortOrder: repo.nextTopSortOrder(),
-      createdAt: now,
-      updatedAt: now,
-    });
-    this.registerServer(id);
-    profileService.assignToActiveProfile([id]);
-    return repo.findById(id)!;
+    return serverService.addServer(config);
   }
 
-  loadFromDb() {
-    this.servers.clear();
-    const db = getDatabase();
-    db.transaction(() => {
-      db.run(
-        "UPDATE mcp_servers SET status = 'stopped', error_message = NULL WHERE status IN ('running', 'starting')",
-      );
-    });
-    const rows = getServerRepository().findAll();
-    for (const row of rows) {
-      this.servers.set(row.id, {
-        id: row.id,
-        name: row.name,
-        connectionType: row.connectionType,
-        status: row.status,
-        autoStart: row.autoStart,
-      });
-    }
+  loadFromDb(): void {
+    serverService.loadFromDb();
   }
 
-  resetForTest() {
-    this.servers.clear();
-    this.sessionManager.resetForTest();
+  resetForTest(): void {
+    serverService.resetForTest();
+    this.lifecycle.resetForTest();
   }
 
   getServer(id: string): ManagedServer | undefined {
-    return this.servers.get(id);
+    return serverService.getServer(id);
   }
 
   getActiveProfileId(): string | null {
-    return profileService.getActiveProfileId();
+    return this.lifecycle.getActiveProfileId();
   }
 
   registerServer(id: string): void {
-    const row = getServerRepository().findById(id);
-    if (!row) return;
-    this.servers.set(id, {
-      id: row.id,
-      name: row.name,
-      connectionType: row.connectionType,
-      status: row.status,
-      autoStart: row.autoStart,
-    });
+    serverService.registerServer(id);
   }
 
   unregisterServer(id: string): void {
-    this.servers.delete(id);
+    serverService.unregisterServer(id);
   }
 
   listServers(): Server[] {
-    return getServerRepository().findAll();
+    return serverService.listServers();
   }
 
   getServerDetail(id: string): (Server & { runtime?: ManagedServer }) | null {
-    const row = getServerRepository().findById(id);
-    if (!row) return null;
-    const runtime = this.getServer(id);
-    return runtime ? { ...row, runtime } : row;
+    return serverService.getServerDetail(id);
   }
 
   updateServer(id: string, body: ServerUpdateInput): Server | null {
-    const repo = getServerRepository();
-    const server = repo.findById(id);
-    if (!server) return null;
-    repo.update(id, body);
-    const updated = repo.findById(id)!;
-    const runtime = this.getServer(id);
-    if (runtime) {
-      if (body.name) runtime.name = updated.name;
-      if ("autoStart" in body) runtime.autoStart = updated.autoStart;
-    }
-    return updated;
+    return serverService.updateServer(id, body);
   }
 
   async removeServer(id: string): Promise<boolean> {
     const runtime = this.getServer(id);
     if (runtime?.status === "running") {
-      await this.stopServer(id);
+      try {
+        await this.lifecycle.stopServer(id);
+      } catch (err) {
+        console.warn(`Failed to stop server ${id} before removal; removing it anyway.`, err);
+      }
     }
-    const existing = getServerRepository().findById(id);
-    if (!existing) return false;
-    getServerRepository().remove(id);
-    this.unregisterServer(id);
-    return true;
+    return serverService.removeServer(id);
   }
 
   async startServer(id: string): Promise<void> {
-    const server = this.servers.get(id);
-    if (!server) throw new Error(`Server ${id} not found`);
-    if (server.status === "running") return;
-    const existingStart = this.sessionManager.getStartPromise(id);
-    if (existingStart) return existingStart;
-
-    const startPromise = this.startServerSession(id);
-    this.sessionManager.setStartPromise(id, startPromise);
-    try {
-      await startPromise;
-    } finally {
-      this.sessionManager.deleteStartPromise(id);
-    }
-  }
-
-  private async startServerSession(id: string): Promise<void> {
-    this.setServerStatus(id, "starting");
-    try {
-      const server = getServerRepository().findById(id);
-      if (!server) throw new Error(`Server ${id} not found`);
-      const timeouts = this.getMcpTimeoutSettings();
-      const startTimeouts = {
-        ...timeouts,
-        startDeadlineMs: Date.now() + timeouts.startTimeoutMs,
-      };
-      const session = await this.sessionManager.createSession(id, server, startTimeouts);
-
-      const toolsResult = await session.client.listTools(undefined, {
-        timeout: getRemainingStartTimeoutMs(startTimeouts),
-      });
-      this.cacheTools(
-        id,
-        toolsResult.tools.map((tool) => ({
-          name: tool.name,
-          description: tool.description,
-          inputSchema: tool.inputSchema,
-        })),
-      );
-
-      this.setServerStatus(id, "running");
-    } catch (err) {
-      await this.sessionManager.destroySession(id).catch(() => {});
-      console.error(`Failed to start server ${id}:`, err);
-      this.setServerStatus(id, "error", getPublicServerStartErrorMessage(err));
-      throw err;
-    }
+    return this.lifecycle.startServer(id);
   }
 
   async stopServer(id: string): Promise<void> {
-    const server = this.servers.get(id);
-    if (!server || server.status !== "running") return;
-    await this.sessionManager.destroySession(id);
-    this.setServerStatus(id, "stopped");
+    return this.lifecycle.stopServer(id);
   }
 
-  async stopAll() {
-    await Promise.all(Array.from(this.servers.keys()).map((id) => this.stopServer(id)));
+  async stopAll(): Promise<void> {
+    return this.lifecycle.stopAll();
   }
 
   autoStartEligibleServers(): ManagedServer[] {
-    return this.getActiveProfileServers()
-      .filter((ps) => ps.server.autoStart)
-      .map((ps) => ps.server);
+    return this.lifecycle.autoStartEligibleServers();
   }
 
   async startAutoStartServers(): Promise<void> {
-    const servers = this.autoStartEligibleServers();
-    await Promise.allSettled(servers.map((server) => this.startServer(server.id)));
+    return this.lifecycle.startAutoStartServers();
   }
 
   async callToolByExposedName(exposedName: string, args: unknown): Promise<unknown> {
-    const owner = this.findToolOwner(exposedName);
-    if (!owner) throw new Error(`Tool "${exposedName}" not found or disabled`);
-
-    const session = this.sessionManager.getSession(owner.serverId);
-    if (!session) throw new Error(`Server "${owner.serverName}" is not running`);
-    const { requestTimeoutMs } = this.getMcpTimeoutSettings();
-    return session.client.callTool(
-      {
-        name: owner.toolName,
-        arguments: args as Record<string, unknown>,
-      },
-      undefined,
-      { timeout: requestTimeoutMs },
-    );
+    return this.lifecycle.callToolByExposedName(exposedName, args);
   }
 
   findToolOwner(exposedName: string): ToolCatalogEntry | null {
-    return this.getToolCatalog().find((tool) => tool.exposedName === exposedName) ?? null;
+    return this.lifecycle.findToolOwner(exposedName);
   }
 
   getToolCatalog(profileId?: string | null): ToolCatalogEntry[] {
-    return toolCatalogService.getToolCatalog(profileId, {
-      serverIds: this.getCallableServerIds(),
-    });
-  }
-
-  private getCallableServerIds(): ReadonlySet<string> {
-    const ids = new Set<string>();
-    for (const server of this.servers.values()) {
-      if (server.status === "running" && this.sessionManager.getSession(server.id)) {
-        ids.add(server.id);
-      }
-    }
-    return ids;
-  }
-
-  private getMcpTimeoutSettings(): McpTimeoutSettings {
-    const advanced = settingsService.getSettings().advanced;
-    return {
-      requestTimeoutMs: advanced.mcpRequestTimeoutMs,
-      startTimeoutMs: advanced.mcpServerStartTimeoutMs,
-    };
-  }
-
-  getActiveProfileServers(): Array<{ serverId: string; server: ManagedServer }> {
-    const activeIds = profileService.getActiveProfileServers().map((server) => server.serverId);
-    return activeIds
-      .map((serverId) => {
-        const server = this.servers.get(serverId);
-        if (!server) return null;
-        return { serverId, server };
-      })
-      .filter((item): item is NonNullable<typeof item> => item !== null);
+    return this.lifecycle.getToolCatalog(profileId);
   }
 
   cacheTools(
     serverId: string,
     tools: Array<{ name: string; description?: string; inputSchema?: unknown }>,
-  ) {
-    getToolDiscoveryRepository().replaceToolsForServer(serverId, tools);
-    eventBus.emit("server:tools", { serverId });
+  ): void {
+    this.lifecycle.cacheTools(serverId, tools);
   }
 
   getDiscoveredTools(serverId: string) {
-    return toolCatalogService.getDiscoveredTools(serverId);
+    return this.lifecycle.getDiscoveredTools(serverId);
   }
 
   getToolDetails(serverId: string, profileId?: string) {
-    return toolCatalogService.getToolDetails(serverId, profileId, {
-      serverIds: this.getCallableServerIds(),
-    });
+    return this.lifecycle.getToolDetails(serverId, profileId);
   }
 
-  private setServerStatus(id: string, status: ManagedServer["status"], errorMessage?: string) {
-    const server = this.servers.get(id);
-    if (!server) return;
-    server.status = status;
-    getServerRepository().updateStatus(id, status, errorMessage ?? null);
-    eventBus.emit("server:status", {
-      serverId: id,
-      status,
-      errorMessage,
-    });
+  getActiveProfileServers(): Array<{ serverId: string; server: ManagedServer }> {
+    return this.lifecycle.getActiveProfileServers();
+  }
+
+  reorderServers(serverIds: string[]): Server[] {
+    return serverService.reorderServers(serverIds);
   }
 }
 

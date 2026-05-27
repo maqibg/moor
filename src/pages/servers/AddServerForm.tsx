@@ -11,7 +11,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { AlertTriangle, X } from "lucide-react";
+import { X } from "lucide-react";
+import { ErrorBanner } from "@/components/shared/ErrorBanner";
 import { Switch } from "@/components/ui/switch";
 import { KeyValueEditor } from "@/components/shared/KeyValueEditor";
 import { UnsavedChangesDialog } from "@/components/shared/UnsavedChangesDialog";
@@ -236,12 +237,7 @@ export function AddServerForm({ onAdd, onClose }: AddServerFormProps) {
             valuePlaceholder={t("your-api-key")}
           />
         </div>
-        {formError && (
-          <div className="flex items-center gap-2 rounded-lg border border-error-warm/20 bg-error-warm/8 px-3 py-2">
-            <AlertTriangle className="h-4 w-4 shrink-0 text-error-warm" />
-            <p className="font-body text-xs text-error-warm">{formError}</p>
-          </div>
-        )}
+        {formError && <ErrorBanner message={formError} />}
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="outline" onClick={requestClose}>
             {t("Cancel")}

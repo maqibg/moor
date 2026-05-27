@@ -16,12 +16,13 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
-import { ServerCard } from "@/components/shared/ServerCard";
+import { ErrorBanner } from "@/components/shared/ErrorBanner";
+import { ServerCard } from "@/components/servers/ServerCard";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { PageLoading } from "@/components/shared/PageLoading";
 import { useServers } from "@/hooks/useServers";
 import { useConfigImport } from "@/hooks/useConfigImport";
-import { AlertTriangle, FileJson, GripVertical, Plus, RefreshCw, ScanSearch } from "lucide-react";
+import { FileJson, GripVertical, Plus, RefreshCw, ScanSearch } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { AddServerForm } from "./servers/AddServerForm";
 import { ConfigImportPanel } from "./servers/ConfigImportPanel";
@@ -201,12 +202,7 @@ export function Servers() {
       {/* Add Server Form */}
       {showAdd && <AddServerForm onAdd={handleAdd} onClose={() => setShowAdd(false)} />}
 
-      {orderError && (
-        <div className="flex items-center gap-2 rounded-lg border border-error-warm/20 bg-error-warm/8 px-3 py-2 animate-fade-in">
-          <AlertTriangle className="h-4 w-4 shrink-0 text-error-warm" />
-          <p className="font-body text-xs text-error-warm">{orderError}</p>
-        </div>
-      )}
+      {orderError && <ErrorBanner message={orderError} className="animate-fade-in" />}
 
       {/* Server List */}
       <div className="space-y-2">

@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { cn, getErrorMessage } from "@/lib/utils";
+import { cn, createErrorWithCause, getErrorMessage } from "@/lib/utils";
 import { getApiRuntime, resetRuntime } from "@/lib/api/runtime";
+import { syncRuntimeSettings, applyLoginAutostartSetting, restartSidecar } from "@/lib/tauri";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { ErrorBanner } from "@/components/shared/ErrorBanner";
 import { useSettings } from "@/hooks/useSettings";
 import { useI18n } from "@/hooks/useI18n";
 import { Switch } from "@/components/ui/switch";
@@ -22,22 +23,6 @@ import {
 } from "./settings-state";
 
 declare const __APP_VERSION__: string;
-
-function isTauriRuntime(): boolean {
-  return "__TAURI_INTERNALS__" in window;
-}
-
-async function syncRuntimeSettings(): Promise<void> {
-  if (!isTauriRuntime()) return;
-  await invoke("sync_runtime_settings");
-}
-
-async function applyLoginAutostartSetting(enabled: boolean): Promise<void> {
-  if (!isTauriRuntime()) return;
-  await invoke("apply_login_autostart_setting", { enabled });
-}
-
-import { createErrorWithCause } from "@/lib/utils";
 
 // --- Reusable Setting Row ---
 
@@ -82,15 +67,6 @@ function RestartBanner({ onRestart }: { onRestart: () => void }) {
       >
         {t("Restart Now")}
       </Button>
-    </div>
-  );
-}
-
-function ErrorBanner({ message }: { message: string }) {
-  return (
-    <div className="flex items-center gap-3 bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-3">
-      <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
-      <span className="font-headline text-sm text-cursor-dark">{message}</span>
     </div>
   );
 }
@@ -583,7 +559,7 @@ export function SettingsPage() {
   const handleRestart = async () => {
     try {
       setErrorMessage(null);
-      await invoke("restart_sidecar");
+      await restartSidecar();
       resetRuntime();
       await refreshRuntimeInfo();
       setPortChangeApplied(false);

@@ -1,9 +1,12 @@
+use crate::sidecar::config::clients;
 use crate::sidecar::config::converter::ConvertInput;
 use crate::sidecar::config::import_parser::ScannedServer;
 use crate::sidecar::config::scanner::{self, ImportPreview};
 use crate::sidecar::config::{converter, import_parser, snippets};
-use crate::sidecar::http::{error_from_code, internal_error, ApiErrorResponse, AppState};
-use crate::sidecar::services::server_service::{CreateServerInput, ServerService};
+use crate::sidecar::http::app_error::AppError;
+use crate::sidecar::http::AppState;
+use crate::sidecar::services::import_service;
+use crate::sidecar::services::server_service::ServerService;
 use axum::{
     extract::State,
     response::Json,
@@ -14,6 +17,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+const MAX_IMPORT_BODY_BYTES: usize = 512 * 1024;
+
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/import/scan", post(scan))
@@ -23,11 +28,13 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/api/import/convert", post(convert))
 }
 
-async fn scan(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ApiErrorResponse> {
+async fn scan(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
     let parsed = scanner::scan_all_configs();
     let existing_names = ServerService::find_all_names(&state.db);
     let preview = scanner::build_import_preview(&parsed, &existing_names);
-    Ok(Json(serde_json::to_value(preview).unwrap()))
+    Ok(Json(
+        serde_json::to_value(preview).map_err(|e| AppError::internal(e.to_string()))?,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -35,14 +42,13 @@ struct ParseBody {
     content: Option<String>,
 }
 
-async fn parse(axum::Json(body): axum::Json<ParseBody>) -> Result<Json<Value>, ApiErrorResponse> {
+async fn parse(axum::Json(body): axum::Json<ParseBody>) -> Result<Json<Value>, AppError> {
     let content = body.content.unwrap_or_default();
     if content.trim().is_empty() {
-        return Err(error_from_code("VALIDATION_ERROR", "content is required"));
+        return Err(AppError::validation("content is required"));
     }
-    if content.len() > 512 * 1024 {
-        return Err(error_from_code(
-            "PAYLOAD_TOO_LARGE",
+    if content.len() > MAX_IMPORT_BODY_BYTES {
+        return Err(AppError::payload_too_large(
             "content exceeds maximum allowed size",
         ));
     }
@@ -57,7 +63,9 @@ async fn parse(axum::Json(body): axum::Json<ParseBody>) -> Result<Json<Value>, A
         errors: parsed.errors,
         diagnostics: parsed.diagnostics,
     };
-    Ok(Json(serde_json::to_value(preview).unwrap()))
+    Ok(Json(
+        serde_json::to_value(preview).map_err(|e| AppError::internal(e.to_string()))?,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -68,47 +76,22 @@ struct ExecuteBody {
 async fn execute(
     State(state): State<Arc<AppState>>,
     axum::Json(body): axum::Json<ExecuteBody>,
-) -> Result<Json<Value>, ApiErrorResponse> {
-    let existing_names = ServerService::find_all_names(&state.db);
-    let all_servers = match body.servers {
-        Some(s) if !s.is_empty() => s,
-        _ => scanner::scan_all_configs().servers,
-    };
-    let (candidates, skipped) = scanner::partition_import_candidates(&all_servers, &existing_names);
-    let mut inputs = vec![];
-
-    for server_config in &candidates {
-        let input = CreateServerInput {
-            name: server_config.name.clone(),
-            connection_type: server_config.connection_type.clone(),
-            command: server_config.command.clone(),
-            args: server_config.args.clone(),
-            url: server_config.url.clone(),
-            env: server_config.env.clone(),
-            headers: server_config.headers.clone(),
-            working_dir: server_config.working_dir.clone(),
-            auto_start: false,
-        };
-        inputs.push(input);
-    }
-
-    let imported_servers = ServerService::insert_servers(&state.db, &state.server_manager, &inputs)
+) -> Result<Json<Value>, AppError> {
+    let result = import_service::execute_import(&state.db, &state.server_manager, body.servers)
         .await
-        .map_err(internal_error)?;
-    let imported = imported_servers
-        .into_iter()
-        .map(|server| server.name)
-        .collect::<Vec<_>>();
+        .map_err(AppError::internal)?;
 
-    Ok(Json(json!({ "imported": imported, "skipped": skipped })))
+    Ok(Json(
+        json!({ "imported": result.imported, "skipped": result.skipped }),
+    ))
 }
 
-async fn snippets_handler(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<Value>, ApiErrorResponse> {
+async fn snippets_handler(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
     let base_url = format!("http://127.0.0.1:{}/mcp", state.port);
     let result = snippets::generate_snippets(&base_url);
-    Ok(Json(serde_json::to_value(result).unwrap()))
+    Ok(Json(
+        serde_json::to_value(result).map_err(|e| AppError::internal(e.to_string()))?,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -124,24 +107,22 @@ struct ConvertBody {
 async fn convert(
     State(state): State<Arc<AppState>>,
     axum::Json(body): axum::Json<ConvertBody>,
-) -> Result<Json<Value>, ApiErrorResponse> {
+) -> Result<Json<Value>, AppError> {
     let target_client = body.target_client.unwrap_or_default();
     let source = body.source.unwrap_or_else(|| "scan".to_string());
 
     if let Some(ref content) = body.content {
-        if content.len() > 512 * 1024 {
-            return Err(error_from_code(
-                "PAYLOAD_TOO_LARGE",
+        if content.len() > MAX_IMPORT_BODY_BYTES {
+            return Err(AppError::payload_too_large(
                 "content exceeds maximum allowed size",
             ));
         }
     }
 
     if clients::get_client_by_id(&target_client).is_none() {
-        return Err(error_from_code(
-            "VALIDATION_ERROR",
-            format!("unknown client id: {target_client}"),
-        ));
+        return Err(AppError::validation(format!(
+            "unknown client id: {target_client}"
+        )));
     }
 
     let input = ConvertInput {
@@ -153,12 +134,12 @@ async fn convert(
     };
 
     match converter::convert_config(&input, &state.db) {
-        Ok(result) => Ok(Json(serde_json::to_value(result).unwrap())),
-        Err(e) => Err(internal_error(e)),
+        Ok(result) => Ok(Json(
+            serde_json::to_value(result).map_err(|e| AppError::internal(e.to_string()))?,
+        )),
+        Err(e) => Err(AppError::internal(e)),
     }
 }
-
-use crate::sidecar::config::clients;
 
 #[cfg(test)]
 mod tests {
