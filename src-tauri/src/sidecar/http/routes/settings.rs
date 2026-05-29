@@ -17,7 +17,7 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 async fn get_settings(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
-    let settings = settings_store::get_settings(&state.db)?;
+    let settings = settings_store::get_settings(&state.db).map_err(AppError::internal)?;
     Ok(Json(
         serde_json::to_value(settings).map_err(|e| AppError::internal(e.to_string()))?,
     ))
@@ -27,8 +27,10 @@ async fn update_settings(
     State(state): State<Arc<AppState>>,
     axum::Json(body): axum::Json<Value>,
 ) -> Result<Json<Value>, AppError> {
-    let settings = settings_store::update_settings(&state.db, body)
-        .map_err(|e| AppError::validation(e.to_string()))?;
+    let settings = settings_store::update_settings(&state.db, body).map_err(|e| match e {
+        settings_store::SettingsError::Validation(m) => AppError::validation(m),
+        settings_store::SettingsError::Internal(m) => AppError::internal(m),
+    })?;
     let settings_value =
         serde_json::to_value(&settings).map_err(|e| AppError::internal(e.to_string()))?;
 
@@ -39,7 +41,7 @@ async fn update_settings(
 }
 
 async fn reset_settings(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
-    let defaults = settings_store::reset_settings(&state.db)?;
+    let defaults = settings_store::reset_settings(&state.db).map_err(AppError::internal)?;
     let defaults_value =
         serde_json::to_value(&defaults).map_err(|e| AppError::internal(e.to_string()))?;
     state
@@ -126,6 +128,20 @@ mod tests {
                 .sidecar_port,
             9333
         );
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn update_settings_rejects_invalid_port_with_validation_error() {
+        let data_dir = temp_data_dir("invalid-port");
+        let err = update_settings(
+            State(test_state(data_dir.clone())),
+            axum::Json(serde_json::json!({ "advanced": { "sidecarPort": 80 } })),
+        )
+        .await
+        .expect_err("invalid port should be rejected");
+        assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(err.code(), "VALIDATION_ERROR");
         let _ = std::fs::remove_dir_all(data_dir);
     }
 

@@ -27,7 +27,7 @@ pub fn router() -> Router<Arc<AppState>> {
 
 async fn list(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
     let repo = ProfileRepository::new(&state.db);
-    let profiles = repo.find_all()?;
+    let profiles = repo.find_all().map_err(AppError::internal)?;
     Ok(Json(
         serde_json::to_value(profiles).map_err(|e| AppError::internal(e.to_string()))?,
     ))
@@ -46,7 +46,7 @@ async fn create(
         return Err(AppError::validation("name is required"));
     }
     let repo = ProfileRepository::new(&state.db);
-    let profile = repo.create(&body.name)?;
+    let profile = repo.create(&body.name).map_err(AppError::internal)?;
     Ok((
         axum::http::StatusCode::CREATED,
         Json(serde_json::to_value(profile).map_err(|e| AppError::internal(e.to_string()))?),
@@ -59,9 +59,10 @@ async fn get_one(
 ) -> Result<Json<Value>, AppError> {
     let repo = ProfileRepository::new(&state.db);
     let profile = repo
-        .find_by_id(&id)?
+        .find_by_id(&id)
+        .map_err(AppError::internal)?
         .ok_or_else(|| AppError::not_found("Profile not found"))?;
-    let servers = repo.find_profile_servers(&id)?;
+    let servers = repo.find_profile_servers(&id).map_err(AppError::internal)?;
     let mut profile_value =
         serde_json::to_value(profile).map_err(|e| AppError::internal(e.to_string()))?;
     if let Some(obj) = profile_value.as_object_mut() {
@@ -85,7 +86,8 @@ async fn update(
 ) -> Result<Json<Value>, AppError> {
     let repo = ProfileRepository::new(&state.db);
     let profile = repo
-        .update(&id, body.name.as_deref())?
+        .update(&id, body.name.as_deref())
+        .map_err(AppError::internal)?
         .ok_or_else(|| AppError::not_found("Profile not found"))?;
     Ok(Json(
         serde_json::to_value(profile).map_err(|e| AppError::internal(e.to_string()))?,
@@ -97,7 +99,7 @@ async fn remove(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, AppError> {
     let repo = ProfileRepository::new(&state.db);
-    match repo.remove(&id)? {
+    match repo.remove(&id).map_err(AppError::internal)? {
         RemoveResult::Success => Ok(Json(json!({ "success": true }))),
         RemoveResult::NotFound => Err(AppError::not_found("Profile not found")),
         RemoveResult::Active => Err(AppError::active_profile("Cannot delete active profile")),
@@ -110,7 +112,8 @@ async fn activate(
 ) -> Result<Json<Value>, AppError> {
     let repo = ProfileRepository::new(&state.db);
     let profile = repo
-        .activate(&id)?
+        .activate(&id)
+        .map_err(AppError::internal)?
         .ok_or_else(|| AppError::not_found("Profile not found"))?;
     state
         .event_bus
@@ -125,7 +128,9 @@ async fn get_profile_server(
     Path((profile_id, server_id)): Path<(String, String)>,
 ) -> Result<Json<Value>, AppError> {
     let repo = ProfileRepository::new(&state.db);
-    let servers = repo.find_profile_servers(&profile_id)?;
+    let servers = repo
+        .find_profile_servers(&profile_id)
+        .map_err(AppError::internal)?;
     let server = servers
         .into_iter()
         .find(|s| s.server.id == server_id)
@@ -148,12 +153,14 @@ async fn upsert_profile_server(
     axum::Json(body): axum::Json<UpsertProfileServerBody>,
 ) -> Result<Json<Value>, AppError> {
     let repo = ProfileRepository::new(&state.db);
-    let result = repo.upsert_profile_server(
-        &profile_id,
-        &server_id,
-        body.enabled,
-        body.disabled_tools.as_ref(),
-    )?;
+    let result = repo
+        .upsert_profile_server(
+            &profile_id,
+            &server_id,
+            body.enabled,
+            body.disabled_tools.as_ref(),
+        )
+        .map_err(AppError::internal)?;
     Ok(Json(
         serde_json::to_value(result).map_err(|e| AppError::internal(e.to_string()))?,
     ))

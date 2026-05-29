@@ -190,6 +190,7 @@ impl ServerService {
         Ok(server)
     }
 
+    /// 写入数据库后会把每个成功创建的 server 注册到内存态 server_manager。
     pub async fn insert_servers(
         db: &Database,
         server_manager: &Arc<ServerManager>,

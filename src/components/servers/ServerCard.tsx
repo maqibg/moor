@@ -358,7 +358,7 @@ export function ServerCard({
             />
           )}
           {isError && server.errorMessage && (
-            <ErrorBanner message={server.errorMessage} className="mt-3" />
+            <ErrorBanner message={server.errorMessage} variant="mono" className="mt-3" />
           )}
         </div>
       </CardContent>

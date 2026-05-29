@@ -220,6 +220,47 @@ describe("ServerManager MCP lifecycle", () => {
     expect(startCalls).toEqual(["Slow Fixture"]);
   });
 
+  it("destroys the pending session and stays stopped when stopped mid-start", async () => {
+    let releaseStart: () => void = () => undefined;
+    const pendingStart = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    let closeCalls = 0;
+    const manager = createTestManager(async () => {
+      await pendingStart;
+      return createFakeSession(() => closeCalls++, [{ name: "search" }]);
+    });
+    const managed = addAutoStartServer(manager, "Interrupted Fixture");
+
+    const start = manager.startServer(managed.id);
+    expect(manager.getServer(managed.id)?.status).toBe("starting");
+
+    await manager.stopServer(managed.id);
+    expect(manager.getServer(managed.id)?.status).toBe("stopped");
+
+    releaseStart();
+    await start;
+
+    expect(manager.getServer(managed.id)?.status).toBe("stopped");
+    expect(closeCalls).toBe(1);
+    expect(
+      queryAll("SELECT tool_name FROM tool_discoveries WHERE server_id = ?", [managed.id]),
+    ).toEqual([]);
+  });
+
+  it("stops an error-state server without throwing and marks it stopped", async () => {
+    const manager = createTestManager(async () => {
+      throw new Error("startup failed");
+    });
+    const managed = addAutoStartServer(manager, "Broken Fixture");
+
+    await expect(manager.startServer(managed.id)).rejects.toThrow("startup failed");
+    expect(manager.getServer(managed.id)?.status).toBe("error");
+
+    await expect(manager.stopServer(managed.id)).resolves.toBeUndefined();
+    expect(manager.getServer(managed.id)?.status).toBe("stopped");
+  });
+
   it("passes startup and latest request timeout settings to SDK requests", async () => {
     const factoryTimeouts: unknown[] = [];
     const listToolOptions: unknown[] = [];
@@ -289,7 +330,10 @@ describe("ServerManager MCP lifecycle", () => {
     const autoStart = manager.startAutoStartServers();
     await Promise.resolve();
 
-    expect(startCalls).toEqual(["Slow Fixture", "Fast Fixture"]);
+    // Both servers must have begun starting before the slow one resolves,
+    // i.e. the pending slow start does not block the later server. Order is
+    // not asserted because it depends on the eligible-server source.
+    expect([...startCalls].sort()).toEqual(["Fast Fixture", "Slow Fixture"]);
 
     releaseSlowStart();
     await autoStart;

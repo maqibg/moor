@@ -8,7 +8,7 @@ use crate::sidecar::http::AppState;
 use crate::sidecar::services::import_service;
 use crate::sidecar::services::server_service::ServerService;
 use axum::{
-    extract::State,
+    extract::{DefaultBodyLimit, State},
     response::Json,
     routing::{get, post},
     Router,
@@ -23,7 +23,10 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/import/scan", post(scan))
         .route("/api/import/parse", post(parse))
-        .route("/api/import/execute", post(execute))
+        .route(
+            "/api/import/execute",
+            post(execute).layer(DefaultBodyLimit::max(MAX_IMPORT_BODY_BYTES)),
+        )
         .route("/api/import/snippets", get(snippets_handler))
         .route("/api/import/convert", post(convert))
 }

@@ -41,6 +41,16 @@ impl AppError {
             message: msg.into(),
         }
     }
+
+    #[cfg(test)]
+    pub fn status_code(&self) -> StatusCode {
+        self.status
+    }
+
+    #[cfg(test)]
+    pub fn code(&self) -> &str {
+        self.code
+    }
 }
 
 impl std::fmt::Display for AppError {
@@ -51,12 +61,6 @@ impl std::fmt::Display for AppError {
 
 impl std::error::Error for AppError {}
 
-impl From<String> for AppError {
-    fn from(msg: String) -> Self {
-        Self::internal(msg)
-    }
-}
-
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         (
@@ -64,5 +68,25 @@ impl IntoResponse for AppError {
             Json(json!({ "error": { "code": self.code, "message": self.message } })),
         )
             .into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validation_uses_bad_request_status_and_code() {
+        let err = AppError::validation("advanced.sidecarPort must be between 1024 and 65535");
+        assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
+        assert_eq!(err.code(), "VALIDATION_ERROR");
+        assert_eq!(err.into_response().status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn internal_uses_server_error_status_and_code() {
+        let err = AppError::internal("boom");
+        assert_eq!(err.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.code(), "INTERNAL_ERROR");
     }
 }

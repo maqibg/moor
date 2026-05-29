@@ -52,10 +52,18 @@ export class ServerLifecycle {
         startDeadlineMs: Date.now() + timeouts.startTimeoutMs,
       };
       const session = await this.sessionManager.createSession(id, server, startTimeouts);
+      if (this.service.getServer(id)?.status !== "starting") {
+        await this.sessionManager.destroySession(id).catch(() => {});
+        return;
+      }
 
       const toolsResult = await session.client.listTools(undefined, {
         timeout: getRemainingStartTimeoutMs(startTimeouts),
       });
+      if (this.service.getServer(id)?.status !== "starting") {
+        await this.sessionManager.destroySession(id).catch(() => {});
+        return;
+      }
       this.cacheTools(
         id,
         toolsResult.tools.map((tool) => ({
@@ -68,6 +76,9 @@ export class ServerLifecycle {
       this.setServerStatus(id, "running");
     } catch (err) {
       await this.sessionManager.destroySession(id).catch(() => {});
+      if (this.service.getServer(id)?.status !== "starting") {
+        return;
+      }
       console.error(`Failed to start server ${id}:`, err);
       this.setServerStatus(id, "error", getPublicServerStartErrorMessage(err));
       throw err;
@@ -76,9 +87,11 @@ export class ServerLifecycle {
 
   async stopServer(id: string): Promise<void> {
     const server = this.service.getServer(id);
-    if (!server || server.status !== "running") return;
+    if (!server && !this.sessionManager.getSession(id)) return;
     await this.sessionManager.destroySession(id);
-    this.setServerStatus(id, "stopped");
+    if (server) {
+      this.setServerStatus(id, "stopped");
+    }
   }
 
   async stopAll(): Promise<void> {

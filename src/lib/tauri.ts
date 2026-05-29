@@ -18,10 +18,3 @@ export async function applyLoginAutostartSetting(enabled: boolean): Promise<void
   if (!isTauriRuntime()) return;
   await invoke("apply_login_autostart_setting", { enabled });
 }
-
-export async function restartSidecar(): Promise<void> {
-  if (!isTauriRuntime()) {
-    throw new Error("Restart is only available in the Tauri desktop runtime.");
-  }
-  await invoke("restart_sidecar");
-}

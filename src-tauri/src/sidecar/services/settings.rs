@@ -8,6 +8,21 @@ pub const MCP_TIMEOUT_MS_MIN: u32 = 5_000;
 pub const MCP_TIMEOUT_MS_MAX: u32 = 300_000;
 pub const MCP_TIMEOUT_MS_DEFAULT: u32 = 30_000;
 
+/// Distinguishes client input errors (HTTP 400) from internal failures (HTTP 500).
+#[derive(Debug)]
+pub enum SettingsError {
+    Validation(String),
+    Internal(String),
+}
+
+impl std::fmt::Display for SettingsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SettingsError::Validation(m) | SettingsError::Internal(m) => write!(f, "{m}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct GeneralSettings {
@@ -223,11 +238,10 @@ pub fn get_settings(db: &Database) -> Result<Settings, String> {
     Ok(db_entries_to_settings(entries))
 }
 
-pub fn update_settings(db: &Database, patch: Value) -> Result<Settings, String> {
-    let current = get_settings(db)?;
-    let updated = merge_settings_value(current, patch)?;
-    validate_settings(&updated)?;
-    persist(db, &updated)?;
+pub fn update_settings(db: &Database, patch: Value) -> Result<Settings, SettingsError> {
+    let current = get_settings(db).map_err(SettingsError::Internal)?;
+    let updated = merge_settings_value(current, patch).map_err(SettingsError::Validation)?;
+    persist(db, &updated).map_err(SettingsError::Internal)?;
     Ok(updated)
 }
 
@@ -411,7 +425,10 @@ mod tests {
             serde_json::json!({ "advanced": { "sidecarPort": 80 } }),
         )
         .expect_err("invalid port should fail");
-        assert!(err.contains("advanced.sidecarPort"));
+        assert!(matches!(
+            err,
+            SettingsError::Validation(ref m) if m.contains("advanced.sidecarPort")
+        ));
         let _ = fs::remove_dir_all(data_dir);
     }
 

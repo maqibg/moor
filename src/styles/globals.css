@@ -1,9 +1,11 @@
 @import "tailwindcss";
+@import "@fontsource-variable/space-grotesk/wght.css";
+@import "@fontsource-variable/newsreader/wght.css";
 @import "./animations.css";
 
 @theme {
-  --font-headline: "Space Grotesk", system-ui, sans-serif;
-  --font-body: "Newsreader", Georgia, serif;
+  --font-headline: "Space Grotesk Variable", "Space Grotesk", system-ui, sans-serif;
+  --font-body: "Newsreader Variable", "Newsreader", Georgia, serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   --color-cursor-dark: #26251e;

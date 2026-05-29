@@ -32,14 +32,16 @@ async fn list(
     Query(query): Query<LogQuery>,
 ) -> Result<Json<Value>, AppError> {
     let repo = AuditLogRepository::new(&state.db);
-    let logs = repo.query_logs(
-        query.server_id.as_deref(),
-        query.tool_name.as_deref(),
-        query.from.as_deref(),
-        query.to.as_deref(),
-        query.limit,
-        query.offset,
-    )?;
+    let logs = repo
+        .query_logs(
+            query.server_id.as_deref(),
+            query.tool_name.as_deref(),
+            query.from.as_deref(),
+            query.to.as_deref(),
+            query.limit,
+            query.offset,
+        )
+        .map_err(AppError::internal)?;
     Ok(Json(
         serde_json::to_value(logs).map_err(|e| AppError::internal(e.to_string()))?,
     ))
@@ -47,7 +49,7 @@ async fn list(
 
 async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
     let repo = AuditLogRepository::new(&state.db);
-    let stats = repo.get_stats()?;
+    let stats = repo.get_stats().map_err(AppError::internal)?;
     Ok(Json(
         serde_json::to_value(stats).map_err(|e| AppError::internal(e.to_string()))?,
     ))

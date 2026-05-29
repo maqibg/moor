@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { cn, createErrorWithCause, getErrorMessage } from "@/lib/utils";
 import { getApiRuntime, resetRuntime } from "@/lib/api/runtime";
-import { syncRuntimeSettings, applyLoginAutostartSetting, restartSidecar } from "@/lib/tauri";
+import { syncRuntimeSettings, applyLoginAutostartSetting } from "@/lib/tauri";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ErrorBanner } from "@/components/shared/ErrorBanner";
 import { useSettings } from "@/hooks/useSettings";
@@ -47,23 +47,18 @@ function SettingRow({ label, description, children }: SettingRowProps) {
 
 // --- Restart Banner ---
 
-function RestartBanner({ onRestart }: { onRestart: () => void }) {
+function RestartBanner() {
   return (
-    <div className="flex items-center justify-between bg-cursor-orange/10 border border-cursor-orange/20 rounded-xl px-4 py-3">
-      <div className="flex items-center gap-3">
-        <AlertTriangle className="h-4 w-4 text-cursor-orange shrink-0" />
-        <span className="font-headline text-sm text-cursor-dark">
-          Some changes require a restart to take effect
-        </span>
+    <div className="flex items-start gap-3 bg-cursor-orange/10 border border-cursor-orange/20 rounded-xl px-4 py-3">
+      <AlertTriangle className="h-4 w-4 text-cursor-orange shrink-0 mt-0.5" />
+      <div className="min-w-0 space-y-0.5">
+        <p className="font-headline text-sm text-cursor-dark">
+          Port changes require reopening Moor
+        </p>
+        <p className="font-body text-xs text-[var(--fg-55)]">
+          Quit and reopen Moor to apply the configured port.
+        </p>
       </div>
-      <Button
-        variant="default"
-        size="sm"
-        onClick={onRestart}
-        className="bg-cursor-orange text-white hover:bg-cursor-orange/90 hover:text-white border-none"
-      >
-        Restart Now
-      </Button>
     </div>
   );
 }
@@ -516,19 +511,6 @@ export function SettingsPage() {
     void refreshRuntimeInfo().catch(() => {});
   }, [refreshRuntimeInfo]);
 
-  const handleRestart = async () => {
-    try {
-      setErrorMessage(null);
-      await restartSidecar();
-      resetRuntime();
-      await refreshRuntimeInfo();
-      setPortChangeApplied(false);
-    } catch (err) {
-      console.error("Failed to restart sidecar:", err);
-      setErrorMessage(getErrorMessage(err, "Failed to restart sidecar"));
-    }
-  };
-
   const handleReset = async () => {
     if (!window.confirm("Reset all settings to their default values?")) return;
     try {
@@ -573,7 +555,7 @@ export function SettingsPage() {
       />
 
       {loadState.kind === "error" && <ErrorBanner message={loadState.message} />}
-      {portBannerState?.kind === "restart" && <RestartBanner onRestart={handleRestart} />}
+      {portBannerState?.kind === "restart" && <RestartBanner />}
       {errorMessage && <ErrorBanner message={errorMessage} />}
 
       {loadState.canRenderControls && (

@@ -77,7 +77,7 @@ export class ServerRuntime {
 
   async removeServer(id: string): Promise<boolean> {
     const runtime = this.getServer(id);
-    if (runtime?.status === "running") {
+    if (runtime && runtime.status !== "stopped") {
       try {
         await this.lifecycle.stopServer(id);
       } catch (err) {

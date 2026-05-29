@@ -26,7 +26,7 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 async fn list(State(state): State<Arc<AppState>>) -> Result<Json<Vec<Server>>, AppError> {
-    let servers = ServerService::list_servers(&state.db)?;
+    let servers = ServerService::list_servers(&state.db).map_err(AppError::internal)?;
     Ok(Json(servers))
 }
 
@@ -110,7 +110,8 @@ async fn get_one(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<Server>, AppError> {
-    let mut server = ServerService::get_server(&state.db, &id)?
+    let mut server = ServerService::get_server(&state.db, &id)
+        .map_err(AppError::internal)?
         .ok_or_else(|| AppError::not_found("Server not found"))?;
 
     if let Some(managed) = state.server_manager.get_server(&id).await {

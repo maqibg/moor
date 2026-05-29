@@ -116,11 +116,6 @@ fn apply_login_autostart_setting(app: tauri::AppHandle, enabled: bool) -> Result
     apply_autostart_setting(&app, enabled)
 }
 
-#[tauri::command]
-fn restart_sidecar() -> Result<(), String> {
-    Err("The Rust sidecar runs in-process. Restart Moor to apply runtime port changes.".to_string())
-}
-
 fn find_available_port(host: &str, start: u16, max: u16) -> Result<u16, String> {
     for port in start..=max {
         if std::net::TcpListener::bind((host, port)).is_ok() {
@@ -168,7 +163,6 @@ pub fn run() {
         ))
         .invoke_handler(tauri::generate_handler![
             get_sidecar_info,
-            restart_sidecar,
             sync_runtime_settings,
             apply_login_autostart_setting,
         ])
