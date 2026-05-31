@@ -358,7 +358,7 @@ vp test
 | Desktop       | Tauri 2 (Rust)                                       |
 | Gateway       | Rust, Axum, Tokio, rusqlite (en proceso)             |
 | Database      | SQLite (rusqlite)                                    |
-| MCP Protocol  | @modelcontextprotocol/sdk (stdio + HTTP/SSE)         |
+| MCP Protocol  | Rust nativo (JSON-RPC sobre Streamable HTTP / stdio) |
 | Icons         | Lucide React                                         |
 | Tooling       | vite-plus (vp CLI), Oxlint, Oxfmt, Vitest            |
 

@@ -352,7 +352,7 @@ vp test
 | 桌面框架 | Tauri 2 (Rust)                                       |
 | 网关     | Rust, Axum, Tokio, rusqlite (进程内)                 |
 | 数据库   | SQLite (rusqlite)                                    |
-| MCP 协议 | @modelcontextprotocol/sdk (stdio + HTTP/SSE)         |
+| MCP 协议 | Rust 自实现 (JSON-RPC over Streamable HTTP / stdio)  |
 | 图标     | Lucide React                                         |
 | 工具链   | vite-plus (vp CLI), Oxlint, Oxfmt, Vitest            |
 

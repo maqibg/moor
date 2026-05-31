@@ -16,6 +16,7 @@
   <img src="https://img.shields.io/badge/Node.js-22+-339933?logo=nodedotjs" alt="Node.js 22+">
   <img src="https://img.shields.io/badge/platform-macOS-black?logo=apple" alt="macOS">
   <img src="https://img.shields.io/badge/platform-Windows-0078D4?logo=windows" alt="Windows">
+  <img src="https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black" alt="Linux">
   <img src="https://img.shields.io/badge/pnpm-10+-F69220?logo=pnpm" alt="pnpm">
 </p>
 
@@ -70,9 +71,13 @@ Download the `.dmg` from [Releases](https://github.com/varandrew/moor/releases),
 
 Download the Windows installer from [Releases](https://github.com/varandrew/moor/releases) and run it. The app bundles the HTTP server as an in-process Rust binary — no pre-installed Node.js runtime required.
 
+### Linux App
+
+Download the `.deb`, `.rpm`, or `.AppImage` from [Releases](https://github.com/varandrew/moor/releases) (x86_64 and aarch64 builds are produced by CI). The app bundles the HTTP server as an in-process Rust binary — no pre-installed Node.js runtime required. macOS remains the primary target; Linux builds are produced by CI but less extensively tested.
+
 ### Build from Source
 
-Requires macOS (Apple Silicon / Intel) or Windows x64, Node.js >= 22, pnpm >= 10, and Rust >= 1.77.
+Requires macOS (Apple Silicon / Intel), Windows x64, or Linux (x86_64 / aarch64), Node.js >= 22 (CI uses 24), pnpm >= 10, and Rust >= 1.77.
 
 ```bash
 git clone https://github.com/varandrew/moor.git
@@ -222,8 +227,8 @@ WebView ◀──SSE──── /api/events
 
 ### Prerequisites
 
-- macOS (Apple Silicon / Intel) or Windows x64
-- [Node.js](https://nodejs.org) >= 22
+- macOS (Apple Silicon / Intel), Windows x64, or Linux (x86_64 / aarch64)
+- [Node.js](https://nodejs.org) >= 22 (CI uses 24)
 - [pnpm](https://pnpm.io) >= 10
 - [Rust](https://rustup.rs) >= 1.77
 - [Xcode Command Line Tools](https://developer.apple.com/xcode/resources/) on macOS
@@ -303,9 +308,11 @@ vp test
 | -------- | -------------------------------- | ------------------------------------- |
 | `GET`    | `/api/profiles`                  | List all profiles                     |
 | `POST`   | `/api/profiles`                  | Create profile                        |
+| `GET`    | `/api/profiles/:id`              | Get profile detail (with servers)     |
 | `PUT`    | `/api/profiles/:id`              | Update profile                        |
 | `DELETE` | `/api/profiles/:id`              | Delete profile                        |
 | `PUT`    | `/api/profiles/:id/activate`     | Set as active profile                 |
+| `GET`    | `/api/profiles/:id/servers/:sid` | Get server toggle + disabled tools    |
 | `PUT`    | `/api/profiles/:id/servers/:sid` | Update server toggle + disabled tools |
 
 ### Audit Logs
@@ -346,7 +353,7 @@ vp test
 | Desktop       | Tauri 2 (Rust)                                       |
 | Gateway       | Rust, Axum, Tokio, rusqlite (in-process)             |
 | Database      | SQLite (rusqlite)                                    |
-| MCP Protocol  | @modelcontextprotocol/sdk (stdio + HTTP/SSE)         |
+| MCP Protocol  | Rust 自实现 (JSON-RPC over Streamable HTTP / stdio)  |
 | Icons         | Lucide React                                         |
 | Tooling       | vite-plus (vp CLI), Oxlint, Oxfmt, Vitest            |
 

@@ -350,17 +350,17 @@ vp test
 
 ## 技術スタック
 
-| レイヤー          | 技術                                                 |
-| ----------------- | ---------------------------------------------------- |
-| フロントエンド    | React 19, vite-plus, TypeScript 5.7, Tailwind CSS v4 |
-| UI プリミティブ   | Radix UI                                             |
-| UI コンポーネント | shadcn/ui (New York style)                           |
-| デスクトップ      | Tauri 2 (Rust)                                       |
-| ゲートウェイ      | Rust, Axum, Tokio, rusqlite (インプロセス)           |
-| データベース      | SQLite (rusqlite)                                    |
-| MCP プロトコル    | @modelcontextprotocol/sdk (stdio + HTTP/SSE)         |
-| アイコン          | Lucide React                                         |
-| ツールチェーン    | vite-plus (vp CLI), Oxlint, Oxfmt, Vitest            |
+| レイヤー          | 技術                                                  |
+| ----------------- | ----------------------------------------------------- |
+| フロントエンド    | React 19, vite-plus, TypeScript 5.7, Tailwind CSS v4  |
+| UI プリミティブ   | Radix UI                                              |
+| UI コンポーネント | shadcn/ui (New York style)                            |
+| デスクトップ      | Tauri 2 (Rust)                                        |
+| ゲートウェイ      | Rust, Axum, Tokio, rusqlite (インプロセス)            |
+| データベース      | SQLite (rusqlite)                                     |
+| MCP プロトコル    | Rust 自前実装 (JSON-RPC over Streamable HTTP / stdio) |
+| アイコン          | Lucide React                                          |
+| ツールチェーン    | vite-plus (vp CLI), Oxlint, Oxfmt, Vitest             |
 
 ## 謝辞
 

@@ -145,7 +145,7 @@ Moor.app
 │   └─ File permissions
 ├─ Gateway Daemon
 │   ├─ Rust in-process Axum HTTP server (production and development)
-│   ├─ MCP protocol: @modelcontextprotocol/sdk
+│   ├─ MCP protocol: Rust 自实现 (JSON-RPC over Streamable HTTP / stdio) — _Evolved: 原 MVP 计划用 @modelcontextprotocol/sdk；移除 Node sidecar 后改为 Rust 自实现_
 │   ├─ Server management (stdio spawn + HTTP/SSE client)
 │   ├─ Profile management + tool filtering
 │   ├─ Request audit logging
@@ -213,6 +213,8 @@ AuditLog
 ```
 
 ## API Design (Sidecar HTTP API)
+
+> **Status Note**: 以下为 MVP 阶段规格。实际实现还包含 `/api/import/parse`、`/api/import/snippets`、`/api/health`、`/api/runtime`、`/api/events`、`/api/settings`(GET/PATCH)、`/api/settings/reset`、`/api/servers/order` 等端点。完整且最新的 API 列表以 `README.md` 的 API 章节为准。
 
 ```
 # Server Management
