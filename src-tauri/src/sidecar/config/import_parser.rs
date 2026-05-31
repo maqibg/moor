@@ -508,3 +508,261 @@ fn strip_jsonc(content: &str) -> String {
     }
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn find<'a>(parsed: &'a ParsedImport, name: &str) -> &'a ScannedServer {
+        parsed
+            .servers
+            .iter()
+            .find(|s| s.name == name)
+            .unwrap_or_else(|| panic!("server {name} not found"))
+    }
+
+    #[test]
+    fn parses_supported_json_and_reports_openapi_as_unsupported() {
+        let parsed = parse_json_mcp_config(
+            r#"{
+              "mcpServers": {
+                "stdio-server-example": { "command": "npx", "args": ["-y", "mcp-server-example"] },
+                "sse-server-example": { "type": "sse", "url": "http://localhost:3000" },
+                "http-server-example": {
+                  "type": "streamable-http",
+                  "url": "http://localhost:3001",
+                  "headers": { "Content-Type": "application/json", "Authorization": "Bearer your-token" }
+                },
+                "openapi-server-example": {
+                  "type": "openapi",
+                  "openapi": { "url": "https://petstore.swagger.io/v2/swagger.json" }
+                }
+              }
+            }"#,
+            "json-import",
+        );
+
+        assert!(parsed.errors.is_empty());
+        assert_eq!(parsed.servers.len(), 3);
+
+        let stdio = find(&parsed, "stdio-server-example");
+        assert_eq!(stdio.connection_type, "stdio");
+        assert_eq!(stdio.command.as_deref(), Some("npx"));
+        assert_eq!(
+            stdio.args,
+            Some(vec!["-y".to_string(), "mcp-server-example".to_string()])
+        );
+
+        let sse = find(&parsed, "sse-server-example");
+        assert_eq!(sse.connection_type, "http");
+        assert_eq!(sse.url.as_deref(), Some("http://localhost:3000"));
+
+        let http = find(&parsed, "http-server-example");
+        assert_eq!(http.connection_type, "http");
+        let headers = http.headers.as_ref().expect("http server has headers");
+        assert_eq!(
+            headers.get("Authorization").map(String::as_str),
+            Some("Bearer your-token")
+        );
+        assert_eq!(
+            headers.get("Content-Type").map(String::as_str),
+            Some("application/json")
+        );
+
+        assert_eq!(parsed.unsupported.len(), 1);
+        assert_eq!(parsed.unsupported[0].name, "openapi-server-example");
+        assert_eq!(
+            parsed.unsupported[0].reason,
+            "OpenAPI-to-MCP is not supported"
+        );
+    }
+
+    #[test]
+    fn reports_json_parse_error_with_diagnostic() {
+        // Node used jsonc-parser ("CommaExpected" + offset); Rust uses serde_json, so we assert
+        // the behaviour (an error + a diagnostic), not the exact code/offset.
+        let parsed = parse_json_mcp_config(
+            "{\n  \"mcpServers\": {\n    \"broken\": {\n      \"command\": \"npx\"\n      \"args\": []\n    }\n  }\n}",
+            "json-import",
+        );
+        assert!(parsed.servers.is_empty());
+        assert!(parsed.unsupported.is_empty());
+        assert_eq!(parsed.errors.len(), 1);
+        assert!(parsed.errors[0].starts_with("json-import: JSON parse error"));
+        assert_eq!(parsed.diagnostics.len(), 1);
+        assert!(parsed.diagnostics[0].line.is_some());
+    }
+
+    #[test]
+    fn parses_codex_toml_with_merged_and_env_headers() {
+        let parsed = parse_codex_toml_config(
+            r#"
+[mcp_servers.code-review-graph]
+command = "uvx"
+args = ["code-review-graph", "serve"]
+type = "stdio"
+
+[mcp_servers.figma]
+url = "https://mcp.figma.com/mcp"
+http_headers = { "X-Figma-Region" = "us-east-1" }
+env_http_headers = { "X-API-Key" = "FIGMA_TOKEN" }
+bearer_token_env_var = "FIGMA_OAUTH_TOKEN"
+"#,
+            "codex",
+        );
+
+        assert!(parsed.errors.is_empty());
+        let crg = find(&parsed, "code-review-graph");
+        assert_eq!(crg.connection_type, "stdio");
+        assert_eq!(crg.command.as_deref(), Some("uvx"));
+        assert_eq!(
+            crg.args,
+            Some(vec!["code-review-graph".to_string(), "serve".to_string()])
+        );
+
+        let figma = find(&parsed, "figma");
+        assert_eq!(figma.connection_type, "http");
+        let headers = figma.headers.as_ref().expect("figma has headers");
+        assert_eq!(
+            headers.get("X-Figma-Region").map(String::as_str),
+            Some("us-east-1")
+        );
+        assert_eq!(
+            headers.get("X-API-Key").map(String::as_str),
+            Some("{env:FIGMA_TOKEN}")
+        );
+        assert_eq!(
+            headers.get("Authorization").map(String::as_str),
+            Some("Bearer {env:FIGMA_OAUTH_TOKEN}")
+        );
+    }
+
+    #[test]
+    fn skips_disabled_json_and_toml_entries() {
+        let json = parse_json_mcp_config(
+            r#"{ "mcp": {
+              "enabledRemote": { "type": "remote", "url": "https://enabled.example.com/mcp" },
+              "disabledRemote": { "type": "remote", "url": "https://disabled.example.com/mcp", "enabled": false }
+            }}"#,
+            "opencode",
+        );
+        assert!(json.errors.is_empty());
+        assert_eq!(
+            json.servers
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["enabledRemote"]
+        );
+        assert!(json.unsupported.is_empty());
+
+        let toml = parse_codex_toml_config(
+            r#"
+[mcp_servers.enabled_stdio]
+command = "uvx"
+args = ["enabled-server"]
+
+[mcp_servers.disabled_stdio]
+command = "uvx"
+args = ["disabled-server"]
+enabled = false
+"#,
+            "codex",
+        );
+        assert!(toml.errors.is_empty());
+        assert_eq!(
+            toml.servers
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["enabled_stdio"]
+        );
+        assert!(toml.unsupported.is_empty());
+    }
+
+    #[test]
+    fn parses_opencode_jsonc_local_and_remote() {
+        let parsed = parse_json_mcp_config(
+            r#"
+{
+  "mcp": {
+    "local-docs": {
+      "type": "local",
+      "command": ["bun", "x", "docs-mcp"],
+      "environment": { "DOCS_TOKEN": "local" },
+    },
+    "remote-docs": {
+      "type": "remote",
+      "url": "https://docs.example.com/mcp",
+      "headers": { "Authorization": "Bearer {env:DOCS_TOKEN}" }
+    }
+  }
+}
+"#,
+            "opencode",
+        );
+
+        assert!(parsed.errors.is_empty());
+        assert_eq!(parsed.servers.len(), 2);
+
+        let local = find(&parsed, "local-docs");
+        assert_eq!(local.connection_type, "stdio");
+        assert_eq!(local.command.as_deref(), Some("bun"));
+        assert_eq!(
+            local.args,
+            Some(vec!["x".to_string(), "docs-mcp".to_string()])
+        );
+        assert_eq!(
+            local
+                .env
+                .as_ref()
+                .and_then(|e| e.get("DOCS_TOKEN"))
+                .map(String::as_str),
+            Some("local")
+        );
+
+        let remote = find(&parsed, "remote-docs");
+        assert_eq!(remote.connection_type, "http");
+        assert_eq!(remote.url.as_deref(), Some("https://docs.example.com/mcp"));
+        assert_eq!(
+            remote
+                .headers
+                .as_ref()
+                .and_then(|h| h.get("Authorization"))
+                .map(String::as_str),
+            Some("Bearer {env:DOCS_TOKEN}")
+        );
+    }
+
+    #[test]
+    fn parses_cursor_stdio_and_http() {
+        let parsed = parse_json_mcp_config(
+            r#"{
+              "mcpServers": {
+                "local-tool": { "type": "stdio", "command": "npx", "args": ["-y", "my-mcp-server"], "env": { "API_KEY": "test" } },
+                "remote-tool": { "url": "https://mcp.example.com/mcp" }
+              }
+            }"#,
+            "cursor",
+        );
+
+        assert!(parsed.errors.is_empty());
+        assert_eq!(parsed.servers.len(), 2);
+
+        let local = find(&parsed, "local-tool");
+        assert_eq!(local.connection_type, "stdio");
+        assert_eq!(local.command.as_deref(), Some("npx"));
+        assert_eq!(
+            local
+                .env
+                .as_ref()
+                .and_then(|e| e.get("API_KEY"))
+                .map(String::as_str),
+            Some("test")
+        );
+
+        let remote = find(&parsed, "remote-tool");
+        assert_eq!(remote.connection_type, "http");
+        assert_eq!(remote.url.as_deref(), Some("https://mcp.example.com/mcp"));
+    }
+}

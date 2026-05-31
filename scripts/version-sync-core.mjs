@@ -79,17 +79,11 @@ export function syncVersions({
   log = console.log,
   error = console.error,
 }) {
-  const expected = readJsonVersion(path.join(root, "sidecar", "package.json"));
+  const expected = readJsonVersion(path.join(root, "package.json"));
 
-  log(`Source of truth: sidecar/package.json -> ${expected}\n`);
+  log(`Source of truth: package.json -> ${expected}\n`);
 
   const targets = [
-    {
-      name: "package.json",
-      path: path.join(root, "package.json"),
-      read: readJsonVersion,
-      write: writeJsonVersion,
-    },
     {
       name: "packages/types/package.json",
       path: path.join(root, "packages", "types", "package.json"),

@@ -110,51 +110,6 @@ impl UpdateServerInput {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn update_server_input_rejects_invalid_json_shapes() {
-        assert!(
-            serde_json::from_value::<UpdateServerInput>(serde_json::json!({
-                "args": "--flag"
-            }))
-            .is_err()
-        );
-
-        assert!(
-            serde_json::from_value::<UpdateServerInput>(serde_json::json!({
-                "name": "Valid",
-                "extra": true
-            }))
-            .is_err()
-        );
-
-        let parsed = serde_json::from_value::<UpdateServerInput>(serde_json::json!({
-            "args": null,
-            "env": null,
-            "headers": null,
-            "workingDir": null,
-            "autoStart": true
-        }))
-        .expect("nullable update payload should deserialize");
-
-        assert_eq!(parsed.args, UpdateField::Set(None));
-        assert_eq!(parsed.env, UpdateField::Set(None));
-        assert_eq!(parsed.headers, UpdateField::Set(None));
-        assert_eq!(parsed.working_dir, UpdateField::Set(None));
-        assert_eq!(parsed.auto_start, Some(true));
-
-        let empty = serde_json::from_value::<UpdateServerInput>(serde_json::json!({}))
-            .expect("empty update payload should deserialize");
-        assert_eq!(empty.args, UpdateField::Unset);
-        assert_eq!(empty.env, UpdateField::Unset);
-        assert_eq!(empty.headers, UpdateField::Unset);
-        assert_eq!(empty.working_dir, UpdateField::Unset);
-    }
-}
-
 pub struct ServerService;
 
 pub enum ServerServiceError {
@@ -426,5 +381,50 @@ impl ServerService {
         repo.reorder(server_ids)
             .map_err(ServerServiceError::Internal)?;
         repo.find_all().map_err(ServerServiceError::Internal)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_server_input_rejects_invalid_json_shapes() {
+        assert!(
+            serde_json::from_value::<UpdateServerInput>(serde_json::json!({
+                "args": "--flag"
+            }))
+            .is_err()
+        );
+
+        assert!(
+            serde_json::from_value::<UpdateServerInput>(serde_json::json!({
+                "name": "Valid",
+                "extra": true
+            }))
+            .is_err()
+        );
+
+        let parsed = serde_json::from_value::<UpdateServerInput>(serde_json::json!({
+            "args": null,
+            "env": null,
+            "headers": null,
+            "workingDir": null,
+            "autoStart": true
+        }))
+        .expect("nullable update payload should deserialize");
+
+        assert_eq!(parsed.args, UpdateField::Set(None));
+        assert_eq!(parsed.env, UpdateField::Set(None));
+        assert_eq!(parsed.headers, UpdateField::Set(None));
+        assert_eq!(parsed.working_dir, UpdateField::Set(None));
+        assert_eq!(parsed.auto_start, Some(true));
+
+        let empty = serde_json::from_value::<UpdateServerInput>(serde_json::json!({}))
+            .expect("empty update payload should deserialize");
+        assert_eq!(empty.args, UpdateField::Unset);
+        assert_eq!(empty.env, UpdateField::Unset);
+        assert_eq!(empty.headers, UpdateField::Unset);
+        assert_eq!(empty.working_dir, UpdateField::Unset);
     }
 }

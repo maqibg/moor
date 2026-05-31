@@ -160,7 +160,9 @@ async fn start(
         .server_manager
         .start_server(&id)
         .await
-        .map_err(|err| AppError::internal(public_server_start_error_message(&err)))?;
+        .map_err(|err| {
+            AppError::internal_public(err.clone(), public_server_start_error_message(&err))
+        })?;
     Ok(Json(serde_json::json!({ "status": "started" })))
 }
 

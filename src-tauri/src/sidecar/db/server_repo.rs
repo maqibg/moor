@@ -205,3 +205,72 @@ impl<'a> ServerRepository<'a> {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::SystemTime;
+
+    fn temp_db() -> Database {
+        let ts = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("moor-server-repo-{ts}.db"));
+        let db = Database::open(&path).expect("open db");
+        db.run_migrations().expect("migrate");
+        db
+    }
+
+    #[test]
+    fn find_by_ids_preserves_requested_order_and_skips_missing() {
+        let db = temp_db();
+        let repo = ServerRepository::new(&db);
+        let now = "2026-01-01T00:00:00.000Z";
+        repo.insert(
+            "first",
+            "first",
+            "stdio",
+            Some("node"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            0,
+            now,
+            now,
+        )
+        .expect("insert first");
+        repo.insert(
+            "second",
+            "second",
+            "stdio",
+            Some("node"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            1,
+            now,
+            now,
+        )
+        .expect("insert second");
+
+        let rows = repo
+            .find_by_ids(&[
+                "second".to_string(),
+                "missing".to_string(),
+                "first".to_string(),
+            ])
+            .expect("find_by_ids");
+
+        assert_eq!(
+            rows.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+            vec!["second", "first"]
+        );
+    }
+}

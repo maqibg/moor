@@ -159,3 +159,74 @@ fn parsed_import_warnings(parsed: &import_parser::ParsedImport) -> Vec<String> {
     );
     warnings
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sidecar::db::server_repo::ServerRepository;
+    use std::time::SystemTime;
+
+    fn temp_db() -> Database {
+        let ts = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("moor-converter-{ts}.db"));
+        let db = Database::open(&path).expect("open db");
+        db.run_migrations().expect("migrate");
+        db
+    }
+
+    #[test]
+    fn converts_selected_moor_servers_to_cursor() {
+        let db = temp_db();
+        let now = "2026-01-01T00:00:00.000Z";
+        let repo = ServerRepository::new(&db);
+        repo.insert(
+            "first",
+            "first",
+            "stdio",
+            Some("node"),
+            Some("[\"first.js\"]"),
+            None,
+            Some("{\"FIRST\":\"1\"}"),
+            None,
+            Some("/tmp/first"),
+            false,
+            0,
+            now,
+            now,
+        )
+        .expect("insert first");
+        repo.insert(
+            "second",
+            "second",
+            "http",
+            None,
+            None,
+            Some("https://mcp.example.com/mcp"),
+            None,
+            Some("{\"Authorization\":\"Bearer ${TOKEN}\"}"),
+            None,
+            false,
+            1,
+            now,
+            now,
+        )
+        .expect("insert second");
+
+        let input = ConvertInput {
+            source: "moor".to_string(),
+            source_client: None,
+            content: None,
+            server_ids: Some(vec!["second".to_string(), "first".to_string()]),
+            target_client: "cursor".to_string(),
+        };
+        let result = convert_config(&input, &db).expect("convert");
+
+        assert_eq!(result.target_client, "cursor");
+        assert!(result.content.contains("first"));
+        assert!(result.content.contains("second"));
+        assert!(result.content.contains("https://mcp.example.com/mcp"));
+    }
+}

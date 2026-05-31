@@ -137,16 +137,15 @@ setup-node → install system deps (webkit2gtk, etc.) → pnpm install → tauri
 
 ### 5.1 Source of Truth
 
-`moor-sidecar` (`sidecar/package.json`) serves as the single source of truth for the version number. Reason: changeset discovers pnpm workspace members, and `sidecar` is the primary package that changeset bumps directly.
+Root `package.json` serves as the single source of truth for the version number. The Node sidecar package has been removed, so release scripts now synchronize from the root package to every generated target.
 
 ### 5.2 Version Sync Flow
 
 ```
 pnpm changeset version
-  └─ bumps moor-sidecar version in sidecar/package.json
+  └─ bumps moor version in package.json
 pnpm version:sync
-  ├─ reads sidecar/package.json version (source)
-  ├─ syncs → package.json (root)
+  ├─ reads package.json version (source)
   ├─ syncs → packages/types/package.json
   ├─ syncs → src-tauri/tauri.conf.json
   ├─ syncs → src-tauri/Cargo.toml
@@ -155,9 +154,8 @@ pnpm version:sync
 
 ### 5.3 Changeset Configuration Changes
 
-- Remove `fixed` option (root package `moor` is not a workspace member and cannot be discovered by changeset).
-- `sync-version.mjs` source of truth changed from root `package.json` to `sidecar/package.json`.
-- Targets changed from `[tauri.conf.json, Cargo.toml, sidecar/package.json]` to `[package.json, packages/types/package.json, tauri.conf.json, Cargo.toml, Cargo.lock]`.
+- `sync-version.mjs` source of truth is root `package.json`.
+- Targets are `[packages/types/package.json, tauri.conf.json, Cargo.toml, Cargo.lock]`.
 
 ## 6. File Change List
 
@@ -166,7 +164,7 @@ pnpm version:sync
 | `.github/workflows/release.yml` | Rewrite | Standardize macos-latest matrix + Windows x64 job |
 | `.changeset/initial-release.md` | New     | Initial changeset, solves CHANGELOG cold start    |
 | `.changeset/config.json`        | Modify  | Remove `fixed` option                             |
-| `scripts/sync-version.mjs`      | Modify  | Source of truth changed to sidecar/package.json   |
+| `scripts/sync-version.mjs`      | Modify  | Source of truth changed to root package.json      |
 
 ## 7. Verification Checklist
 

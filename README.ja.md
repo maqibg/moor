@@ -204,8 +204,7 @@ Moor.app
 │       ├── Profile routing        Global active Profile, hot-swap
 │       ├── Audit logging          Tool call recording
 │       └── SSE push               Real-time status sync to WebView
-├── Dev Sidecar      Node.js / TypeScript (Hono — 開発モード & SEA スタンドアロン)
-└── Storage           SQLite (rusqlite / node:sqlite)
+└── Storage           SQLite (rusqlite)
     ├── servers (configs, status)
     ├── profiles (server groups + tool toggles)
     └── audit_logs (tool calls, params, results, errors)
@@ -223,7 +222,7 @@ WebView ──fetch──▶ /api/* ────────┘
 WebView ◀──SSE──── /api/events
 ```
 
-- **ランタイム検出**: WebView → Tauri IPC (`get_sidecar_info`) → Rust（ポート、トークン）；ブラウザ開発モードでは `/api/runtime` にフォールバック
+- **ランタイム検出**: WebView → Tauri IPC (`get_sidecar_info`) → Rust（ポート、トークン）
 - **業務操作**: WebView → HTTP `fetch()` → インプロセス Axum サーバー（Rust）
 - **システム操作**: WebView → Tauri IPC → Rust（トレイ、ウィンドウ、自動起動）
 
@@ -247,20 +246,13 @@ pnpm install
 
 ### 開発モード
 
-フロントエンドと Sidecar を同時に起動：
-
-```bash
-pnpm dev:all
-```
-
-- フロントエンド: http://localhost:1420
-- Sidecar API: http://localhost:9223
-
-完全なデスクトップアプリ（Tauri）を起動：
+完全なデスクトップアプリ（Tauri、インプロセス Rust ゲートウェイ内蔵）を起動：
 
 ```bash
 pnpm tauri dev
 ```
+
+- フロントエンド: http://localhost:1420（WebView 内で Vite HMR 動作）
 
 ### プロダクションビルド
 
@@ -286,10 +278,10 @@ vp fmt         # フォーマット
 ### テスト
 
 ```bash
-# Sidecar テスト
-cd sidecar && vp test run
+# Rust ゲートウェイテスト
+cargo test --manifest-path src-tauri/Cargo.toml
 
-# フロントエンドテスト
+# フロントエンド + スクリプトテスト
 vp test
 ```
 
@@ -358,18 +350,17 @@ vp test
 
 ## 技術スタック
 
-| レイヤー          | 技術                                                    |
-| ----------------- | ------------------------------------------------------- |
-| フロントエンド    | React 19, vite-plus, TypeScript 5.7, Tailwind CSS v4    |
-| UI プリミティブ   | Radix UI                                                |
-| UI コンポーネント | shadcn/ui (New York style)                              |
-| デスクトップ      | Tauri 2 (Rust)                                          |
-| ゲートウェイ      | Rust, Axum, Tokio, rusqlite (インプロセス)              |
-| 開発 Sidecar      | Node.js, TypeScript, Hono, @hono/node-server, @hono/mcp |
-| データベース      | SQLite (rusqlite / node:sqlite)                         |
-| MCP プロトコル    | @modelcontextprotocol/sdk (stdio + HTTP/SSE)            |
-| アイコン          | Lucide React                                            |
-| ツールチェーン    | vite-plus (vp CLI), Oxlint, Oxfmt, Vitest               |
+| レイヤー          | 技術                                                 |
+| ----------------- | ---------------------------------------------------- |
+| フロントエンド    | React 19, vite-plus, TypeScript 5.7, Tailwind CSS v4 |
+| UI プリミティブ   | Radix UI                                             |
+| UI コンポーネント | shadcn/ui (New York style)                           |
+| デスクトップ      | Tauri 2 (Rust)                                       |
+| ゲートウェイ      | Rust, Axum, Tokio, rusqlite (インプロセス)           |
+| データベース      | SQLite (rusqlite)                                    |
+| MCP プロトコル    | @modelcontextprotocol/sdk (stdio + HTTP/SSE)         |
+| アイコン          | Lucide React                                         |
+| ツールチェーン    | vite-plus (vp CLI), Oxlint, Oxfmt, Vitest            |
 
 ## 謝辞
 

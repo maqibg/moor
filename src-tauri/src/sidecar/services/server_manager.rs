@@ -624,6 +624,9 @@ pub fn public_server_start_error_message(err: &str) -> String {
     if err.contains("not executable") {
         return "Server failed to start. Check that the command path exists and has execute permission.".to_string();
     }
+    if let Some(message) = extract_remote_mcp_error_message(err) {
+        return format!("Server failed to start: {message}");
+    }
     if let Some(summary) = extract_stdio_stderr_summary(err) {
         return format!("Server failed to start: {summary}");
     }
@@ -631,7 +634,7 @@ pub fn public_server_start_error_message(err: &str) -> String {
 }
 
 fn format_timeout_ms(timeout_ms: u32) -> String {
-    if timeout_ms % 1000 == 0 {
+    if timeout_ms.is_multiple_of(1000) {
         format!("{}s", timeout_ms / 1000)
     } else {
         format!("{timeout_ms}ms")
@@ -648,6 +651,12 @@ fn extract_stdio_stderr_summary(err: &str) -> Option<&str> {
     err.split_once(". stdio stderr: ")
         .map(|(_, summary)| summary.trim())
         .filter(|summary| !summary.is_empty())
+}
+
+fn extract_remote_mcp_error_message(err: &str) -> Option<&str> {
+    err.strip_prefix("Remote MCP server error: ")
+        .map(str::trim)
+        .filter(|message| !message.is_empty())
 }
 
 #[cfg(test)]
@@ -876,6 +885,16 @@ process.stdin.on("data", (chunk) => {{
         assert_eq!(
             public_server_start_error_message("request timed out after 30s"),
             "Server failed to start. Check logs for details."
+        );
+    }
+
+    #[test]
+    fn public_error_exposes_remote_mcp_error_message() {
+        assert_eq!(
+            public_server_start_error_message(
+                "Remote MCP server error: Bad Request: No valid session ID provided"
+            ),
+            "Server failed to start: Bad Request: No valid session ID provided"
         );
     }
 

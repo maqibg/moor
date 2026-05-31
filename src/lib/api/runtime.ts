@@ -11,22 +11,11 @@ async function getRuntimeInfo(): Promise<SidecarInfo> {
   try {
     return await getSidecarInfo();
   } catch {
-    // Fall through to HTTP discovery
+    // Outside Tauri (e.g. `pnpm dev` in a plain browser) there is no in-process
+    // gateway. Point at one via VITE_MOOR_API_URL / VITE_MOOR_API_TOKEN; otherwise
+    // API calls surface errors. The desktop dev loop is `pnpm tauri dev`.
+    return defaultRuntime();
   }
-
-  const fallback = defaultRuntime();
-  try {
-    const resp = await fetch(`${fallback.baseUrl}/api/runtime`, {
-      headers: { "X-Moor-Token": fallback.apiToken },
-    });
-    if (resp.ok) {
-      const runtime = (await resp.json()) as { port: number; baseUrl: string };
-      return { ...fallback, port: runtime.port, baseUrl: runtime.baseUrl };
-    }
-  } catch {
-    // Dev sidecar may not be running yet; callers will surface API errors.
-  }
-  return fallback;
 }
 
 let runtimeInfo: SidecarInfo | null = null;

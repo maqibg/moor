@@ -610,3 +610,48 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod stdio_env_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[cfg(unix)]
+    #[test]
+    fn keeps_server_path_entries_before_process_path_entries() {
+        let parent = HashMap::from([
+            ("HOME".to_string(), "/home/u".to_string()),
+            ("PATH".to_string(), "/parent/bin".to_string()),
+        ]);
+        let server = HashMap::from([("PATH".to_string(), "/server/bin".to_string())]);
+
+        let env = build_stdio_environment(&parent, Some(&server));
+        let path = env.get("PATH").expect("PATH set");
+        let entries: Vec<&str> = path.split(':').collect();
+        let server_idx = entries
+            .iter()
+            .position(|e| *e == "/server/bin")
+            .expect("server path");
+        let parent_idx = entries
+            .iter()
+            .position(|e| *e == "/parent/bin")
+            .expect("parent path");
+        assert!(
+            server_idx < parent_idx,
+            "server PATH must precede process PATH"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn builds_unix_environment_with_common_cli_paths() {
+        let parent = HashMap::from([
+            ("HOME".to_string(), "/home/u".to_string()),
+            ("PATH".to_string(), "/usr/bin".to_string()),
+        ]);
+        let env = build_stdio_environment(&parent, None);
+        let path = env.get("PATH").expect("PATH set");
+        assert!(path.contains("/opt/homebrew/bin"));
+        assert!(path.contains("/usr/local/bin"));
+    }
+}

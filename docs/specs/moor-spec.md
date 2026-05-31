@@ -123,7 +123,7 @@ Build a local MCP console + gateway application running on macOS. Moor acts as a
 - **Original Decision (MVP)**: Node sidecar was planned to be compiled as a standalone binary (pkg/SEA) and packaged into Moor.app.
 - **Evolved Decision**: The production gateway is now a **Rust in-process Axum HTTP server** embedded directly in the Tauri app. No external Node.js runtime or sidecar process is required.
 - **Why**: Better performance, smaller bundle size, simpler lifecycle management, and no Node.js SEA compatibility risks.
-- **Development**: Node.js sidecar (Hono) is still used for `pnpm dev:all` / `pnpm sidecar` for faster iteration.
+- **Development**: `pnpm tauri dev` runs the same in-process Rust gateway used by production; Vite HMR still runs inside the WebView.
 
 ### AD-13: MCP Timeout Settings
 
@@ -131,7 +131,7 @@ Build a local MCP console + gateway application running on macOS. Moor acts as a
 - **范围与默认值**: 两个字段都使用毫秒，范围为 `5_000..300_000`，默认值为 `30_000`。
 - **启动语义**: 启动期 `initialize` / `tools/list` 使用 `mcpServerStartTimeoutMs`，并受同一个启动总等待时间约束。
 - **运行期语义**: `tools/call` 每次调用前读取最新 `mcpRequestTimeoutMs`；修改 request timeout 后无需重启运行中的 server。
-- **跨端一致性**: Node.js development sidecar 与 Rust production gateway 必须保持以上语义一致。
+- **单实现一致性**: 开发和生产都使用 Rust gateway，因此以上语义只维护一份实现。
 
 ## Tech Stack (Confirmed)
 
@@ -141,11 +141,10 @@ Moor.app
 ├─ Desktop Layer: Tauri 2 / Rust
 │   ├─ Window management + tray icon
 │   ├─ macOS Keychain access
-│   ├─ Sidecar process lifecycle management (dev mode only)
+│   ├─ In-process gateway startup and runtime settings
 │   └─ File permissions
 ├─ Gateway Daemon
-│   ├─ Production: Rust in-process Axum HTTP server (no external sidecar)
-│   ├─ Development: Node.js / TypeScript sidecar (Hono, via tsx watch)
+│   ├─ Rust in-process Axum HTTP server (production and development)
 │   ├─ MCP protocol: @modelcontextprotocol/sdk
 │   ├─ Server management (stdio spawn + HTTP/SSE client)
 │   ├─ Profile management + tool filtering

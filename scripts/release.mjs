@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { copyFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -57,14 +57,7 @@ if (status) {
 
 run("pnpm changeset version");
 
-// changeset generates CHANGELOG.md inside the bumped package (sidecar/).
-// Copy it to the repo root so extract-changelog.mjs can find it.
-const sidecarChangelog = path.join(root, "sidecar", "CHANGELOG.md");
-if (existsSync(sidecarChangelog)) {
-  copyFileSync(sidecarChangelog, path.join(root, "CHANGELOG.md"));
-  console.log("  [synced] sidecar/CHANGELOG.md -> CHANGELOG.md");
-}
-
+// changeset writes CHANGELOG.md for the root package (moor) at the repo root.
 run("pnpm version:sync");
 
 const version = getRootVersion();
