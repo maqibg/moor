@@ -1,5 +1,11 @@
 # moor
 
+## 0.6.1
+
+### Patch Changes
+
+- Add a macOS setting to hide the Dock icon when closing to tray, improve stdio server PATH resolution by merging the login shell PATH, and update runtime discovery/API documentation.
+
 ## 0.6.0
 
 ### Minor Changes
