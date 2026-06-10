@@ -218,11 +218,12 @@ Moor.app
 AI Agent ──HTTP──▶ POST /mcp ──▶ Moor Gateway ──stdio/HTTP──▶ MCP Servers
                               │
 WebView ──IPC──▶ get_sidecar_info ─┐
-WebView ──fetch──▶ /api/* ────────┘
+WebView ──fetch──▶ /api/runtime ───┤ (ブラウザ開発モードでフォールバック)
+WebView ──fetch──▶ /api/* ─────────┘
 WebView ◀──SSE──── /api/events
 ```
 
-- **ランタイム検出**: WebView → Tauri IPC (`get_sidecar_info`) → Rust（ポート、トークン）
+- **ランタイム検出**: WebView → Tauri IPC (`get_sidecar_info`) → Rust（ポート、トークン）；ブラウザ開発モードでは HTTP `GET /api/runtime` にフォールバック
 - **業務操作**: WebView → HTTP `fetch()` → インプロセス Axum サーバー（Rust）
 - **システム操作**: WebView → Tauri IPC → Rust（トレイ、ウィンドウ、自動起動）
 
@@ -311,14 +312,14 @@ vp test
 
 ### プロファイル管理
 
-| メソッド | パス                             | 説明                               |
-| -------- | -------------------------------- | ---------------------------------- |
-| `GET`    | `/api/profiles`                  | すべての Profile を一覧            |
-| `POST`   | `/api/profiles`                  | Profile を作成                     |
-| `PUT`    | `/api/profiles/:id`              | Profile を更新                     |
-| `DELETE` | `/api/profiles/:id`              | Profile を削除                     |
-| `PUT`    | `/api/profiles/:id/activate`     | アクティブ Profile に設定          |
-| `PUT`    | `/api/profiles/:id/servers/:sid` | Server 切り替え + 無効ツールを更新 |
+| メソッド | パス                                  | 説明                               |
+| -------- | ------------------------------------- | ---------------------------------- |
+| `GET`    | `/api/profiles`                       | すべての Profile を一覧            |
+| `POST`   | `/api/profiles`                       | Profile を作成                     |
+| `PUT`    | `/api/profiles/:id`                   | Profile を更新                     |
+| `DELETE` | `/api/profiles/:id`                   | Profile を削除                     |
+| `PUT`    | `/api/profiles/:id/activate`          | アクティブ Profile に設定          |
+| `PUT`    | `/api/profiles/:id/servers/:serverId` | Server 切り替え + 無効ツールを更新 |
 
 ### 監査ログ
 

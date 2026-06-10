@@ -289,7 +289,7 @@ Based on Stitch project screens + interview decisions:
 
 ### 6. Settings
 
-- General: auto-start on login, auto-start servers on launch, minimize to tray, show window on launch
+- General: auto-start on login, auto-start servers on launch, minimize to tray, hide dock icon on close, show window on launch
 - Appearance: theme (System/Light/Dark)
 - Advanced: MCP request timeout, server start timeout, log retention, audit logging toggle, sidecar port, API token display
 - Reset to defaults with confirmation

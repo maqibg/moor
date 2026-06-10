@@ -8,7 +8,7 @@ The Moor project's GitHub Actions Release workflow has the following issues:
 
 1. **Severe macos-13 runner queuing**: GitHub is gradually reducing Intel runner capacity. The number of available macos-13 instances is far fewer than macos-latest (ARM64), resulting in long wait times during peak hours.
 2. **Future deprecation risk of macos-13**: GitHub may deprecate macos-13, which would completely break x86_64 builds.
-3. **Missing CHANGELOG.md**: The project is configured with changeset but has never been used. The Release page shows "No CHANGELOG.md found."
+3. ~~**Missing CHANGELOG.md**~~ → **Resolved**: `CHANGELOG.md` is now maintained by changesets and exists in the repo root.
 4. **Cache key conflict risk**: The two jobs use different runner types, and the caching strategy does not account for architecture differences.
 
 ## 2. Design Decisions
@@ -177,4 +177,5 @@ pnpm version:sync
 - [ ] Release page contains complete changelog content.
 - [ ] Generates both `_aarch64.dmg` and `_x86_64.dmg` artifacts.
 - [ ] Generates Windows installer artifacts for x64 releases.
+- [ ] Generates Linux `.deb`, `.rpm`, and `.AppImage` artifacts for both x86_64 and aarch64.
 - [ ] `pnpm release` correctly generates CHANGELOG.md.

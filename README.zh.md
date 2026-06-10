@@ -216,11 +216,12 @@ Moor.app
 AI Agent ──HTTP──▶ POST /mcp ──▶ Moor Gateway ──stdio/HTTP──▶ MCP Servers
                               │
 WebView ──IPC──▶ get_sidecar_info ─┐
-WebView ──fetch──▶ /api/* ────────┘
+WebView ──fetch──▶ /api/runtime ───┤ (纯浏览器开发模式回退)
+WebView ──fetch──▶ /api/* ─────────┘
 WebView ◀──SSE──── /api/events
 ```
 
-- **运行时发现**: WebView → Tauri IPC (`get_sidecar_info`) → Rust（端口、token）
+- **运行时发现**: WebView → Tauri IPC (`get_sidecar_info`) → Rust（端口、token）；纯浏览器开发模式下回退到 HTTP `GET /api/runtime`
 - **业务操作**: WebView → HTTP `fetch()` → 进程内 Axum 服务器（Rust）
 - **系统操作**: WebView → Tauri IPC → Rust（托盘、窗口、自启动）
 
@@ -305,14 +306,14 @@ vp test
 
 ### Profile 管理
 
-| 方法     | 路径                             | 说明                        |
-| -------- | -------------------------------- | --------------------------- |
-| `GET`    | `/api/profiles`                  | 列出所有 Profile            |
-| `POST`   | `/api/profiles`                  | 创建 Profile                |
-| `PUT`    | `/api/profiles/:id`              | 更新 Profile                |
-| `DELETE` | `/api/profiles/:id`              | 删除 Profile                |
-| `PUT`    | `/api/profiles/:id/activate`     | 激活 Profile                |
-| `PUT`    | `/api/profiles/:id/servers/:sid` | 更新 Server 开关 + 禁用工具 |
+| 方法     | 路径                                  | 说明                        |
+| -------- | ------------------------------------- | --------------------------- |
+| `GET`    | `/api/profiles`                       | 列出所有 Profile            |
+| `POST`   | `/api/profiles`                       | 创建 Profile                |
+| `PUT`    | `/api/profiles/:id`                   | 更新 Profile                |
+| `DELETE` | `/api/profiles/:id`                   | 删除 Profile                |
+| `PUT`    | `/api/profiles/:id/activate`          | 激活 Profile                |
+| `PUT`    | `/api/profiles/:id/servers/:serverId` | 更新 Server 开关 + 禁用工具 |
 
 ### 审计日志
 

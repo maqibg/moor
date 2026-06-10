@@ -215,11 +215,12 @@ Moor.app
 AI Agent ──HTTP──▶ POST /mcp ──▶ Moor Gateway ──stdio/HTTP──▶ MCP Servers
                               │
 WebView ──IPC──▶ get_sidecar_info ─┐
-WebView ──fetch──▶ /api/* ────────┘
+WebView ──fetch──▶ /api/runtime ───┤ (fallback in browser dev mode)
+WebView ──fetch──▶ /api/* ─────────┘
 WebView ◀──SSE──── /api/events
 ```
 
-- **Runtime discovery**: WebView → Tauri IPC (`get_sidecar_info`) → Rust (port, token)
+- **Runtime discovery**: WebView → Tauri IPC (`get_sidecar_info`) → Rust (port, token); falls back to HTTP `GET /api/runtime` in browser dev mode
 - **Business operations**: WebView → HTTP `fetch()` → In-process Axum server (Rust)
 - **System operations**: WebView → Tauri IPC → Rust (tray, window, auto-start)
 
@@ -304,16 +305,16 @@ vp test
 
 ### Profile Management
 
-| Method   | Path                             | Description                           |
-| -------- | -------------------------------- | ------------------------------------- |
-| `GET`    | `/api/profiles`                  | List all profiles                     |
-| `POST`   | `/api/profiles`                  | Create profile                        |
-| `GET`    | `/api/profiles/:id`              | Get profile detail (with servers)     |
-| `PUT`    | `/api/profiles/:id`              | Update profile                        |
-| `DELETE` | `/api/profiles/:id`              | Delete profile                        |
-| `PUT`    | `/api/profiles/:id/activate`     | Set as active profile                 |
-| `GET`    | `/api/profiles/:id/servers/:sid` | Get server toggle + disabled tools    |
-| `PUT`    | `/api/profiles/:id/servers/:sid` | Update server toggle + disabled tools |
+| Method   | Path                                  | Description                           |
+| -------- | ------------------------------------- | ------------------------------------- |
+| `GET`    | `/api/profiles`                       | List all profiles                     |
+| `POST`   | `/api/profiles`                       | Create profile                        |
+| `GET`    | `/api/profiles/:id`                   | Get profile detail (with servers)     |
+| `PUT`    | `/api/profiles/:id`                   | Update profile                        |
+| `DELETE` | `/api/profiles/:id`                   | Delete profile                        |
+| `PUT`    | `/api/profiles/:id/activate`          | Set as active profile                 |
+| `GET`    | `/api/profiles/:id/servers/:serverId` | Get server toggle + disabled tools    |
+| `PUT`    | `/api/profiles/:id/servers/:serverId` | Update server toggle + disabled tools |
 
 ### Audit Logs
 

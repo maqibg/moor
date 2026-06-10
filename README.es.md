@@ -218,11 +218,12 @@ Moor.app
 AI Agent ──HTTP──▶ POST /mcp ──▶ Moor Gateway ──stdio/HTTP──▶ MCP Servers
                               │
 WebView ──IPC──▶ get_sidecar_info ─┐
-WebView ──fetch──▶ /api/* ────────┘
+WebView ──fetch──▶ /api/runtime ───┤ (fallback en modo de desarrollo del navegador)
+WebView ──fetch──▶ /api/* ─────────┘
 WebView ◀──SSE──── /api/events
 ```
 
-- **Detección de runtime**: WebView → Tauri IPC (`get_sidecar_info`) → Rust (puerto, token)
+- **Detección de runtime**: WebView → Tauri IPC (`get_sidecar_info`) → Rust (puerto, token); en modo de desarrollo del navegador recurre a HTTP `GET /api/runtime`
 - **Operaciones de negocio**: WebView → HTTP `fetch()` → Servidor Axum en proceso (Rust)
 - **Operaciones de sistema**: WebView → Tauri IPC → Rust (bandeja, ventana, auto-inicio)
 
@@ -311,14 +312,14 @@ vp test
 
 ### Gestión de Perfiles
 
-| Método   | Ruta                             | Descripción                                                     |
-| -------- | -------------------------------- | --------------------------------------------------------------- |
-| `GET`    | `/api/profiles`                  | Listar todos los perfiles                                       |
-| `POST`   | `/api/profiles`                  | Crear perfil                                                    |
-| `PUT`    | `/api/profiles/:id`              | Actualizar perfil                                               |
-| `DELETE` | `/api/profiles/:id`              | Eliminar perfil                                                 |
-| `PUT`    | `/api/profiles/:id/activate`     | Establecer como perfil activo                                   |
-| `PUT`    | `/api/profiles/:id/servers/:sid` | Actualizar conmutador de servidor + herramientas deshabilitadas |
+| Método   | Ruta                                  | Descripción                                                     |
+| -------- | ------------------------------------- | --------------------------------------------------------------- |
+| `GET`    | `/api/profiles`                       | Listar todos los perfiles                                       |
+| `POST`   | `/api/profiles`                       | Crear perfil                                                    |
+| `PUT`    | `/api/profiles/:id`                   | Actualizar perfil                                               |
+| `DELETE` | `/api/profiles/:id`                   | Eliminar perfil                                                 |
+| `PUT`    | `/api/profiles/:id/activate`          | Establecer como perfil activo                                   |
+| `PUT`    | `/api/profiles/:id/servers/:serverId` | Actualizar conmutador de servidor + herramientas deshabilitadas |
 
 ### Registros de auditoría
 
