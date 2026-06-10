@@ -17,6 +17,7 @@ mod login_autostart;
 mod sidecar;
 
 const LEGACY_BUNDLE_IDENTIFIER: &str = "dev.moor.app";
+const AUTOSTART_ARG: &str = "--moor-autostart";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,6 +56,7 @@ struct MoorInner {
     api_token: String,
     db: Arc<sidecar::db::Database>,
     minimize_to_tray: AtomicBool,
+    hide_dock_icon_on_close: AtomicBool,
 }
 
 impl MoorState {
@@ -72,6 +74,16 @@ impl MoorState {
 
     fn set_minimize_to_tray(&self, value: bool) {
         self.inner.minimize_to_tray.store(value, Ordering::SeqCst);
+    }
+
+    fn get_hide_dock_icon_on_close(&self) -> bool {
+        self.inner.hide_dock_icon_on_close.load(Ordering::SeqCst)
+    }
+
+    fn set_hide_dock_icon_on_close(&self, value: bool) {
+        self.inner
+            .hide_dock_icon_on_close
+            .store(value, Ordering::SeqCst);
     }
 }
 
@@ -96,13 +108,25 @@ fn apply_autostart_setting(app: &tauri::AppHandle, enabled: bool) -> Result<(), 
     }
 }
 
+fn show_main_window(app: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    let _ = app.set_dock_visibility(true);
+
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 fn sync_runtime_settings_from_db(
     state: &MoorState,
     db: &sidecar::db::Database,
 ) -> Result<(), String> {
     let settings = sidecar::services::settings::get_settings(db)?;
     let minimize_to_tray = settings.general.minimize_to_tray_on_close;
+    let hide_dock_icon_on_close = settings.general.hide_dock_icon_on_close;
     state.set_minimize_to_tray(minimize_to_tray);
+    state.set_hide_dock_icon_on_close(hide_dock_icon_on_close);
     Ok(())
 }
 
@@ -156,10 +180,16 @@ fn migrate_legacy_data_dir(data_dir: &PathBuf, legacy_data_dir: Option<&PathBuf>
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if args.iter().any(|arg| arg == AUTOSTART_ARG) {
+                return;
+            }
+            show_main_window(app);
+        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec![]),
+            Some(vec![AUTOSTART_ARG]),
         ))
         .invoke_handler(tauri::generate_handler![
             get_sidecar_info,
@@ -193,6 +223,7 @@ pub fn run() {
                 .map_err(|e| format!("Failed to initialize settings: {e}"))?;
             let configured_port = settings.advanced.sidecar_port;
             let minimize_to_tray = settings.general.minimize_to_tray_on_close;
+            let hide_dock_icon_on_close = settings.general.hide_dock_icon_on_close;
             let show_window_on_launch = settings.general.show_window_on_launch;
             let should_show_window =
                 should_show_main_window_on_launch(minimize_to_tray, show_window_on_launch);
@@ -244,6 +275,7 @@ pub fn run() {
                     api_token,
                     db: db_arc.clone(),
                     minimize_to_tray: AtomicBool::new(minimize_to_tray),
+                    hide_dock_icon_on_close: AtomicBool::new(hide_dock_icon_on_close),
                 }),
             };
             app.manage(state);
@@ -282,10 +314,7 @@ pub fn run() {
                             app.exit(0);
                         }
                         "show" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
+                            show_main_window(app);
                         }
                         _ => {}
                     });
@@ -307,10 +336,10 @@ pub fn run() {
             };
 
             if should_show_window {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                show_main_window(app.handle());
+            } else if minimize_to_tray && hide_dock_icon_on_close {
+                #[cfg(target_os = "macos")]
+                let _ = app.handle().set_dock_visibility(false);
             }
 
             Ok(())
@@ -331,6 +360,10 @@ pub fn run() {
                     api.prevent_close();
                     if let Some(window) = app_handle.get_webview_window("main") {
                         let _ = window.hide();
+                    }
+                    if state.get_hide_dock_icon_on_close() {
+                        #[cfg(target_os = "macos")]
+                        let _ = app_handle.set_dock_visibility(false);
                     }
                 }
             }
@@ -377,6 +410,7 @@ mod tests {
                         .expect("failed to open temp db"),
                 ),
                 minimize_to_tray: AtomicBool::new(true),
+                hide_dock_icon_on_close: AtomicBool::new(false),
             }),
         };
         state.set_minimize_to_tray(false);
@@ -414,6 +448,7 @@ mod tests {
                 api_token: "token".to_string(),
                 db: Arc::new(db),
                 minimize_to_tray: AtomicBool::new(true),
+                hide_dock_icon_on_close: AtomicBool::new(false),
             }),
         };
 

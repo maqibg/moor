@@ -29,6 +29,7 @@ pub struct GeneralSettings {
     pub auto_start_on_login: bool,
     pub auto_start_servers_on_launch: bool,
     pub minimize_to_tray_on_close: bool,
+    pub hide_dock_icon_on_close: bool,
     pub show_window_on_launch: bool,
 }
 
@@ -63,6 +64,7 @@ struct PartialGeneralSettings {
     auto_start_on_login: Option<bool>,
     auto_start_servers_on_launch: Option<bool>,
     minimize_to_tray_on_close: Option<bool>,
+    hide_dock_icon_on_close: Option<bool>,
     show_window_on_launch: Option<bool>,
 }
 
@@ -98,6 +100,7 @@ pub fn default_settings() -> Settings {
             auto_start_on_login: false,
             auto_start_servers_on_launch: false,
             minimize_to_tray_on_close: true,
+            hide_dock_icon_on_close: false,
             show_window_on_launch: true,
         },
         appearance: AppearanceSettings {
@@ -144,6 +147,11 @@ fn settings_to_db_entries(settings: &Settings) -> Result<Vec<(&'static str, Stri
         (
             "general.minimizeToTrayOnClose",
             serde_json::to_string(&settings.general.minimize_to_tray_on_close)
+                .map_err(|e| e.to_string())?,
+        ),
+        (
+            "general.hideDockIconOnClose",
+            serde_json::to_string(&settings.general.hide_dock_icon_on_close)
                 .map_err(|e| e.to_string())?,
         ),
         (
@@ -269,6 +277,9 @@ pub fn merge_settings_value(mut base: Settings, value: Value) -> Result<Settings
         }
         if let Some(value) = general.minimize_to_tray_on_close {
             base.general.minimize_to_tray_on_close = value;
+        }
+        if let Some(value) = general.hide_dock_icon_on_close {
+            base.general.hide_dock_icon_on_close = value;
         }
         if let Some(value) = general.show_window_on_launch {
             base.general.show_window_on_launch = value;

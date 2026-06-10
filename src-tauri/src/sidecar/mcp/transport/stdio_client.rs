@@ -1,7 +1,11 @@
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
+#[cfg(all(target_os = "macos", not(test)))]
+use std::process::{Command as StdCommand, Stdio as StdStdio};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
+#[cfg(all(target_os = "macos", not(test)))]
+use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{oneshot, watch, Mutex as AsyncMutex};
@@ -16,6 +20,8 @@ const WINDOWS_CREATE_NO_WINDOW: u32 = 0x08000000;
 const STDERR_SUMMARY_MAX_LINES: usize = 3;
 const STDERR_SUMMARY_MAX_CHARS: usize = 240;
 const STDERR_REDACTED: &str = "[REDACTED]";
+#[cfg(all(target_os = "macos", not(test)))]
+const LOGIN_SHELL_PATH_TIMEOUT: Duration = Duration::from_millis(1500);
 
 pub struct StdioClientTransport {
     child: Option<Child>,
@@ -322,6 +328,19 @@ pub fn build_stdio_environment(
     parent_env: &HashMap<String, String>,
     server_env: Option<&HashMap<String, String>>,
 ) -> HashMap<String, String> {
+    let login_shell_path = login_shell_path_for_platform();
+    build_stdio_environment_with_login_shell_path(
+        parent_env,
+        server_env,
+        login_shell_path.as_deref(),
+    )
+}
+
+fn build_stdio_environment_with_login_shell_path(
+    parent_env: &HashMap<String, String>,
+    server_env: Option<&HashMap<String, String>>,
+    login_shell_path: Option<&str>,
+) -> HashMap<String, String> {
     let is_windows = cfg!(windows);
     let mut env = parent_env.clone();
     if let Some(server_env) = server_env {
@@ -377,6 +396,9 @@ pub fn build_stdio_environment(
     {
         all_entries.extend(split_path(server_path));
     }
+    if let Some(login_shell_path) = login_shell_path {
+        all_entries.extend(split_path(login_shell_path));
+    }
     if let Some(parent_path) = path_value_for_platform(parent_env, is_windows) {
         all_entries.extend(split_path(parent_path));
     }
@@ -391,6 +413,63 @@ pub fn build_stdio_environment(
     let separator = if is_windows { ";" } else { ":" };
     env.insert("PATH".to_string(), unique.join(separator));
     env
+}
+
+#[cfg(all(target_os = "macos", not(test)))]
+fn login_shell_path_for_platform() -> Option<String> {
+    static LOGIN_SHELL_PATH: OnceLock<Option<String>> = OnceLock::new();
+    LOGIN_SHELL_PATH
+        .get_or_init(read_macos_login_shell_path)
+        .clone()
+}
+
+#[cfg(any(not(target_os = "macos"), test))]
+fn login_shell_path_for_platform() -> Option<String> {
+    None
+}
+
+fn parse_login_shell_path_stdout(stdout: &[u8]) -> Option<String> {
+    let stdout = std::str::from_utf8(stdout).ok()?;
+    stdout
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(String::from)
+}
+
+#[cfg(all(target_os = "macos", not(test)))]
+fn read_macos_login_shell_path() -> Option<String> {
+    let shell = std::env::var("SHELL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "/bin/zsh".to_string());
+    let mut child = StdCommand::new(shell)
+        .arg("-l")
+        .arg("-i")
+        .arg("-c")
+        .arg("/usr/bin/printenv PATH")
+        .stdout(StdStdio::piped())
+        .stderr(StdStdio::null())
+        .spawn()
+        .ok()?;
+    let started_at = Instant::now();
+
+    loop {
+        if let Some(_status) = child.try_wait().ok()? {
+            let output = child.wait_with_output().ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            return parse_login_shell_path_stdout(&output.stdout);
+        }
+        if started_at.elapsed() >= LOGIN_SHELL_PATH_TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 fn expand_home(path: &str, home: &str) -> String {
@@ -653,5 +732,83 @@ mod stdio_env_tests {
         let path = env.get("PATH").expect("PATH set");
         assert!(path.contains("/opt/homebrew/bin"));
         assert!(path.contains("/usr/local/bin"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inserts_login_shell_path_between_server_and_parent_path_entries() {
+        let parent = HashMap::from([
+            ("HOME".to_string(), "/home/u".to_string()),
+            ("PATH".to_string(), "/parent/bin".to_string()),
+        ]);
+        let server = HashMap::from([("PATH".to_string(), "/server/bin".to_string())]);
+
+        let env = build_stdio_environment_with_login_shell_path(
+            &parent,
+            Some(&server),
+            Some("/login/bin:/usr/bin"),
+        );
+        let path = env.get("PATH").expect("PATH set");
+        let entries: Vec<&str> = path.split(':').collect();
+        let server_idx = entries
+            .iter()
+            .position(|e| *e == "/server/bin")
+            .expect("server path");
+        let login_idx = entries
+            .iter()
+            .position(|e| *e == "/login/bin")
+            .expect("login shell path");
+        let parent_idx = entries
+            .iter()
+            .position(|e| *e == "/parent/bin")
+            .expect("parent path");
+
+        assert!(server_idx < login_idx);
+        assert!(login_idx < parent_idx);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn login_shell_path_deduplicates_after_server_path_entries() {
+        let parent = HashMap::from([
+            ("HOME".to_string(), "/home/u".to_string()),
+            ("PATH".to_string(), "/parent/bin:/shared/bin".to_string()),
+        ]);
+        let server = HashMap::from([("PATH".to_string(), "/shared/bin:/server/bin".to_string())]);
+
+        let env = build_stdio_environment_with_login_shell_path(
+            &parent,
+            Some(&server),
+            Some("/login/bin:/shared/bin:/parent/bin"),
+        );
+        let path = env.get("PATH").expect("PATH set");
+        let entries: Vec<&str> = path.split(':').collect();
+
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| **entry == "/shared/bin")
+                .count(),
+            1
+        );
+        assert!(
+            entries.iter().position(|entry| *entry == "/shared/bin")
+                < entries.iter().position(|entry| *entry == "/login/bin")
+        );
+    }
+
+    #[test]
+    fn parses_last_non_empty_login_shell_path_stdout_line() {
+        assert_eq!(
+            parse_login_shell_path_stdout(b"noise\n\n /first/bin:/bin \n /last/bin:/usr/bin \n")
+                .as_deref(),
+            Some("/last/bin:/usr/bin")
+        );
+    }
+
+    #[test]
+    fn rejects_empty_or_invalid_login_shell_path_stdout() {
+        assert_eq!(parse_login_shell_path_stdout(b"\n  \n"), None);
+        assert_eq!(parse_login_shell_path_stdout(&[0xff, 0xfe]), None);
     }
 }

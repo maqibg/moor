@@ -83,6 +83,7 @@ describe("settings page state helpers", () => {
       autoStartOnLogin: getGeneralSettingRuntimeAction("autoStartOnLogin"),
       autoStartServersOnLaunch: getGeneralSettingRuntimeAction("autoStartServersOnLaunch"),
       minimizeToTrayOnClose: getGeneralSettingRuntimeAction("minimizeToTrayOnClose"),
+      hideDockIconOnClose: getGeneralSettingRuntimeAction("hideDockIconOnClose"),
       showWindowOnLaunch: getGeneralSettingRuntimeAction("showWindowOnLaunch"),
     };
 
@@ -90,6 +91,7 @@ describe("settings page state helpers", () => {
       autoStartOnLogin: "loginAutostart",
       autoStartServersOnLaunch: "settingsOnly",
       minimizeToTrayOnClose: "windowRuntime",
+      hideDockIconOnClose: "windowRuntime",
       showWindowOnLaunch: "windowRuntime",
     });
   });

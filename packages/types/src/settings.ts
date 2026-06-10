@@ -8,6 +8,7 @@ export interface GeneralSettings {
   autoStartOnLogin: boolean;
   autoStartServersOnLaunch: boolean;
   minimizeToTrayOnClose: boolean;
+  hideDockIconOnClose: boolean;
   showWindowOnLaunch: boolean;
 }
 
@@ -45,6 +46,7 @@ export function createDefaultSettings(): Settings {
       autoStartOnLogin: false,
       autoStartServersOnLaunch: false,
       minimizeToTrayOnClose: true,
+      hideDockIconOnClose: false,
       showWindowOnLaunch: true,
     },
     appearance: { theme: "system" },

@@ -160,6 +160,16 @@ function GeneralSection({ onError }: { onError: (message: string | null) => void
           />
         </SettingRow>
         <SettingRow
+          label="Hide Dock Icon on Close"
+          description="Hide the macOS Dock icon after the window is closed"
+        >
+          <Switch
+            checked={settings.general.hideDockIconOnClose}
+            disabled={!settings.general.minimizeToTrayOnClose}
+            onCheckedChange={(v) => void handleSwitch("hideDockIconOnClose", v)}
+          />
+        </SettingRow>
+        <SettingRow
           label="Show Window on Launch"
           description="Display the main window when Moor starts"
         >
