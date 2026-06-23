@@ -149,8 +149,6 @@ mod tests {
     use super::*;
     use crate::sidecar::db::profile_repo::ProfileRepository;
     use crate::sidecar::db::Database;
-    use crate::sidecar::services::event_bus::EventBus;
-    use crate::sidecar::services::server_manager::ServerManager;
     use std::sync::Arc;
     use std::time::SystemTime;
 
@@ -163,18 +161,7 @@ mod tests {
     }
 
     fn test_state(data_dir: std::path::PathBuf) -> Arc<AppState> {
-        std::fs::create_dir_all(&data_dir).expect("failed to create temp data dir");
-        let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
-        db.run_migrations().expect("failed to run migrations");
-        let event_bus = Arc::new(EventBus::new(16));
-        Arc::new(AppState {
-            db: db.clone(),
-            api_token: "test-token".to_string(),
-            version: "test".to_string(),
-            port: 19444,
-            event_bus: event_bus.clone(),
-            server_manager: Arc::new(ServerManager::new(db, event_bus)),
-        })
+        AppState::for_test(&data_dir)
     }
 
     fn fail_profile_server_inserts(db: &Database) {
@@ -234,15 +221,19 @@ mod tests {
     async fn snippets_use_runtime_port() {
         let data_dir = temp_data_dir("snippets-port");
         let state = test_state(data_dir.clone());
+        let expected_host = format!("127.0.0.1:{}", state.port);
 
         let Json(value) = snippets_handler(State(state))
             .await
             .expect("snippets should succeed");
         let snippets = value.as_array().expect("snippets should be an array");
-        assert!(snippets.iter().any(|snippet| snippet["snippet"]
-            .as_str()
-            .unwrap_or("")
-            .contains("127.0.0.1:19444")));
+        assert!(
+            snippets.iter().any(|snippet| snippet["snippet"]
+                .as_str()
+                .unwrap_or("")
+                .contains(&expected_host)),
+            "snippets should contain the runtime port {expected_host}"
+        );
         let _ = std::fs::remove_dir_all(data_dir);
     }
 

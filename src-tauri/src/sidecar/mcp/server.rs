@@ -1,9 +1,6 @@
 use super::jsonrpc;
-use crate::sidecar::db::audit_log_repo::AuditLogRepository;
-use crate::sidecar::db::profile_repo::ProfileRepository;
 use crate::sidecar::http::AppState;
-use crate::sidecar::services::audit_redaction::redact_for_audit;
-use crate::sidecar::services::settings::audit_logging_enabled;
+use crate::sidecar::services::audit_recorder::{AuditRecorder, ToolCallRecord};
 use std::sync::Arc;
 
 /// Handle an incoming MCP JSON-RPC request and produce a response.
@@ -87,15 +84,17 @@ async fn handle_tools_call(
         Some(t) => t,
         None => {
             let error = format!("Tool \"{tool_name}\" not found or disabled");
-            record_audit(
-                &state,
-                None,
-                tool_name,
-                &arguments,
-                None,
-                Some(&error),
-                0,
-                agent_info,
+            AuditRecorder::record(
+                &state.db,
+                ToolCallRecord {
+                    server_id: None,
+                    tool_name,
+                    arguments: &arguments,
+                    result: None,
+                    error: Some(&error),
+                    duration_ms: 0,
+                    agent_info,
+                },
             );
             return jsonrpc::make_error(id, jsonrpc::INVALID_PARAMS, &error);
         }
@@ -108,71 +107,42 @@ async fn handle_tools_call(
         .await
     {
         Ok(result) => {
-            record_audit(
-                &state,
-                Some(&owner.server_id),
-                tool_name,
-                &arguments,
-                Some(&result),
-                None,
-                start_time.elapsed().as_millis() as i64,
-                agent_info,
+            AuditRecorder::record(
+                &state.db,
+                ToolCallRecord {
+                    server_id: Some(&owner.server_id),
+                    tool_name,
+                    arguments: &arguments,
+                    result: Some(&result),
+                    error: None,
+                    duration_ms: start_time.elapsed().as_millis() as i64,
+                    agent_info,
+                },
             );
             jsonrpc::make_response(id, result)
         }
         Err(err) => {
-            record_audit(
-                &state,
-                Some(&owner.server_id),
-                tool_name,
-                &arguments,
-                None,
-                Some(&err),
-                start_time.elapsed().as_millis() as i64,
-                agent_info,
+            AuditRecorder::record(
+                &state.db,
+                ToolCallRecord {
+                    server_id: Some(&owner.server_id),
+                    tool_name,
+                    arguments: &arguments,
+                    result: None,
+                    error: Some(&err),
+                    duration_ms: start_time.elapsed().as_millis() as i64,
+                    agent_info,
+                },
             );
             jsonrpc::make_error(id, jsonrpc::INTERNAL_ERROR, &err)
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn record_audit(
-    state: &AppState,
-    server_id: Option<&str>,
-    tool_name: &str,
-    arguments: &serde_json::Value,
-    result: Option<&serde_json::Value>,
-    error: Option<&str>,
-    duration_ms: i64,
-    agent_info: Option<&str>,
-) {
-    if !audit_logging_enabled(state.db.as_ref()) {
-        return;
-    }
-
-    let profile_repo = ProfileRepository::new(&state.db);
-    let profile_id = profile_repo.find_active_id().ok().flatten();
-    let repo = AuditLogRepository::new(&state.db);
-    let redacted_args = redact_for_audit(arguments);
-    let redacted_result = result.map(redact_for_audit);
-    let _ = repo.insert(
-        &uuid::Uuid::new_v4().to_string(),
-        &chrono::Utc::now().to_rfc3339(),
-        profile_id.as_deref(),
-        server_id,
-        tool_name,
-        Some(&redacted_args),
-        redacted_result.as_ref(),
-        error,
-        duration_ms,
-        agent_info,
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sidecar::db::audit_log_repo::AuditLogRepository;
     use crate::sidecar::db::profile_repo::ProfileRepository;
     use crate::sidecar::db::server_repo::ServerRepository;
     use crate::sidecar::db::Database;
@@ -235,25 +205,22 @@ process.stdin.on("data", (chunk) => {
         profile_repo.seed_default().expect("failed to seed profile");
 
         let server_id = uuid::Uuid::new_v4().to_string();
-        let now = chrono::Utc::now().to_rfc3339();
-        let args = serde_json::to_string(&vec![script.to_string_lossy().to_string()])
-            .expect("failed to serialize args");
         let server_repo = ServerRepository::new(&db);
         server_repo
-            .insert(
+            .insert_one_with_id(
                 &server_id,
-                "fake",
-                "stdio",
-                Some("node"),
-                Some(&args),
-                None,
-                None,
-                None,
-                None,
-                false,
                 0,
-                &now,
-                &now,
+                &crate::sidecar::db::server_repo::ServerInsertInput {
+                    name: "fake".into(),
+                    connection_type: "stdio".into(),
+                    command: Some("node".into()),
+                    args: Some(vec![script.to_string_lossy().to_string()]),
+                    url: None,
+                    env: None,
+                    headers: None,
+                    working_dir: None,
+                    auto_start: false,
+                },
             )
             .expect("failed to insert server");
         profile_repo

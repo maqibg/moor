@@ -8,14 +8,52 @@ use crate::sidecar::mcp::transport::mcp_client::{
 use crate::sidecar::mcp::transport::stdio_client::{
     build_stdio_environment, find_executable_on_path,
 };
-use crate::sidecar::services::event_bus::EventBus;
+use crate::sidecar::services::event_bus::{EventBus, Evt};
 use crate::sidecar::services::settings;
 use crate::sidecar::services::tool_catalog::{ToolCatalogService, ToolDetail};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
+
+/// 运行时 MCP 会话接口。连接建立后,ServerManager 通过它列工具、调工具、断开、
+/// 读存活信号。真实适配器是 McpClient;测试里用假适配器实现它。
+/// async 方法手写 BoxFuture,让 trait 可作 `dyn McpSession` 用。
+pub trait McpSession: Send {
+    #[allow(dead_code)]
+    fn list_tools(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<ToolInsert>, String>> + Send + '_>>;
+    fn call_tool<'a>(
+        &'a self,
+        tool_name: &'a str,
+        args: Value,
+    ) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>>;
+    fn disconnect(&mut self) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>>;
+    fn set_request_timeout_ms(&mut self, request_timeout_ms: u32);
+    fn alive_receiver(&self) -> Option<tokio::sync::watch::Receiver<bool>>;
+}
+
+/// 连接工厂返回的会话盒。类型别名消除 clippy::type_complexity 警告,
+/// 也让 connect 签名更可读。
+pub type BoxedConnectFuture<'a> = Pin<
+    Box<dyn Future<Output = Result<(Vec<ToolInsert>, Box<dyn McpSession>), String>> + Send + 'a>,
+>;
+
+/// 连接工厂接口。把"怎么从存储配置建立会话"藏到接缝背后。
+/// 真实适配器按 connection_type 分派到 stdio/http 连接并构造 McpClient;
+/// 测试可注入假工厂,返回预设的 (tools, 假会话),让 start_server 的 token
+/// 竞争、接受/拒绝、death watcher 在没有真实子进程的情况下可测。
+pub trait McpConnector: Send + Sync {
+    fn connect<'a>(
+        &'a self,
+        config: &'a StoredServerConfig,
+        timeouts: ServerTimeouts,
+    ) -> BoxedConnectFuture<'a>;
+}
 
 #[derive(Clone)]
 struct ServerSlot {
@@ -25,7 +63,7 @@ struct ServerSlot {
     start_token: u64,
     start_deadline: Option<Instant>,
     start_timeout_ms: Option<u32>,
-    session: Option<Arc<tokio::sync::Mutex<McpClient>>>,
+    session: Option<Arc<Mutex<Box<dyn McpSession>>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -56,20 +94,31 @@ pub struct ServerManager {
     slots: Arc<Mutex<HashMap<String, ServerSlot>>>,
     db: Arc<Database>,
     event_bus: Arc<EventBus>,
+    connector: Arc<dyn McpConnector>,
 }
 
 #[derive(Clone, Copy)]
-struct ServerTimeouts {
+pub(crate) struct ServerTimeouts {
     request_ms: u32,
     start_ms: u32,
 }
 
 impl ServerManager {
     pub fn new(db: Arc<Database>, event_bus: Arc<EventBus>) -> Self {
+        Self::with_connector(db, event_bus, Arc::new(StdioHttpConnector))
+    }
+
+    /// 测试入口:注入自定义连接工厂,让 start_server 状态机可在没有真实子进程的情况下测。
+    pub fn with_connector(
+        db: Arc<Database>,
+        event_bus: Arc<EventBus>,
+        connector: Arc<dyn McpConnector>,
+    ) -> Self {
         Self {
             slots: Arc::new(Mutex::new(HashMap::new())),
             db,
             event_bus,
+            connector,
         }
     }
 
@@ -201,11 +250,7 @@ impl ServerManager {
         let result =
             match tokio::time::timeout(Duration::from_millis(timeouts.start_ms as u64), async {
                 match self.get_stored_config(id) {
-                    Ok(config) => match config.connection_type.as_str() {
-                        "stdio" => self.connect_stdio(&config, timeouts).await,
-                        "http" => self.connect_http(&config, timeouts).await,
-                        other => Err(format!("Unknown connection type: {other}")),
-                    },
+                    Ok(config) => self.connector.connect(&config, timeouts).await,
                     Err(err) => Err(err),
                 }
             })
@@ -314,88 +359,6 @@ impl ServerManager {
             "Server start wait timed out after {}",
             format_timeout_ms(timeout_ms)
         ))
-    }
-
-    async fn connect_stdio(
-        &self,
-        config: &StoredServerConfig,
-        timeouts: ServerTimeouts,
-    ) -> Result<(Vec<ToolInsert>, McpClient), String> {
-        let command = config
-            .command
-            .as_deref()
-            .ok_or("stdio server requires command")?;
-
-        let parent_env: HashMap<String, String> = std::env::vars().collect();
-        let server_env = config
-            .env
-            .as_ref()
-            .and_then(|v| serde_json::from_value(v.clone()).ok());
-        let env = build_stdio_environment(&parent_env, server_env.as_ref());
-
-        verify_command_available(command, &env)?;
-
-        let args: Vec<String> = config
-            .args
-            .as_ref()
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
-        let mut client = McpClient::connect_stdio(StdioConnectConfig {
-            server_name: config.name.clone(),
-            command: command.to_string(),
-            args,
-            cwd: config.working_dir.clone(),
-            env,
-            request_timeout_ms: timeouts.start_ms,
-        })
-        .await?;
-
-        let tools = client.list_tools().await?;
-        client.set_request_timeout_ms(timeouts.request_ms);
-
-        Ok((tools, client))
-    }
-
-    async fn connect_http(
-        &self,
-        config: &StoredServerConfig,
-        timeouts: ServerTimeouts,
-    ) -> Result<(Vec<ToolInsert>, McpClient), String> {
-        let url = config.url.as_deref().ok_or("http server requires url")?;
-
-        let headers = config
-            .headers
-            .as_ref()
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
-        let env = config
-            .env
-            .as_ref()
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
-        let headers = crate::sidecar::mcp::transport::http_client::resolve_http_headers(
-            Some(&headers),
-            Some(&env),
-        );
-
-        let mut client = McpClient::connect_http(HttpConnectConfig {
-            server_name: config.name.clone(),
-            url: url.to_string(),
-            headers,
-            request_timeout_ms: timeouts.start_ms,
-        })
-        .await?;
-
-        let tools = client.list_tools().await?;
-        client.set_request_timeout_ms(timeouts.request_ms);
-
-        Ok((tools, client))
     }
 
     pub async fn stop_server(&self, id: &str) -> Result<(), String> {
@@ -532,10 +495,11 @@ impl ServerManager {
                     }
                     let repo = ServerRepository::new(&db);
                     let _ = repo.update_status(&server_id, "error", Some(&msg));
-                    event_bus.emit(
-                        "server:status",
-                        serde_json::json!({ "serverId": server_id, "status": "error", "errorMessage": msg }),
-                    );
+                    event_bus.emit(Evt::ServerStatus {
+                        server_id: server_id.clone(),
+                        status: "error".into(),
+                        error_message: Some(msg),
+                    });
                     return;
                 }
             }
@@ -545,17 +509,19 @@ impl ServerManager {
     fn cache_tools(&self, server_id: &str, tools: &[ToolInsert]) {
         let repo = ToolDiscoveryRepository::new(&self.db);
         let _ = repo.replace_tools_for_server(server_id, tools);
-        self.event_bus
-            .emit("server:tools", serde_json::json!({ "serverId": server_id }));
+        self.event_bus.emit(Evt::ServerTools {
+            server_id: server_id.to_string(),
+        });
     }
 
     fn persist_server_status(&self, id: &str, status: &str, error_message: Option<&str>) {
         let repo = ServerRepository::new(&self.db);
         let _ = repo.update_status(id, status, error_message);
-        self.event_bus.emit(
-            "server:status",
-            serde_json::json!({ "serverId": id, "status": status, "errorMessage": error_message }),
-        );
+        self.event_bus.emit(Evt::ServerStatus {
+            server_id: id.to_string(),
+            status: status.to_string(),
+            error_message: error_message.map(str::to_string),
+        });
     }
 
     fn get_stored_config(&self, id: &str) -> Result<StoredServerConfig, String> {
@@ -588,7 +554,7 @@ impl ServerManager {
     }
 }
 
-struct StoredServerConfig {
+pub(crate) struct StoredServerConfig {
     name: String,
     connection_type: String,
     command: Option<String>,
@@ -657,6 +623,109 @@ fn extract_remote_mcp_error_message(err: &str) -> Option<&str> {
     err.strip_prefix("Remote MCP server error: ")
         .map(str::trim)
         .filter(|message| !message.is_empty())
+}
+
+/// 真实连接工厂适配器。按 connection_type 分派到 stdio/http 连接,
+/// 在内部完成环境变量构建、命令可用性检查、header 解析、MCP 握手,
+/// 然后返回一个装在 Box<dyn McpSession> 里的 McpClient。
+struct StdioHttpConnector;
+
+impl McpConnector for StdioHttpConnector {
+    fn connect<'a>(
+        &'a self,
+        config: &'a StoredServerConfig,
+        timeouts: ServerTimeouts,
+    ) -> BoxedConnectFuture<'a> {
+        Box::pin(async move {
+            match config.connection_type.as_str() {
+                "stdio" => Self::connect_stdio(config, timeouts).await,
+                "http" => Self::connect_http(config, timeouts).await,
+                other => Err(format!("Unknown connection type: {other}")),
+            }
+        })
+    }
+}
+
+impl StdioHttpConnector {
+    async fn connect_stdio(
+        config: &StoredServerConfig,
+        timeouts: ServerTimeouts,
+    ) -> Result<(Vec<ToolInsert>, Box<dyn McpSession>), String> {
+        let command = config
+            .command
+            .as_deref()
+            .ok_or("stdio server requires command")?;
+
+        let parent_env: HashMap<String, String> = std::env::vars().collect();
+        let server_env = config
+            .env
+            .as_ref()
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+        let env = build_stdio_environment(&parent_env, server_env.as_ref());
+
+        verify_command_available(command, &env)?;
+
+        let args: Vec<String> = config
+            .args
+            .as_ref()
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let mut client = McpClient::connect_stdio(StdioConnectConfig {
+            server_name: config.name.clone(),
+            command: command.to_string(),
+            args,
+            cwd: config.working_dir.clone(),
+            env,
+            request_timeout_ms: timeouts.start_ms,
+        })
+        .await?;
+
+        let tools = client.list_tools().await?;
+        client.set_request_timeout_ms(timeouts.request_ms);
+
+        Ok((tools, Box::new(client)))
+    }
+
+    async fn connect_http(
+        config: &StoredServerConfig,
+        timeouts: ServerTimeouts,
+    ) -> Result<(Vec<ToolInsert>, Box<dyn McpSession>), String> {
+        let url = config.url.as_deref().ok_or("http server requires url")?;
+
+        let headers = config
+            .headers
+            .as_ref()
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        let env = config
+            .env
+            .as_ref()
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        let headers = crate::sidecar::mcp::transport::http_client::resolve_http_headers(
+            Some(&headers),
+            Some(&env),
+        );
+
+        let mut client = McpClient::connect_http(HttpConnectConfig {
+            server_name: config.name.clone(),
+            url: url.to_string(),
+            headers,
+            request_timeout_ms: timeouts.start_ms,
+        })
+        .await?;
+
+        let tools = client.list_tools().await?;
+        client.set_request_timeout_ms(timeouts.request_ms);
+
+        Ok((tools, Box::new(client)))
+    }
 }
 
 #[cfg(test)]
@@ -906,23 +975,22 @@ process.stdin.on("data", (chunk) => {{
         auto_start: bool,
         sort_order: i64,
     ) {
-        let now = chrono::Utc::now().to_rfc3339();
-        let args = serde_json::to_string(&vec![script]).expect("failed to serialize args");
+        use crate::sidecar::db::server_repo::ServerInsertInput;
         ServerRepository::new(db)
-            .insert(
+            .insert_one_with_id(
                 id,
-                name,
-                "stdio",
-                Some("node"),
-                Some(&args),
-                None,
-                None,
-                None,
-                None,
-                auto_start,
                 sort_order,
-                &now,
-                &now,
+                &ServerInsertInput {
+                    name: name.into(),
+                    connection_type: "stdio".into(),
+                    command: Some("node".into()),
+                    args: Some(vec![script]),
+                    url: None,
+                    env: None,
+                    headers: None,
+                    working_dir: None,
+                    auto_start,
+                },
             )
             .expect("failed to insert server");
     }
@@ -1423,5 +1491,188 @@ process.stdin.on("data", (chunk) => {{
             fast_started_before_slow_completed,
             "fast auto-start server should begin before slow server finishes; starts: {starts:?}"
         );
+    }
+
+    // ───────────── 假适配器:让 start_server 状态机脱离真实子进程可测 ─────────────
+
+    /// 假会话:记录调用,不做任何 I/O。
+    struct FakeSession {
+        timeout_calls: Arc<std::sync::atomic::AtomicU32>,
+        disconnected: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl McpSession for FakeSession {
+        fn list_tools(
+            &self,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<ToolInsert>, String>> + Send + '_>> {
+            Box::pin(async move { Ok(vec![]) })
+        }
+        fn call_tool<'a>(
+            &'a self,
+            _tool_name: &'a str,
+            _args: Value,
+        ) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>> {
+            Box::pin(async move { Ok(serde_json::json!({})) })
+        }
+        fn disconnect(&mut self) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+            let d = self.disconnected.clone();
+            Box::pin(async move {
+                d.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            })
+        }
+        fn set_request_timeout_ms(&mut self, _ms: u32) {
+            self.timeout_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        fn alive_receiver(&self) -> Option<tokio::sync::watch::Receiver<bool>> {
+            None
+        }
+    }
+
+    /// 假连接工厂:记录 connect 调用次数,立即返回一个假会话。
+    struct FakeConnector {
+        connect_calls: Arc<std::sync::atomic::AtomicU32>,
+        timeout_calls: Arc<std::sync::atomic::AtomicU32>,
+    }
+
+    impl FakeConnector {
+        fn new() -> (Self, Arc<std::sync::atomic::AtomicU32>) {
+            let calls = Arc::new(std::sync::atomic::AtomicU32::new(0));
+            let timeouts = Arc::new(std::sync::atomic::AtomicU32::new(0));
+            (
+                Self {
+                    connect_calls: calls.clone(),
+                    timeout_calls: timeouts,
+                },
+                calls,
+            )
+        }
+    }
+
+    impl McpConnector for FakeConnector {
+        fn connect<'a>(
+            &'a self,
+            _config: &'a StoredServerConfig,
+            _timeouts: ServerTimeouts,
+        ) -> BoxedConnectFuture<'a> {
+            self.connect_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let timeout_calls = self.timeout_calls.clone();
+            Box::pin(async move {
+                Ok((
+                    vec![],
+                    Box::new(FakeSession {
+                        timeout_calls,
+                        disconnected: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    }) as Box<dyn McpSession>,
+                ))
+            })
+        }
+    }
+
+    fn build_manager_with_fake_connector(
+        data_dir: &std::path::Path,
+        connector: Arc<dyn McpConnector>,
+    ) -> (Arc<Database>, Arc<ServerManager>) {
+        let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
+        db.run_migrations().expect("failed to run migrations");
+        ProfileRepository::new(&db)
+            .seed_default()
+            .expect("failed to seed profile");
+        let event_bus = Arc::new(EventBus::new(16));
+        let manager = Arc::new(ServerManager::with_connector(
+            db.clone(),
+            event_bus,
+            connector,
+        ));
+        (db, manager)
+    }
+
+    #[tokio::test]
+    async fn concurrent_starts_share_one_connect_via_fake_connector() {
+        // 不依赖真实 node 子进程:假工厂记录 connect 调用次数,
+        // 验证 start_server 的 token 去重逻辑——并发启动只触发一次连接。
+        let data_dir = temp_data_dir("fake-dedupe-start");
+        std::fs::create_dir_all(&data_dir).expect("failed to create temp dir");
+
+        let (connector, connect_calls) = FakeConnector::new();
+        let (db, manager) = build_manager_with_fake_connector(&data_dir, Arc::new(connector));
+
+        let server_id = uuid::Uuid::new_v4().to_string();
+        insert_stdio_server(&db, &server_id, "fake", "unused-script".into(), false, 0);
+        manager.load_from_db().await;
+
+        // 三个并发 start_server 应该只触发一次 connect。
+        let m1 = manager.clone();
+        let m2 = manager.clone();
+        let m3 = manager.clone();
+        let id1 = server_id.clone();
+        let id2 = server_id.clone();
+        let id3 = server_id.clone();
+        let (a, b, c) = tokio::join!(
+            async move { m1.start_server(&id1).await },
+            async move { m2.start_server(&id2).await },
+            async move { m3.start_server(&id3).await },
+        );
+        let _ = std::fs::remove_dir_all(data_dir);
+
+        a.expect("first start ok");
+        b.expect("second start ok");
+        c.expect("third start ok");
+
+        assert_eq!(
+            connect_calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "concurrent starts should collapse into one connect attempt"
+        );
+        let managed = manager
+            .get_server(&server_id)
+            .await
+            .expect("server present");
+        assert_eq!(managed.status, "running");
+    }
+
+    #[tokio::test]
+    async fn fake_connector_start_transitions_to_running_without_subprocess() {
+        // 单次启动也能走完整状态机:Starting → Running,无需 Node.js。
+        let data_dir = temp_data_dir("fake-single-start");
+        std::fs::create_dir_all(&data_dir).expect("failed to create temp dir");
+
+        let (connector, _calls) = FakeConnector::new();
+        let (db, manager) = build_manager_with_fake_connector(&data_dir, Arc::new(connector));
+
+        let server_id = uuid::Uuid::new_v4().to_string();
+        insert_stdio_server(&db, &server_id, "fake", "unused".into(), false, 0);
+        manager.load_from_db().await;
+
+        let before = manager
+            .get_server(&server_id)
+            .await
+            .expect("server present");
+        assert_eq!(before.status, "stopped");
+
+        manager
+            .start_server(&server_id)
+            .await
+            .expect("start should succeed via fake connector");
+
+        let after = manager
+            .get_server(&server_id)
+            .await
+            .expect("server present");
+        assert_eq!(after.status, "running");
+
+        manager
+            .stop_server(&server_id)
+            .await
+            .expect("stop should succeed");
+        let stopped = manager
+            .get_server(&server_id)
+            .await
+            .expect("server present");
+        assert_eq!(stopped.status, "stopped");
+
+        let _ = std::fs::remove_dir_all(data_dir);
     }
 }

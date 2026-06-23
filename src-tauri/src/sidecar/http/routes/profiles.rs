@@ -1,6 +1,6 @@
-use crate::sidecar::db::profile_repo::{ProfileRepository, RemoveResult};
 use crate::sidecar::http::app_error::AppError;
 use crate::sidecar::http::AppState;
+use crate::sidecar::services::profile_service::ProfileService;
 use axum::{
     extract::{Path, State},
     response::Json,
@@ -26,8 +26,7 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 async fn list(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
-    let repo = ProfileRepository::new(&state.db);
-    let profiles = repo.find_all().map_err(AppError::internal)?;
+    let profiles = ProfileService::list(&state.db).map_err(AppError::from)?;
     Ok(Json(
         serde_json::to_value(profiles).map_err(|e| AppError::internal(e.to_string()))?,
     ))
@@ -45,8 +44,7 @@ async fn create(
     if body.name.is_empty() {
         return Err(AppError::validation("name is required"));
     }
-    let repo = ProfileRepository::new(&state.db);
-    let profile = repo.create(&body.name).map_err(AppError::internal)?;
+    let profile = ProfileService::create(&state.db, &body.name).map_err(AppError::from)?;
     Ok((
         axum::http::StatusCode::CREATED,
         Json(serde_json::to_value(profile).map_err(|e| AppError::internal(e.to_string()))?),
@@ -57,12 +55,7 @@ async fn get_one(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, AppError> {
-    let repo = ProfileRepository::new(&state.db);
-    let profile = repo
-        .find_by_id(&id)
-        .map_err(AppError::internal)?
-        .ok_or_else(|| AppError::not_found("Profile not found"))?;
-    let servers = repo.find_profile_servers(&id).map_err(AppError::internal)?;
+    let (profile, servers) = ProfileService::get_detail(&state.db, &id).map_err(AppError::from)?;
     let mut profile_value =
         serde_json::to_value(profile).map_err(|e| AppError::internal(e.to_string()))?;
     if let Some(obj) = profile_value.as_object_mut() {
@@ -84,11 +77,8 @@ async fn update(
     Path(id): Path<String>,
     axum::Json(body): axum::Json<UpdateBody>,
 ) -> Result<Json<Value>, AppError> {
-    let repo = ProfileRepository::new(&state.db);
-    let profile = repo
-        .update(&id, body.name.as_deref())
-        .map_err(AppError::internal)?
-        .ok_or_else(|| AppError::not_found("Profile not found"))?;
+    let profile =
+        ProfileService::update(&state.db, &id, body.name.as_deref()).map_err(AppError::from)?;
     Ok(Json(
         serde_json::to_value(profile).map_err(|e| AppError::internal(e.to_string()))?,
     ))
@@ -98,26 +88,16 @@ async fn remove(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, AppError> {
-    let repo = ProfileRepository::new(&state.db);
-    match repo.remove(&id).map_err(AppError::internal)? {
-        RemoveResult::Success => Ok(Json(json!({ "success": true }))),
-        RemoveResult::NotFound => Err(AppError::not_found("Profile not found")),
-        RemoveResult::Active => Err(AppError::active_profile("Cannot delete active profile")),
-    }
+    ProfileService::remove(&state.db, &id).map_err(AppError::from)?;
+    Ok(Json(json!({ "success": true })))
 }
 
 async fn activate(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, AppError> {
-    let repo = ProfileRepository::new(&state.db);
-    let profile = repo
-        .activate(&id)
-        .map_err(AppError::internal)?
-        .ok_or_else(|| AppError::not_found("Profile not found"))?;
-    state
-        .event_bus
-        .emit("profile:activated", serde_json::json!({ "profileId": id }));
+    let profile =
+        ProfileService::activate(&state.db, &state.event_bus, &id).map_err(AppError::from)?;
     Ok(Json(
         serde_json::to_value(profile).map_err(|e| AppError::internal(e.to_string()))?,
     ))
@@ -127,14 +107,8 @@ async fn get_profile_server(
     State(state): State<Arc<AppState>>,
     Path((profile_id, server_id)): Path<(String, String)>,
 ) -> Result<Json<Value>, AppError> {
-    let repo = ProfileRepository::new(&state.db);
-    let servers = repo
-        .find_profile_servers(&profile_id)
-        .map_err(AppError::internal)?;
-    let server = servers
-        .into_iter()
-        .find(|s| s.server.id == server_id)
-        .ok_or_else(|| AppError::not_found("Server not found in profile"))?;
+    let server = ProfileService::get_profile_server(&state.db, &profile_id, &server_id)
+        .map_err(AppError::from)?;
     Ok(Json(
         serde_json::to_value(server).map_err(|e| AppError::internal(e.to_string()))?,
     ))
@@ -152,15 +126,14 @@ async fn upsert_profile_server(
     Path((profile_id, server_id)): Path<(String, String)>,
     axum::Json(body): axum::Json<UpsertProfileServerBody>,
 ) -> Result<Json<Value>, AppError> {
-    let repo = ProfileRepository::new(&state.db);
-    let result = repo
-        .upsert_profile_server(
-            &profile_id,
-            &server_id,
-            body.enabled,
-            body.disabled_tools.as_ref(),
-        )
-        .map_err(AppError::internal)?;
+    let result = ProfileService::upsert_profile_server(
+        &state.db,
+        &profile_id,
+        &server_id,
+        body.enabled,
+        body.disabled_tools.as_ref(),
+    )
+    .map_err(AppError::from)?;
     Ok(Json(
         serde_json::to_value(result).map_err(|e| AppError::internal(e.to_string()))?,
     ))
@@ -170,9 +143,6 @@ async fn upsert_profile_server(
 mod tests {
     use super::*;
     use crate::sidecar::db::profile_repo::ProfileRepository;
-    use crate::sidecar::db::Database;
-    use crate::sidecar::services::event_bus::EventBus;
-    use crate::sidecar::services::server_manager::ServerManager;
     use axum::body::Body;
     use std::sync::Arc;
     use std::time::SystemTime;
@@ -187,18 +157,7 @@ mod tests {
     }
 
     fn test_state(data_dir: std::path::PathBuf) -> Arc<AppState> {
-        std::fs::create_dir_all(&data_dir).expect("failed to create temp data dir");
-        let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
-        db.run_migrations().expect("failed to run migrations");
-        let event_bus = Arc::new(EventBus::new(16));
-        Arc::new(AppState {
-            db: db.clone(),
-            api_token: "test-token".to_string(),
-            version: "test".to_string(),
-            port: 19323,
-            event_bus: event_bus.clone(),
-            server_manager: Arc::new(ServerManager::new(db, event_bus)),
-        })
+        AppState::for_test(&data_dir)
     }
 
     #[tokio::test]

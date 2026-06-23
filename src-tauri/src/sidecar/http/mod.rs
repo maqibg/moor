@@ -19,6 +19,49 @@ pub struct AppState {
     pub server_manager: Arc<ServerManager>,
 }
 
+impl AppState {
+    /// 生产构造函数:组装 axum 共享状态的全部协作者。
+    pub fn new(
+        db: Arc<Database>,
+        api_token: String,
+        version: String,
+        port: u16,
+        event_bus: Arc<EventBus>,
+        server_manager: Arc<ServerManager>,
+    ) -> Self {
+        Self {
+            db,
+            api_token,
+            version,
+            port,
+            event_bus,
+            server_manager,
+        }
+    }
+
+    /// 测试构造函数:在一个临时目录里 open+migrate 一个全新 Database,
+    /// 初始化默认 settings,装上默认 EventBus + 真实 ServerManager,
+    /// 返回可直接喂给路由的 AppState。
+    #[cfg(test)]
+    pub fn for_test(data_dir: &std::path::Path) -> Arc<Self> {
+        use crate::sidecar::db::Database;
+        use crate::sidecar::services::settings;
+        std::fs::create_dir_all(data_dir).expect("failed to create temp data dir");
+        let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
+        db.run_migrations().expect("failed to run migrations");
+        settings::init_settings(db.as_ref(), data_dir).expect("failed to init settings");
+        let event_bus = Arc::new(EventBus::new(16));
+        Arc::new(Self::new(
+            db.clone(),
+            "test-token".to_string(),
+            "test".to_string(),
+            19323,
+            event_bus.clone(),
+            Arc::new(ServerManager::new(db, event_bus)),
+        ))
+    }
+}
+
 pub fn create_app(state: Arc<AppState>) -> Router {
     let mcp_routes = Router::new().route(
         "/mcp",

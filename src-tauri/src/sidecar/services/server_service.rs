@@ -1,4 +1,4 @@
-use crate::sidecar::db::server_repo::{map_server, Server, ServerRepository};
+use crate::sidecar::db::server_repo::{Server, ServerInsertInput, ServerRepository};
 use crate::sidecar::db::Database;
 use crate::sidecar::services::server_manager::ServerManager;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -119,6 +119,18 @@ pub enum ServerServiceError {
     Internal(String),
 }
 
+/// 单一映射点:ServerServiceError → AppError,避免路由层重复分类领域错误。
+impl From<ServerServiceError> for crate::sidecar::http::app_error::AppError {
+    fn from(e: ServerServiceError) -> Self {
+        match e {
+            ServerServiceError::NotFound(m) => Self::not_found(m),
+            ServerServiceError::Validation(m) => Self::validation(m),
+            ServerServiceError::InvalidOrder(m) => Self::order_invalid(m),
+            ServerServiceError::Internal(m) => Self::internal(m),
+        }
+    }
+}
+
 fn serialize_json<T: Serialize>(field: &str, value: &T) -> Result<String, String> {
     serde_json::to_string(value).map_err(|e| format!("serialize {field}: {e}"))
 }
@@ -164,77 +176,26 @@ impl ServerService {
         db: &Database,
         inputs: &[CreateServerInput],
     ) -> Result<Vec<Server>, String> {
-        db.transaction(|conn| {
-            let mut servers = Vec::with_capacity(inputs.len());
-            let mut next_sort_order = match conn.query_row(
-                "SELECT MIN(sort_order) FROM mcp_servers",
-                [],
-                |row| row.get::<_, Option<i64>>(0),
-            ) {
-                Ok(Some(value)) => value - 1,
-                Ok(None) => 0,
-                Err(e) => return Err(e.to_string()),
-            };
-            let active_profile_id = match conn.query_row(
-                "SELECT id FROM profiles WHERE is_active = 1",
-                [],
-                |row| row.get::<_, String>(0),
-            ) {
-                Ok(id) => Some(id),
-                Err(rusqlite::Error::QueryReturnedNoRows) => None,
-                Err(e) => return Err(e.to_string()),
-            };
-
-            for input in inputs {
-                input.validate()?;
-                let id = uuid::Uuid::new_v4().to_string();
-                let now = chrono::Utc::now().to_rfc3339();
-                let args_json = serialize_nullable_json("args", &input.args)?;
-                let env_json = serialize_nullable_json("env", &input.env)?;
-                let headers_json = serialize_nullable_json("headers", &input.headers)?;
-
-                conn.execute(
-                    "INSERT INTO mcp_servers (id, name, connection_type, command, args, url, env, headers, working_dir, auto_start, sort_order, status, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'stopped', ?12, ?13)",
-                    rusqlite::params![
-                        &id,
-                        &input.name,
-                        &input.connection_type,
-                        input.command.as_deref(),
-                        args_json.as_deref(),
-                        input.url.as_deref(),
-                        env_json.as_deref(),
-                        headers_json.as_deref(),
-                        input.working_dir.as_deref(),
-                        input.auto_start as i64,
-                        next_sort_order,
-                        &now,
-                        &now,
-                    ],
-                )
-                .map_err(|e| e.to_string())?;
-
-                if let Some(profile_id) = &active_profile_id {
-                    conn.execute(
-                        "INSERT OR IGNORE INTO profile_servers (profile_id, server_id, enabled, disabled_tools) VALUES (?1, ?2, 1, '[]')",
-                        rusqlite::params![profile_id, &id],
-                    )
-                    .map_err(|e| e.to_string())?;
-                }
-
-                let server = conn
-                    .query_row(
-                        "SELECT * FROM mcp_servers WHERE id = ?1",
-                        rusqlite::params![&id],
-                        map_server,
-                    )
-                    .map_err(|e| e.to_string())?;
-                servers.push(server);
-                next_sort_order -= 1;
-            }
-
-            Ok(servers)
-        })
+        // 校验集中在 service 层(repo 只管持久化);通过后把领域字段映射成
+        // repo 的输入结构体,事务 SQL 全部由 ServerRepository 内部处理。
+        let repo_inputs: Vec<ServerInsertInput> = inputs
+            .iter()
+            .map(|i| -> Result<ServerInsertInput, String> {
+                i.validate()?;
+                Ok(ServerInsertInput {
+                    name: i.name.clone(),
+                    connection_type: i.connection_type.clone(),
+                    command: i.command.clone(),
+                    args: i.args.clone(),
+                    url: i.url.clone(),
+                    env: i.env.clone(),
+                    headers: i.headers.clone(),
+                    working_dir: i.working_dir.clone(),
+                    auto_start: i.auto_start,
+                })
+            })
+            .collect::<Result<_, _>>()?;
+        ServerRepository::new(db).insert_batch_with_active_profile(&repo_inputs)
     }
 
     pub fn list_servers(db: &Database) -> Result<Vec<Server>, String> {

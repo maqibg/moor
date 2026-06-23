@@ -180,38 +180,45 @@ mod tests {
     #[test]
     fn converts_selected_moor_servers_to_cursor() {
         let db = temp_db();
-        let now = "2026-01-01T00:00:00.000Z";
         let repo = ServerRepository::new(&db);
-        repo.insert(
+        repo.insert_one_with_id(
             "first",
-            "first",
-            "stdio",
-            Some("node"),
-            Some("[\"first.js\"]"),
-            None,
-            Some("{\"FIRST\":\"1\"}"),
-            None,
-            Some("/tmp/first"),
-            false,
             0,
-            now,
-            now,
+            &crate::sidecar::db::server_repo::ServerInsertInput {
+                name: "first".into(),
+                connection_type: "stdio".into(),
+                command: Some("node".into()),
+                args: Some(vec!["first.js".into()]),
+                url: None,
+                env: Some(
+                    [("FIRST".to_string(), "1".to_string())]
+                        .into_iter()
+                        .collect(),
+                ),
+                headers: None,
+                working_dir: Some("/tmp/first".into()),
+                auto_start: false,
+            },
         )
         .expect("insert first");
-        repo.insert(
+        repo.insert_one_with_id(
             "second",
-            "second",
-            "http",
-            None,
-            None,
-            Some("https://mcp.example.com/mcp"),
-            None,
-            Some("{\"Authorization\":\"Bearer ${TOKEN}\"}"),
-            None,
-            false,
             1,
-            now,
-            now,
+            &crate::sidecar::db::server_repo::ServerInsertInput {
+                name: "second".into(),
+                connection_type: "http".into(),
+                command: None,
+                args: None,
+                url: Some("https://mcp.example.com/mcp".into()),
+                env: None,
+                headers: Some(
+                    [("Authorization".to_string(), "Bearer ${TOKEN}".to_string())]
+                        .into_iter()
+                        .collect(),
+                ),
+                working_dir: None,
+                auto_start: false,
+            },
         )
         .expect("insert second");
 

@@ -178,3 +178,39 @@ fn parse_tools_list(result: &Value) -> Vec<ToolInsert> {
         })
         .unwrap_or_default()
 }
+
+/// 真实适配器:McpClient 实现 McpSession 接口。
+/// 连接工厂(StdioHttpConnector)负责构造 McpClient;之后 ServerManager
+/// 只通过 trait 接口与它交互,不再知道具体类型。
+impl crate::sidecar::services::server_manager::McpSession for McpClient {
+    fn list_tools(
+        &self,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<ToolInsert>, String>> + Send + '_>,
+    > {
+        Box::pin(async move { McpClient::list_tools(self).await })
+    }
+
+    fn call_tool<'a>(
+        &'a self,
+        tool_name: &'a str,
+        args: Value,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, String>> + Send + 'a>>
+    {
+        Box::pin(async move { McpClient::call_tool(self, tool_name, args).await })
+    }
+
+    fn disconnect(
+        &mut self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + '_>> {
+        Box::pin(async move { McpClient::disconnect(self).await })
+    }
+
+    fn set_request_timeout_ms(&mut self, request_timeout_ms: u32) {
+        McpClient::set_request_timeout_ms(self, request_timeout_ms);
+    }
+
+    fn alive_receiver(&self) -> Option<tokio::sync::watch::Receiver<bool>> {
+        McpClient::alive_receiver(self)
+    }
+}

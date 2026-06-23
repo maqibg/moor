@@ -61,8 +61,6 @@ mod tests {
     use crate::sidecar::db::audit_log_repo::AuditLogRepository;
     use crate::sidecar::db::server_repo::ServerRepository;
     use crate::sidecar::db::Database;
-    use crate::sidecar::services::event_bus::EventBus;
-    use crate::sidecar::services::server_manager::ServerManager;
     use axum::body::{to_bytes, Body};
     use std::sync::Arc;
     use std::time::SystemTime;
@@ -77,37 +75,26 @@ mod tests {
     }
 
     fn test_state(data_dir: std::path::PathBuf) -> Arc<AppState> {
-        std::fs::create_dir_all(&data_dir).expect("failed to create temp data dir");
-        let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
-        db.run_migrations().expect("failed to run migrations");
-        let event_bus = Arc::new(EventBus::new(16));
-        Arc::new(AppState {
-            db: db.clone(),
-            api_token: "test-token".to_string(),
-            version: "test".to_string(),
-            port: 19323,
-            event_bus: event_bus.clone(),
-            server_manager: Arc::new(ServerManager::new(db, event_bus)),
-        })
+        AppState::for_test(&data_dir)
     }
 
     fn insert_server(db: &Database, id: &str, name: &str) {
-        let now = chrono::Utc::now().to_rfc3339();
+        use crate::sidecar::db::server_repo::ServerInsertInput;
         ServerRepository::new(db)
-            .insert(
+            .insert_one_with_id(
                 id,
-                name,
-                "stdio",
-                Some("node"),
-                Some("[]"),
-                None,
-                None,
-                None,
-                None,
-                false,
                 0,
-                &now,
-                &now,
+                &ServerInsertInput {
+                    name: name.into(),
+                    connection_type: "stdio".into(),
+                    command: Some("node".into()),
+                    args: Some(vec![]),
+                    url: None,
+                    env: None,
+                    headers: None,
+                    working_dir: None,
+                    auto_start: false,
+                },
             )
             .expect("failed to insert server");
     }

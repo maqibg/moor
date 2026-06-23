@@ -260,14 +260,14 @@ pub fn run() {
                 db_arc.clone(),
                 event_bus.clone(),
             ));
-            let app_state = Arc::new(sidecar::http::AppState {
-                db: db_arc.clone(),
-                api_token: api_token.clone(),
-                version: env!("CARGO_PKG_VERSION").to_string(),
+            let app_state = Arc::new(sidecar::http::AppState::new(
+                db_arc.clone(),
+                api_token.clone(),
+                env!("CARGO_PKG_VERSION").to_string(),
                 port,
-                event_bus: event_bus.clone(),
-                server_manager: server_manager.clone(),
-            });
+                event_bus.clone(),
+                server_manager.clone(),
+            ));
 
             let state = MoorState {
                 inner: Arc::new(MoorInner {
@@ -349,6 +349,13 @@ pub fn run() {
         .run(|app_handle, event| match event {
             RunEvent::Exit | RunEvent::ExitRequested { .. } => {
                 // Server will be dropped automatically when the process exits
+            }
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen {
+                has_visible_windows: false,
+                ..
+            } => {
+                show_main_window(app_handle);
             }
             RunEvent::WindowEvent {
                 event: tauri::WindowEvent::CloseRequested { api, .. },

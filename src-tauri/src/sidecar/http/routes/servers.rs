@@ -3,7 +3,7 @@ use crate::sidecar::http::app_error::AppError;
 use crate::sidecar::http::AppState;
 use crate::sidecar::services::server_manager::public_server_start_error_message;
 use crate::sidecar::services::server_service::{
-    CreateServerInput, ServerService, ServerServiceError, UpdateServerInput,
+    CreateServerInput, ServerService, UpdateServerInput,
 };
 use axum::{
     extract::{Path, Query, State},
@@ -97,12 +97,7 @@ async fn reorder(
             "Server order must include every existing server exactly once.",
         ));
     }
-    let servers = ServerService::reorder(&state.db, &body.server_ids).map_err(|e| match e {
-        ServerServiceError::NotFound(m) => AppError::not_found(m),
-        ServerServiceError::Validation(m) => AppError::validation(m),
-        ServerServiceError::InvalidOrder(m) => AppError::order_invalid(m),
-        ServerServiceError::Internal(m) => AppError::internal(m),
-    })?;
+    let servers = ServerService::reorder(&state.db, &body.server_ids).map_err(AppError::from)?;
     Ok(Json(servers))
 }
 
@@ -128,12 +123,7 @@ async fn update(
 ) -> Result<Json<Server>, AppError> {
     let server = ServerService::update_server(&state.db, &state.server_manager, &id, &body)
         .await
-        .map_err(|e| match e {
-            ServerServiceError::NotFound(m) => AppError::not_found(m),
-            ServerServiceError::Validation(m) => AppError::validation(m),
-            ServerServiceError::InvalidOrder(m) => AppError::order_invalid(m),
-            ServerServiceError::Internal(m) => AppError::internal(m),
-        })?;
+        .map_err(AppError::from)?;
     Ok(Json(server))
 }
 
@@ -143,12 +133,7 @@ async fn remove(
 ) -> Result<Json<Value>, AppError> {
     ServerService::delete_server(&state.db, &state.server_manager, &id)
         .await
-        .map_err(|e| match e {
-            ServerServiceError::NotFound(m) => AppError::not_found(m),
-            ServerServiceError::Validation(m) => AppError::validation(m),
-            ServerServiceError::InvalidOrder(m) => AppError::order_invalid(m),
-            ServerServiceError::Internal(m) => AppError::internal(m),
-        })?;
+        .map_err(AppError::from)?;
     Ok(Json(serde_json::json!({ "success": true })))
 }
 
@@ -204,8 +189,6 @@ mod tests {
     use crate::sidecar::db::server_repo::ServerRepository;
     use crate::sidecar::db::tool_discovery_repo::{ToolDiscoveryRepository, ToolInsert};
     use crate::sidecar::db::Database;
-    use crate::sidecar::services::event_bus::EventBus;
-    use crate::sidecar::services::server_manager::ServerManager;
     use std::sync::Arc;
     use std::time::SystemTime;
 
@@ -218,37 +201,26 @@ mod tests {
     }
 
     fn test_state(data_dir: std::path::PathBuf) -> Arc<AppState> {
-        std::fs::create_dir_all(&data_dir).expect("failed to create temp data dir");
-        let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
-        db.run_migrations().expect("failed to run migrations");
-        let event_bus = Arc::new(EventBus::new(16));
-        Arc::new(AppState {
-            db: db.clone(),
-            api_token: "test-token".to_string(),
-            version: "test".to_string(),
-            port: 19323,
-            event_bus: event_bus.clone(),
-            server_manager: Arc::new(ServerManager::new(db, event_bus)),
-        })
+        AppState::for_test(&data_dir)
     }
 
     fn insert_server(db: &Database, id: &str, name: &str) {
-        let now = chrono::Utc::now().to_rfc3339();
+        use crate::sidecar::db::server_repo::ServerInsertInput;
         ServerRepository::new(db)
-            .insert(
+            .insert_one_with_id(
                 id,
-                name,
-                "stdio",
-                Some("node"),
-                Some("[]"),
-                None,
-                None,
-                None,
-                None,
-                false,
                 0,
-                &now,
-                &now,
+                &ServerInsertInput {
+                    name: name.into(),
+                    connection_type: "stdio".into(),
+                    command: Some("node".into()),
+                    args: Some(vec![]),
+                    url: None,
+                    env: None,
+                    headers: None,
+                    working_dir: None,
+                    auto_start: false,
+                },
             )
             .expect("failed to insert server");
     }
