@@ -1,5 +1,17 @@
 # moor
 
+## 0.6.2
+
+### Patch Changes
+
+- Refactor audit logging and server management
+  - Extract `AuditRecorder` to encapsulate audit logging (enabled check, active-profile resolution, redaction, persistence), replacing the standalone `record_audit` function
+  - Add `ProfileService` domain service for profile persistence and typed domain events, slimming HTTP routes to transport concerns
+  - Introduce `StdioHttpConnector` to manage connections per server config and simplify `ServerManager` connection logic
+  - Make the `McpSession` trait async for tool management operations
+  - Streamline `ServerService` creation and validation via the new `ServerInsertInput` struct
+  - Adopt typed events on the event bus for clarity and maintainability
+
 ## 0.6.1
 
 ### Patch Changes
