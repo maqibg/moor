@@ -22,6 +22,8 @@ export interface AdvancedSettings {
   sidecarPort: number;
   mcpRequestTimeoutMs: number;
   mcpServerStartTimeoutMs: number;
+  /** Allow WSL/LAN clients to reach /mcp (bind 0.0.0.0, requires restart) */
+  allowWslMcpAccess: boolean;
 }
 
 export interface Settings {
@@ -56,6 +58,7 @@ export function createDefaultSettings(): Settings {
       sidecarPort: 9223,
       mcpRequestTimeoutMs: MCP_TIMEOUT_MS_DEFAULT,
       mcpServerStartTimeoutMs: MCP_TIMEOUT_MS_DEFAULT,
+      allowWslMcpAccess: false,
     },
   };
 }

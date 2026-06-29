@@ -222,6 +222,7 @@ pub fn run() {
             let settings = sidecar::services::settings::init_settings(&db, &data_dir)
                 .map_err(|e| format!("Failed to initialize settings: {e}"))?;
             let configured_port = settings.advanced.sidecar_port;
+            let allow_wsl_mcp_access = settings.advanced.allow_wsl_mcp_access;
             let minimize_to_tray = settings.general.minimize_to_tray_on_close;
             let hide_dock_icon_on_close = settings.general.hide_dock_icon_on_close;
             let show_window_on_launch = settings.general.show_window_on_launch;
@@ -244,7 +245,12 @@ pub fn run() {
             // Find available port
             let api_token = generate_api_token()?;
             let max_port = configured_port.saturating_add(10);
-            let port = find_available_port("127.0.0.1", configured_port, max_port)
+            let bind_host = if allow_wsl_mcp_access {
+                "0.0.0.0"
+            } else {
+                "127.0.0.1"
+            };
+            let port = find_available_port(bind_host, configured_port, max_port)
                 .map_err(|e| format!("Failed to find available port: {e}"))?;
 
             // Write port file for external tool discovery
@@ -265,6 +271,7 @@ pub fn run() {
                 api_token.clone(),
                 env!("CARGO_PKG_VERSION").to_string(),
                 port,
+                allow_wsl_mcp_access,
                 event_bus.clone(),
                 server_manager.clone(),
             ));
@@ -281,7 +288,7 @@ pub fn run() {
             app.manage(state);
 
             // Spawn axum server
-            let host = "127.0.0.1".to_string();
+            let host = bind_host.to_string();
             let sm = server_manager.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = sidecar::http::start_server(app_state, &host, port).await {

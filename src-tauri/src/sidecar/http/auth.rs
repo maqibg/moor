@@ -5,6 +5,7 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use std::net::IpAddr;
 use std::sync::Arc;
 
 const ALLOWED_DEV_ORIGINS: &[&str] = &[
@@ -23,6 +24,30 @@ fn is_loopback_host(host: &str) -> bool {
     matches!(hostname.as_str(), "127.0.0.1" | "localhost" | "::1")
 }
 
+fn host_ip(host: &str) -> Option<IpAddr> {
+    let hostname = host.split(':').next()?.trim();
+    let hostname = hostname.trim_start_matches('[').trim_end_matches(']');
+    hostname.parse().ok()
+}
+
+fn is_private_lan_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => v4.is_private() || v4.is_link_local(),
+        IpAddr::V6(v6) => v6.is_unique_local() || v6.is_loopback(),
+    }
+}
+
+fn is_private_lan_host(host: &str) -> bool {
+    host_ip(host).is_some_and(|ip| is_private_lan_ip(&ip))
+}
+
+fn is_allowed_host(host: &str, path: &str, allow_wsl_mcp_access: bool) -> bool {
+    if is_loopback_host(host) {
+        return true;
+    }
+    allow_wsl_mcp_access && path == "/mcp" && is_private_lan_host(host)
+}
+
 fn is_allowed_origin(origin: &str) -> bool {
     ALLOWED_DEV_ORIGINS.contains(&origin)
 }
@@ -33,10 +58,15 @@ pub async fn auth_middleware(
     next: Next,
 ) -> Response {
     let headers = req.headers();
+    let path = req.uri().path().to_string();
 
     // Host check
     if let Some(host) = headers.get(header::HOST) {
-        if !is_loopback_host(host.to_str().unwrap_or("")) {
+        if !is_allowed_host(
+            host.to_str().unwrap_or(""),
+            &path,
+            state.allow_wsl_mcp_access,
+        ) {
             return super::json_error_response(
                 StatusCode::FORBIDDEN,
                 "FORBIDDEN",
@@ -84,7 +114,6 @@ pub async fn auth_middleware(
     }
 
     // Token check for /api/* paths — before running handler
-    let path = req.uri().path().to_string();
     if path.starts_with("/api/") {
         let token = headers.get("x-moor-token").and_then(|v| v.to_str().ok());
         match token {
@@ -99,7 +128,6 @@ pub async fn auth_middleware(
         }
     }
 
-    // Remove host check headers to avoid passing them to handler
     let response = next.run(req).await;
 
     // Add CORS headers to response
@@ -135,5 +163,17 @@ mod tests {
         assert!(is_loopback_host("127.0.0.1:9223"));
         assert!(is_loopback_host("[::1]:9223"));
         assert!(!is_loopback_host("192.168.1.10:9223"));
+    }
+
+    #[test]
+    fn allows_private_wsl_host_on_mcp_when_enabled() {
+        assert!(is_allowed_host("172.26.32.1:9223", "/mcp", true));
+        assert!(!is_allowed_host("172.26.32.1:9223", "/api/health", true));
+        assert!(!is_allowed_host("172.26.32.1:9223", "/mcp", false));
+    }
+
+    #[test]
+    fn rejects_public_host_even_when_wsl_access_enabled() {
+        assert!(!is_allowed_host("8.8.8.8:9223", "/mcp", true));
     }
 }

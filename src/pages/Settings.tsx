@@ -337,6 +337,15 @@ function AdvancedSection({
             />
           </SettingRow>
           <SettingRow
+            label="WSL / LAN MCP Access"
+            description="Allow WSL and private-network clients to reach /mcp (bind 0.0.0.0, requires restart). Management API stays loopback-only."
+          >
+            <Switch
+              checked={settings.advanced.allowWslMcpAccess}
+              onCheckedChange={(v) => void updateSettings({ advanced: { allowWslMcpAccess: v } })}
+            />
+          </SettingRow>
+          <SettingRow
             label="Request Timeout"
             description="Timeout for MCP JSON-RPC requests in seconds (5-300). Applies to the next MCP request."
           >

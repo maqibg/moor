@@ -47,6 +47,7 @@ pub struct AdvancedSettings {
     pub sidecar_port: u16,
     pub mcp_request_timeout_ms: u32,
     pub mcp_server_start_timeout_ms: u32,
+    pub allow_wsl_mcp_access: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -82,6 +83,7 @@ struct PartialAdvancedSettings {
     sidecar_port: Option<u16>,
     mcp_request_timeout_ms: Option<u32>,
     mcp_server_start_timeout_ms: Option<u32>,
+    allow_wsl_mcp_access: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -112,6 +114,7 @@ pub fn default_settings() -> Settings {
             sidecar_port: 9223,
             mcp_request_timeout_ms: MCP_TIMEOUT_MS_DEFAULT,
             mcp_server_start_timeout_ms: MCP_TIMEOUT_MS_DEFAULT,
+            allow_wsl_mcp_access: false,
         },
     }
 }
@@ -185,6 +188,11 @@ fn settings_to_db_entries(settings: &Settings) -> Result<Vec<(&'static str, Stri
         (
             "advanced.mcpServerStartTimeoutMs",
             serde_json::to_string(&settings.advanced.mcp_server_start_timeout_ms)
+                .map_err(|e| e.to_string())?,
+        ),
+        (
+            "advanced.allowWslMcpAccess",
+            serde_json::to_string(&settings.advanced.allow_wsl_mcp_access)
                 .map_err(|e| e.to_string())?,
         ),
     ])
@@ -305,6 +313,9 @@ pub fn merge_settings_value(mut base: Settings, value: Value) -> Result<Settings
         }
         if let Some(value) = advanced.mcp_server_start_timeout_ms {
             base.advanced.mcp_server_start_timeout_ms = value;
+        }
+        if let Some(value) = advanced.allow_wsl_mcp_access {
+            base.advanced.allow_wsl_mcp_access = value;
         }
     }
     validate_settings(&base)?;

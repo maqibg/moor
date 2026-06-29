@@ -3,6 +3,7 @@ mod auth;
 pub mod routes;
 
 use crate::sidecar::db::Database;
+use crate::sidecar::mcp::transport::mcp_session::McpSessionStore;
 use crate::sidecar::services::event_bus::EventBus;
 use crate::sidecar::services::server_manager::ServerManager;
 use axum::{http::StatusCode, middleware, response::IntoResponse, Json, Router};
@@ -15,6 +16,8 @@ pub struct AppState {
     pub api_token: String,
     pub version: String,
     pub port: u16,
+    pub allow_wsl_mcp_access: bool,
+    pub mcp_sessions: Arc<McpSessionStore>,
     pub event_bus: Arc<EventBus>,
     pub server_manager: Arc<ServerManager>,
 }
@@ -26,6 +29,7 @@ impl AppState {
         api_token: String,
         version: String,
         port: u16,
+        allow_wsl_mcp_access: bool,
         event_bus: Arc<EventBus>,
         server_manager: Arc<ServerManager>,
     ) -> Self {
@@ -34,6 +38,8 @@ impl AppState {
             api_token,
             version,
             port,
+            allow_wsl_mcp_access,
+            mcp_sessions: Arc::new(McpSessionStore::new()),
             event_bus,
             server_manager,
         }
@@ -56,6 +62,7 @@ impl AppState {
             "test-token".to_string(),
             "test".to_string(),
             19323,
+            false,
             event_bus.clone(),
             Arc::new(ServerManager::new(db, event_bus)),
         ))
