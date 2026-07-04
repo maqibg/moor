@@ -133,3 +133,60 @@ fn backfill_server_sort_order(db: &Database) -> Result<(), String> {
         Ok(())
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::SystemTime;
+
+    fn temp_db() -> Database {
+        let ts = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("moor-migrations-{ts}.db"));
+        Database::open(&path).expect("open db")
+    }
+
+    #[test]
+    fn backfills_sort_order_newest_created_first() {
+        let db = temp_db();
+        db.exec(
+            "CREATE TABLE mcp_servers (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL,
+                connection_type TEXT NOT NULL CHECK(connection_type IN ('stdio','http')),
+                command TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );",
+        )
+        .expect("create table");
+        for (id, created) in [
+            ("old", "2026-01-01T00:00:00.000Z"),
+            ("new", "2026-01-03T00:00:00.000Z"),
+            ("middle", "2026-01-02T00:00:00.000Z"),
+        ] {
+            db.run(
+                "INSERT INTO mcp_servers (id, name, connection_type, command, created_at, updated_at) VALUES (?1, ?1, 'stdio', 'node', ?2, ?2)",
+                &[&id, &created],
+            )
+            .expect("insert row");
+        }
+
+        run_migrations(&db).expect("migrate");
+
+        let rows = db
+            .query_all(
+                "SELECT id, sort_order FROM mcp_servers ORDER BY sort_order ASC",
+                &[],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .expect("query");
+        assert_eq!(
+            rows,
+            vec![
+                ("new".to_string(), 0),
+                ("middle".to_string(), 1),
+                ("old".to_string(), 2),
+            ]
+        );
+    }
+}

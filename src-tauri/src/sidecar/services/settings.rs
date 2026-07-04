@@ -8,12 +8,28 @@ pub const MCP_TIMEOUT_MS_MIN: u32 = 5_000;
 pub const MCP_TIMEOUT_MS_MAX: u32 = 300_000;
 pub const MCP_TIMEOUT_MS_DEFAULT: u32 = 30_000;
 
+/// Distinguishes client input errors (HTTP 400) from internal failures (HTTP 500).
+#[derive(Debug)]
+pub enum SettingsError {
+    Validation(String),
+    Internal(String),
+}
+
+impl std::fmt::Display for SettingsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SettingsError::Validation(m) | SettingsError::Internal(m) => write!(f, "{m}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct GeneralSettings {
     pub auto_start_on_login: bool,
     pub auto_start_servers_on_launch: bool,
     pub minimize_to_tray_on_close: bool,
+    pub hide_dock_icon_on_close: bool,
     pub show_window_on_launch: bool,
 }
 
@@ -48,6 +64,7 @@ struct PartialGeneralSettings {
     auto_start_on_login: Option<bool>,
     auto_start_servers_on_launch: Option<bool>,
     minimize_to_tray_on_close: Option<bool>,
+    hide_dock_icon_on_close: Option<bool>,
     show_window_on_launch: Option<bool>,
 }
 
@@ -83,6 +100,7 @@ pub fn default_settings() -> Settings {
             auto_start_on_login: false,
             auto_start_servers_on_launch: false,
             minimize_to_tray_on_close: true,
+            hide_dock_icon_on_close: false,
             show_window_on_launch: true,
         },
         appearance: AppearanceSettings {
@@ -129,6 +147,11 @@ fn settings_to_db_entries(settings: &Settings) -> Result<Vec<(&'static str, Stri
         (
             "general.minimizeToTrayOnClose",
             serde_json::to_string(&settings.general.minimize_to_tray_on_close)
+                .map_err(|e| e.to_string())?,
+        ),
+        (
+            "general.hideDockIconOnClose",
+            serde_json::to_string(&settings.general.hide_dock_icon_on_close)
                 .map_err(|e| e.to_string())?,
         ),
         (
@@ -223,11 +246,10 @@ pub fn get_settings(db: &Database) -> Result<Settings, String> {
     Ok(db_entries_to_settings(entries))
 }
 
-pub fn update_settings(db: &Database, patch: Value) -> Result<Settings, String> {
-    let current = get_settings(db)?;
-    let updated = merge_settings_value(current, patch)?;
-    validate_settings(&updated)?;
-    persist(db, &updated)?;
+pub fn update_settings(db: &Database, patch: Value) -> Result<Settings, SettingsError> {
+    let current = get_settings(db).map_err(SettingsError::Internal)?;
+    let updated = merge_settings_value(current, patch).map_err(SettingsError::Validation)?;
+    persist(db, &updated).map_err(SettingsError::Internal)?;
     Ok(updated)
 }
 
@@ -255,6 +277,9 @@ pub fn merge_settings_value(mut base: Settings, value: Value) -> Result<Settings
         }
         if let Some(value) = general.minimize_to_tray_on_close {
             base.general.minimize_to_tray_on_close = value;
+        }
+        if let Some(value) = general.hide_dock_icon_on_close {
+            base.general.hide_dock_icon_on_close = value;
         }
         if let Some(value) = general.show_window_on_launch {
             base.general.show_window_on_launch = value;
@@ -411,7 +436,10 @@ mod tests {
             serde_json::json!({ "advanced": { "sidecarPort": 80 } }),
         )
         .expect_err("invalid port should fail");
-        assert!(err.contains("advanced.sidecarPort"));
+        assert!(matches!(
+            err,
+            SettingsError::Validation(ref m) if m.contains("advanced.sidecarPort")
+        ));
         let _ = fs::remove_dir_all(data_dir);
     }
 

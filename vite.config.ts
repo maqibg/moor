@@ -20,7 +20,7 @@ export default defineConfig({
     env: {
       builtin: true,
     },
-    ignorePatterns: ["dist/**", "src-tauri/**", "sidecar/dist/**"],
+    ignorePatterns: ["dist/**", "src-tauri/**"],
     rules: {
       "constructor-super": "error",
       "for-direction": "error",
@@ -136,7 +136,7 @@ export default defineConfig({
         },
       },
       {
-        files: ["src/**/*.{ts,tsx}", "sidecar/src/**/*.ts"],
+        files: ["src/**/*.{ts,tsx}"],
         rules: {
           "no-unused-vars": [
             "warn",
@@ -172,12 +172,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: [
-      "src/**/*.test.{ts,tsx}",
-      "sidecar/src/**/*.test.ts",
-      "scripts/**/*.test.mjs",
-      "sidecar/scripts/**/*.test.mjs",
-    ],
+    include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.mjs"],
     exclude: ["**/node_modules/**", "**/dist/**"],
   },
   clearScreen: false,

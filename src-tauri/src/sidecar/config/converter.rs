@@ -159,3 +159,81 @@ fn parsed_import_warnings(parsed: &import_parser::ParsedImport) -> Vec<String> {
     );
     warnings
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sidecar::db::server_repo::ServerRepository;
+    use std::time::SystemTime;
+
+    fn temp_db() -> Database {
+        let ts = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("moor-converter-{ts}.db"));
+        let db = Database::open(&path).expect("open db");
+        db.run_migrations().expect("migrate");
+        db
+    }
+
+    #[test]
+    fn converts_selected_moor_servers_to_cursor() {
+        let db = temp_db();
+        let repo = ServerRepository::new(&db);
+        repo.insert_one_with_id(
+            "first",
+            0,
+            &crate::sidecar::db::server_repo::ServerInsertInput {
+                name: "first".into(),
+                connection_type: "stdio".into(),
+                command: Some("node".into()),
+                args: Some(vec!["first.js".into()]),
+                url: None,
+                env: Some(
+                    [("FIRST".to_string(), "1".to_string())]
+                        .into_iter()
+                        .collect(),
+                ),
+                headers: None,
+                working_dir: Some("/tmp/first".into()),
+                auto_start: false,
+            },
+        )
+        .expect("insert first");
+        repo.insert_one_with_id(
+            "second",
+            1,
+            &crate::sidecar::db::server_repo::ServerInsertInput {
+                name: "second".into(),
+                connection_type: "http".into(),
+                command: None,
+                args: None,
+                url: Some("https://mcp.example.com/mcp".into()),
+                env: None,
+                headers: Some(
+                    [("Authorization".to_string(), "Bearer ${TOKEN}".to_string())]
+                        .into_iter()
+                        .collect(),
+                ),
+                working_dir: None,
+                auto_start: false,
+            },
+        )
+        .expect("insert second");
+
+        let input = ConvertInput {
+            source: "moor".to_string(),
+            source_client: None,
+            content: None,
+            server_ids: Some(vec!["second".to_string(), "first".to_string()]),
+            target_client: "cursor".to_string(),
+        };
+        let result = convert_config(&input, &db).expect("convert");
+
+        assert_eq!(result.target_client, "cursor");
+        assert!(result.content.contains("first"));
+        assert!(result.content.contains("second"));
+        assert!(result.content.contains("https://mcp.example.com/mcp"));
+    }
+}

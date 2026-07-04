@@ -7,6 +7,8 @@ use tokio::sync::Mutex;
 use super::format_timeout_duration;
 
 static ENV_PATTERN: OnceLock<regex_lite::Regex> = OnceLock::new();
+const MCP_SESSION_ID_HEADER: &str = "mcp-session-id";
+const REMOTE_MCP_ERROR_PREFIX: &str = "Remote MCP server error: ";
 
 /// MCP Client over HTTP transport (Streamable HTTP or SSE).
 /// Uses reqwest to communicate with HTTP-based MCP servers.
@@ -15,6 +17,7 @@ pub struct HttpClientTransport {
     headers: HashMap<String, String>,
     client: reqwest::Client,
     mode: Mutex<HttpMode>,
+    session_id: Mutex<Option<String>>,
     request_timeout: Duration,
 }
 
@@ -47,6 +50,7 @@ impl HttpClientTransport {
             headers,
             client: reqwest::Client::new(),
             mode: Mutex::new(HttpMode::Unknown),
+            session_id: Mutex::new(None),
             request_timeout,
         }
     }
@@ -121,11 +125,9 @@ impl HttpClientTransport {
             "params": params.unwrap_or(Value::Null),
         });
 
-        let mut builder = self.client.post(&self.url);
-        for (key, value) in &self.headers {
-            builder = builder.header(key, value);
-        }
-        builder = builder
+        let builder = self
+            .streamable_post_builder()
+            .await
             .header("accept", "application/json, text/event-stream")
             .header("mcp-protocol-version", "2024-11-05");
 
@@ -137,6 +139,11 @@ impl HttpClientTransport {
 
         let status = response.status();
         if !status.is_success() {
+            if let Some(message) = remote_jsonrpc_error_message(response).await {
+                return Err(StreamableError::Failed(format!(
+                    "{REMOTE_MCP_ERROR_PREFIX}{message}"
+                )));
+            }
             return if is_streamable_unsupported_status(status) {
                 Err(StreamableError::Unsupported(format!(
                     "Streamable HTTP unsupported: {status}"
@@ -147,6 +154,9 @@ impl HttpClientTransport {
                 )))
             };
         }
+
+        self.capture_streamable_session_id(method, response.headers())
+            .await;
 
         let content_type = response
             .headers()
@@ -222,11 +232,9 @@ impl HttpClientTransport {
             "params": params.unwrap_or(Value::Null),
         });
 
-        let mut builder = self.client.post(&self.url);
-        for (key, value) in &self.headers {
-            builder = builder.header(key, value);
-        }
-        let response = builder
+        let response = self
+            .streamable_post_builder()
+            .await
             .header("accept", "application/json, text/event-stream")
             .header("mcp-protocol-version", "2024-11-05")
             .json(&request_body)
@@ -234,19 +242,54 @@ impl HttpClientTransport {
             .await
             .map_err(|e| StreamableError::Unsupported(format!("HTTP notification failed: {e}")))?;
         if !response.status().is_success() {
-            return if is_streamable_unsupported_status(response.status()) {
+            let status = response.status();
+            if let Some(message) = remote_jsonrpc_error_message(response).await {
+                return Err(StreamableError::Failed(format!(
+                    "{REMOTE_MCP_ERROR_PREFIX}{message}"
+                )));
+            }
+            return if is_streamable_unsupported_status(status) {
                 Err(StreamableError::Unsupported(format!(
-                    "Streamable HTTP unsupported: {}",
-                    response.status()
+                    "Streamable HTTP unsupported: {status}"
                 )))
             } else {
                 Err(StreamableError::Failed(format!(
-                    "HTTP notification failed: {}",
-                    response.status()
+                    "HTTP notification failed: {status}"
                 )))
             };
         }
         Ok(())
+    }
+
+    async fn streamable_post_builder(&self) -> reqwest::RequestBuilder {
+        let session_id = self.session_id.lock().await.clone();
+        let mut builder = self.client.post(&self.url);
+        for (key, value) in &self.headers {
+            builder = builder.header(key, value);
+        }
+        if let Some(session_id) = session_id {
+            builder = builder.header(MCP_SESSION_ID_HEADER, session_id);
+        }
+        builder
+    }
+
+    async fn capture_streamable_session_id(
+        &self,
+        method: &str,
+        headers: &reqwest::header::HeaderMap,
+    ) {
+        if method != "initialize" {
+            return;
+        }
+        let Some(session_id) = headers
+            .get(MCP_SESSION_ID_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return;
+        };
+        *self.session_id.lock().await = Some(session_id.to_string());
     }
 
     async fn open_sse(&self) -> Result<SseState, String> {
@@ -347,6 +390,19 @@ impl StreamableError {
 
 fn is_streamable_unsupported_status(status: reqwest::StatusCode) -> bool {
     matches!(status.as_u16(), 400 | 404 | 405 | 406 | 415)
+}
+
+async fn remote_jsonrpc_error_message(response: reqwest::Response) -> Option<String> {
+    let body = response.json::<Value>().await.ok()?;
+    jsonrpc_error_message(&body).map(String::from)
+}
+
+fn jsonrpc_error_message(body: &Value) -> Option<&str> {
+    body.get("error")
+        .and_then(|error| error.get("message"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|message| !message.is_empty())
 }
 
 async fn read_sse_jsonrpc_response(
@@ -526,9 +582,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sidecar::mcp::transport::mcp_client::{HttpConnectConfig, McpClient};
     use axum::{
         extract::State,
-        http::StatusCode,
+        http::{HeaderMap, StatusCode},
         response::{sse::Event, IntoResponse, Sse},
         routing::{get, post},
         Json, Router,
@@ -617,6 +674,69 @@ mod tests {
             "id": id,
             "result": { "ok": true }
         }))
+    }
+
+    async fn streamable_session_endpoint(
+        headers: HeaderMap,
+        Json(body): Json<Value>,
+    ) -> axum::response::Response {
+        const SESSION_ID: &str = "test-session-123";
+
+        let method = body.get("method").and_then(Value::as_str).unwrap_or("");
+        let id = body.get("id").cloned().unwrap_or(Value::Null);
+        let has_session = headers
+            .get("mcp-session-id")
+            .and_then(|value| value.to_str().ok())
+            == Some(SESSION_ID);
+
+        match method {
+            "initialize" => (
+                [("mcp-session-id", SESSION_ID)],
+                Json(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": { "tools": {} },
+                        "serverInfo": { "name": "session-test", "version": "1.0.0" }
+                    }
+                })),
+            )
+                .into_response(),
+            "notifications/initialized" if has_session => StatusCode::ACCEPTED.into_response(),
+            "tools/list" if has_session => Json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "tools": [{
+                        "name": "resolve-library-id",
+                        "description": "Resolve docs",
+                        "inputSchema": { "type": "object" }
+                    }]
+                }
+            }))
+            .into_response(),
+            _ => session_required_error_response(),
+        }
+    }
+
+    async fn streamable_jsonrpc_error() -> impl IntoResponse {
+        session_required_error_response()
+    }
+
+    fn session_required_error_response() -> axum::response::Response {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32000,
+                    "message": "Bad Request: No valid session ID provided"
+                },
+                "id": null
+            })),
+        )
+            .into_response()
     }
 
     #[test]
@@ -729,6 +849,67 @@ mod tests {
             .expect("SSE fallback request should succeed");
 
         assert_eq!(result["ok"], true);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn streamable_http_reuses_session_id_after_initialize() {
+        let app = Router::new().route("/mcp", post(streamable_session_endpoint));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to bind test server");
+        let addr = listener.local_addr().expect("failed to read local addr");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server failed");
+        });
+
+        let client = McpClient::connect_http(HttpConnectConfig {
+            server_name: "session-test".to_string(),
+            url: format!("http://{addr}/mcp"),
+            headers: HashMap::new(),
+            request_timeout_ms: 30_000,
+        })
+        .await
+        .expect("handshake should reuse session header for initialized notification");
+        let tools = client
+            .list_tools()
+            .await
+            .expect("tools/list should reuse session header");
+
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "resolve-library-id");
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn streamable_http_error_response_uses_jsonrpc_message() {
+        let app = Router::new().route("/mcp", post(streamable_jsonrpc_error));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to bind test server");
+        let addr = listener.local_addr().expect("failed to read local addr");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server failed");
+        });
+
+        let transport = HttpClientTransport::new(
+            &format!("http://{addr}/mcp"),
+            HashMap::new(),
+            Duration::from_secs(30),
+        );
+        let err = transport
+            .send_request(1, "tools/list", Some(serde_json::json!({})))
+            .await
+            .expect_err("JSON-RPC error body should be returned as a transport error");
+
+        assert_eq!(
+            err,
+            "Remote MCP server error: Bad Request: No valid session ID provided"
+        );
         server.abort();
     }
 

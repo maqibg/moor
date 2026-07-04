@@ -204,8 +204,7 @@ Moor.app
 │       ├── Profile routing        Global active Profile, hot-swap
 │       ├── Audit logging          Tool call recording
 │       └── SSE push               Real-time status sync to WebView
-├── Dev Sidecar      Node.js / TypeScript (Hono — modo desarrollo & SEA independiente)
-└── Storage           SQLite (rusqlite / node:sqlite)
+└── Storage           SQLite (rusqlite)
     ├── servers (configs, status)
     ├── profiles (server groups + tool toggles)
     └── audit_logs (tool calls, params, results, errors)
@@ -219,11 +218,12 @@ Moor.app
 AI Agent ──HTTP──▶ POST /mcp ──▶ Moor Gateway ──stdio/HTTP──▶ MCP Servers
                               │
 WebView ──IPC──▶ get_sidecar_info ─┐
-WebView ──fetch──▶ /api/* ────────┘
+WebView ──fetch──▶ /api/runtime ───┤ (fallback en modo de desarrollo del navegador)
+WebView ──fetch──▶ /api/* ─────────┘
 WebView ◀──SSE──── /api/events
 ```
 
-- **Detección de runtime**: WebView → Tauri IPC (`get_sidecar_info`) → Rust (puerto, token); en modo navegador recurre a `/api/runtime`
+- **Detección de runtime**: WebView → Tauri IPC (`get_sidecar_info`) → Rust (puerto, token); en modo de desarrollo del navegador recurre a HTTP `GET /api/runtime`
 - **Operaciones de negocio**: WebView → HTTP `fetch()` → Servidor Axum en proceso (Rust)
 - **Operaciones de sistema**: WebView → Tauri IPC → Rust (bandeja, ventana, auto-inicio)
 
@@ -247,20 +247,13 @@ pnpm install
 
 ### Modo de desarrollo
 
-Inicia tanto el frontend como el sidecar:
-
-```bash
-pnpm dev:all
-```
-
-- Frontend: http://localhost:1420
-- Sidecar API: http://localhost:9223
-
-Inicia la aplicación de escritorio completa (Tauri):
+Inicia la aplicación de escritorio completa (Tauri, con la pasarela Rust en proceso):
 
 ```bash
 pnpm tauri dev
 ```
+
+- Frontend: http://localhost:1420 (Vite HMR dentro del WebView)
 
 ### Compilación de producción
 
@@ -286,10 +279,10 @@ vp fmt         # formato
 ### Pruebas
 
 ```bash
-# Pruebas del sidecar
-cd sidecar && vp test run
+# Pruebas de la pasarela Rust
+cargo test --manifest-path src-tauri/Cargo.toml
 
-# Pruebas del frontend
+# Pruebas de frontend + scripts
 vp test
 ```
 
@@ -319,14 +312,14 @@ vp test
 
 ### Gestión de Perfiles
 
-| Método   | Ruta                             | Descripción                                                     |
-| -------- | -------------------------------- | --------------------------------------------------------------- |
-| `GET`    | `/api/profiles`                  | Listar todos los perfiles                                       |
-| `POST`   | `/api/profiles`                  | Crear perfil                                                    |
-| `PUT`    | `/api/profiles/:id`              | Actualizar perfil                                               |
-| `DELETE` | `/api/profiles/:id`              | Eliminar perfil                                                 |
-| `PUT`    | `/api/profiles/:id/activate`     | Establecer como perfil activo                                   |
-| `PUT`    | `/api/profiles/:id/servers/:sid` | Actualizar conmutador de servidor + herramientas deshabilitadas |
+| Método   | Ruta                                  | Descripción                                                     |
+| -------- | ------------------------------------- | --------------------------------------------------------------- |
+| `GET`    | `/api/profiles`                       | Listar todos los perfiles                                       |
+| `POST`   | `/api/profiles`                       | Crear perfil                                                    |
+| `PUT`    | `/api/profiles/:id`                   | Actualizar perfil                                               |
+| `DELETE` | `/api/profiles/:id`                   | Eliminar perfil                                                 |
+| `PUT`    | `/api/profiles/:id/activate`          | Establecer como perfil activo                                   |
+| `PUT`    | `/api/profiles/:id/servers/:serverId` | Actualizar conmutador de servidor + herramientas deshabilitadas |
 
 ### Registros de auditoría
 
@@ -358,18 +351,17 @@ vp test
 
 ## Stack tecnológico
 
-| Capa          | Tecnología                                              |
-| ------------- | ------------------------------------------------------- |
-| Frontend      | React 19, vite-plus, TypeScript 5.7, Tailwind CSS v4    |
-| UI Primitives | Radix UI                                                |
-| UI Components | shadcn/ui (New York style)                              |
-| Desktop       | Tauri 2 (Rust)                                          |
-| Gateway       | Rust, Axum, Tokio, rusqlite (en proceso)                |
-| Dev Sidecar   | Node.js, TypeScript, Hono, @hono/node-server, @hono/mcp |
-| Database      | SQLite (rusqlite / node:sqlite)                         |
-| MCP Protocol  | @modelcontextprotocol/sdk (stdio + HTTP/SSE)            |
-| Icons         | Lucide React                                            |
-| Tooling       | vite-plus (vp CLI), Oxlint, Oxfmt, Vitest               |
+| Capa          | Tecnología                                           |
+| ------------- | ---------------------------------------------------- |
+| Frontend      | React 19, vite-plus, TypeScript 5.7, Tailwind CSS v4 |
+| UI Primitives | Radix UI                                             |
+| UI Components | shadcn/ui (New York style)                           |
+| Desktop       | Tauri 2 (Rust)                                       |
+| Gateway       | Rust, Axum, Tokio, rusqlite (en proceso)             |
+| Database      | SQLite (rusqlite)                                    |
+| MCP Protocol  | Rust nativo (JSON-RPC sobre Streamable HTTP / stdio) |
+| Icons         | Lucide React                                         |
+| Tooling       | vite-plus (vp CLI), Oxlint, Oxfmt, Vitest            |
 
 ## Agradecimientos
 
@@ -381,7 +373,7 @@ Gracias a la comunidad [linuxdo](https://linux.do/) por las discusiones, compart
 
 ## 🌟 Historial de estrellas
 
-[![Star History Chart](https://api.star-history.com/svg?repos=varandrew/moor&type=Date)](https://www.star-history.com/#varandrew/moor&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=maqibg/moor&type=Date)](https://www.star-history.com/#maqibg/moor&Date)
 
 ## Licencia
 

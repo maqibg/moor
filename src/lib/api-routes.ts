@@ -64,6 +64,5 @@ export const routes = {
     convert: () => "/api/import/convert",
   },
   events: () => "/api/events",
-  runtime: () => "/api/runtime",
   health: () => "/api/health",
 } as const;

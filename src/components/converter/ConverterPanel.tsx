@@ -108,7 +108,7 @@ export function ConverterPanel() {
     } finally {
       setLoading(false);
     }
-  }, [inputSource, targetClient, selectedIds, scanClient, pasteClient, pasteContent]);
+  }, [inputSource, targetClient, selectedIds, scanClient, pasteClient, pasteContent, t]);
 
   const canConvert = (() => {
     if (loading) return false;

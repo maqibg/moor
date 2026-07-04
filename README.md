@@ -72,7 +72,7 @@ Download the Windows installer from [Releases](https://github.com/maqibg/moor/re
 
 ### Build from Source
 
-Requires macOS (Apple Silicon / Intel) or Windows x64, Node.js >= 22, pnpm >= 10, and Rust >= 1.77.
+Requires macOS (Apple Silicon / Intel) or Windows x64, Node.js >= 22 (CI uses 24), pnpm >= 10, and Rust >= 1.77.
 
 ```bash
 git clone https://github.com/maqibg/moor.git
@@ -116,9 +116,9 @@ Point any MCP-compatible client to Moor's single endpoint:
 http://127.0.0.1:9223/mcp
 ```
 
-`9223` is the default sidecar port. If it is already in use, Moor picks the next available port and shows the actual endpoint in the Dashboard and Client Config pages.
+`9223` is the default gateway port. If it is already in use, Moor picks the next available port and shows the actual endpoint in the Dashboard and Client Config pages.
 
-The `/mcp` endpoint is loopback-only and does not require `X-Moor-Token`. Moor uses `X-Moor-Token` only for local management APIs between the WebView and sidecar, so you do not need to paste it into agent configs.
+The `/mcp` endpoint is loopback-only and does not require `X-Moor-Token`. Moor uses `X-Moor-Token` only for local management APIs between the WebView and gateway, so you do not need to paste it into agent configs.
 
 Moor handles the rest — aggregating `tools/list`, routing `tools/call`, and filtering based on your active Profile.
 
@@ -196,8 +196,7 @@ Moor.app
 │       ├── Profile routing        Global active Profile, hot-swap
 │       ├── Audit logging          Tool call recording
 │       └── SSE push               Real-time status sync to WebView
-├── Dev Sidecar      Node.js / TypeScript (Hono — dev mode & SEA standalone)
-└── Storage           SQLite (rusqlite / node:sqlite)
+└── Storage           SQLite (rusqlite)
     ├── servers (configs, status)
     ├── profiles (server groups + tool toggles)
     └── audit_logs (tool calls, params, results, errors)
@@ -211,11 +210,12 @@ Moor.app
 AI Agent ──HTTP──▶ POST /mcp ──▶ Moor Gateway ──stdio/HTTP──▶ MCP Servers
                               │
 WebView ──IPC──▶ get_sidecar_info ─┐
-WebView ──fetch──▶ /api/* ────────┘
+WebView ──fetch──▶ /api/runtime ───┤ (fallback in browser dev mode)
+WebView ──fetch──▶ /api/* ─────────┘
 WebView ◀──SSE──── /api/events
 ```
 
-- **Runtime discovery**: WebView → Tauri IPC (`get_sidecar_info`) → Rust (port, token); falls back to `/api/runtime` in browser dev mode
+- **Runtime discovery**: WebView → Tauri IPC (`get_sidecar_info`) → Rust (port, token); falls back to HTTP `GET /api/runtime` in browser dev mode
 - **Business operations**: WebView → HTTP `fetch()` → In-process Axum server (Rust)
 - **System operations**: WebView → Tauri IPC → Rust (tray, window, auto-start)
 
@@ -224,7 +224,7 @@ WebView ◀──SSE──── /api/events
 ### Prerequisites
 
 - macOS (Apple Silicon / Intel) or Windows x64
-- [Node.js](https://nodejs.org) >= 22
+- [Node.js](https://nodejs.org) >= 22 (CI uses 24)
 - [pnpm](https://pnpm.io) >= 10
 - [Rust](https://rustup.rs) >= 1.77
 - [Xcode Command Line Tools](https://developer.apple.com/xcode/resources/) on macOS
@@ -237,20 +237,13 @@ pnpm install
 
 ### Development Mode
 
-Start both frontend and sidecar:
-
-```bash
-pnpm dev:all
-```
-
-- Frontend: http://localhost:1420
-- Sidecar API: http://localhost:9223
-
-Start the full desktop app (Tauri):
+Start the full desktop app (Tauri, with the in-process Rust gateway):
 
 ```bash
 pnpm tauri dev
 ```
+
+- Frontend dev server: http://localhost:1420 (Vite HMR runs inside the WebView)
 
 ### Production Build
 
@@ -276,10 +269,10 @@ vp fmt         # format
 ### Testing
 
 ```bash
-# Sidecar tests
-cd sidecar && vp test run
+# Rust gateway tests
+cargo test --manifest-path src-tauri/Cargo.toml
 
-# Frontend tests
+# Frontend + scripts tests
 vp test
 ```
 
@@ -307,14 +300,16 @@ vp test
 
 ### Profile Management
 
-| Method   | Path                             | Description                           |
-| -------- | -------------------------------- | ------------------------------------- |
-| `GET`    | `/api/profiles`                  | List all profiles                     |
-| `POST`   | `/api/profiles`                  | Create profile                        |
-| `PUT`    | `/api/profiles/:id`              | Update profile                        |
-| `DELETE` | `/api/profiles/:id`              | Delete profile                        |
-| `PUT`    | `/api/profiles/:id/activate`     | Set as active profile                 |
-| `PUT`    | `/api/profiles/:id/servers/:sid` | Update server toggle + disabled tools |
+| Method   | Path                                  | Description                           |
+| -------- | ------------------------------------- | ------------------------------------- |
+| `GET`    | `/api/profiles`                       | List all profiles                     |
+| `POST`   | `/api/profiles`                       | Create profile                        |
+| `GET`    | `/api/profiles/:id`                   | Get profile detail (with servers)     |
+| `PUT`    | `/api/profiles/:id`                   | Update profile                        |
+| `DELETE` | `/api/profiles/:id`                   | Delete profile                        |
+| `PUT`    | `/api/profiles/:id/activate`          | Set as active profile                 |
+| `GET`    | `/api/profiles/:id/servers/:serverId` | Get server toggle + disabled tools    |
+| `PUT`    | `/api/profiles/:id/servers/:serverId` | Update server toggle + disabled tools |
 
 ### Audit Logs
 
@@ -346,18 +341,17 @@ vp test
 
 ## Tech Stack
 
-| Layer         | Technology                                              |
-| ------------- | ------------------------------------------------------- |
-| Frontend      | React 19, vite-plus, TypeScript 5.7, Tailwind CSS v4    |
-| UI Primitives | Radix UI                                                |
-| UI Components | shadcn/ui (New York style)                              |
-| Desktop       | Tauri 2 (Rust)                                          |
-| Gateway       | Rust, Axum, Tokio, rusqlite (in-process)                |
-| Dev Sidecar   | Node.js, TypeScript, Hono, @hono/node-server, @hono/mcp |
-| Database      | SQLite (rusqlite / node:sqlite)                         |
-| MCP Protocol  | @modelcontextprotocol/sdk (stdio + HTTP/SSE)            |
-| Icons         | Lucide React                                            |
-| Tooling       | vite-plus (vp CLI), Oxlint, Oxfmt, Vitest               |
+| Layer         | Technology                                           |
+| ------------- | ---------------------------------------------------- |
+| Frontend      | React 19, vite-plus, TypeScript 5.7, Tailwind CSS v4 |
+| UI Primitives | Radix UI                                             |
+| UI Components | shadcn/ui (New York style)                           |
+| Desktop       | Tauri 2 (Rust)                                       |
+| Gateway       | Rust, Axum, Tokio, rusqlite (in-process)             |
+| Database      | SQLite (rusqlite)                                    |
+| MCP Protocol  | Rust 自实现 (JSON-RPC over Streamable HTTP / stdio)  |
+| Icons         | Lucide React                                         |
+| Tooling       | vite-plus (vp CLI), Oxlint, Oxfmt, Vitest            |
 
 ## Acknowledgements
 
@@ -369,7 +363,7 @@ Thanks to the [linuxdo](https://linux.do/) community for discussion, sharing, an
 
 ## 🌟 Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=varandrew/moor&type=Date)](https://www.star-history.com/#varandrew/moor&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=maqibg/moor&type=Date)](https://www.star-history.com/#maqibg/moor&Date)
 
 ## License
 

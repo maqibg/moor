@@ -1,4 +1,40 @@
-# moor-sidecar
+# moor
+
+## 0.6.3
+
+### Patch Changes
+
+- Merge upstream v0.6.2 Rust-only gateway changes into the fork while preserving Chinese UI localization, fork release links, and Windows auto-publish workflow behavior.
+
+## 0.6.2
+
+### Patch Changes
+
+- Refactor audit logging and server management
+  - Extract `AuditRecorder` to encapsulate audit logging (enabled check, active-profile resolution, redaction, persistence), replacing the standalone `record_audit` function
+  - Add `ProfileService` domain service for profile persistence and typed domain events, slimming HTTP routes to transport concerns
+  - Introduce `StdioHttpConnector` to manage connections per server config and simplify `ServerManager` connection logic
+  - Make the `McpSession` trait async for tool management operations
+  - Streamline `ServerService` creation and validation via the new `ServerInsertInput` struct
+  - Adopt typed events on the event bus for clarity and maintainability
+
+## 0.6.1
+
+### Patch Changes
+
+- Add a macOS setting to hide the Dock icon when closing to tray, improve stdio server PATH resolution by merging the login shell PATH, and update runtime discovery/API documentation.
+
+## 0.6.0
+
+### Minor Changes
+
+- 0fd707c: Migrate from Node.js sidecar to unified Rust gateway
+  - **Remove Node.js sidecar entirely**: Delete the `sidecar/` package including all TypeScript source, build scripts, tests, and configuration. Implements ADR-0001: single in-process Rust gateway.
+  - **Complete Rust gateway features**: Add import service, config converter, import parser, audit redaction, and database migrations for the Rust implementation.
+  - **Refactor HTTP error handling**: Introduce `AppError` for consistent error responses across all HTTP routes.
+  - **Migrate to variable fonts**: Replace Google Fonts CDN with `@fontsource-variable` packages (Space Grotesk, Inter) for offline-first rendering and reduced external dependencies.
+  - **Improve server lifecycle**: Handle mid-start interruptions gracefully, add session cleanup for stopped servers during startup phase.
+  - **Update documentation**: Add CONTEXT.md, ADR-0001, update README translations (en, es, ja, zh) to reflect Rust-only architecture.
 
 ## 0.5.8
 

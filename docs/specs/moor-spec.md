@@ -123,7 +123,7 @@ Build a local MCP console + gateway application running on macOS. Moor acts as a
 - **Original Decision (MVP)**: Node sidecar was planned to be compiled as a standalone binary (pkg/SEA) and packaged into Moor.app.
 - **Evolved Decision**: The production gateway is now a **Rust in-process Axum HTTP server** embedded directly in the Tauri app. No external Node.js runtime or sidecar process is required.
 - **Why**: Better performance, smaller bundle size, simpler lifecycle management, and no Node.js SEA compatibility risks.
-- **Development**: Node.js sidecar (Hono) is still used for `pnpm dev:all` / `pnpm sidecar` for faster iteration.
+- **Development**: `pnpm tauri dev` runs the same in-process Rust gateway used by production; Vite HMR still runs inside the WebView.
 
 ### AD-13: MCP Timeout Settings
 
@@ -131,7 +131,7 @@ Build a local MCP console + gateway application running on macOS. Moor acts as a
 - **范围与默认值**: 两个字段都使用毫秒，范围为 `5_000..300_000`，默认值为 `30_000`。
 - **启动语义**: 启动期 `initialize` / `tools/list` 使用 `mcpServerStartTimeoutMs`，并受同一个启动总等待时间约束。
 - **运行期语义**: `tools/call` 每次调用前读取最新 `mcpRequestTimeoutMs`；修改 request timeout 后无需重启运行中的 server。
-- **跨端一致性**: Node.js development sidecar 与 Rust production gateway 必须保持以上语义一致。
+- **单实现一致性**: 开发和生产都使用 Rust gateway，因此以上语义只维护一份实现。
 
 ## Tech Stack (Confirmed)
 
@@ -141,12 +141,11 @@ Moor.app
 ├─ Desktop Layer: Tauri 2 / Rust
 │   ├─ Window management + tray icon
 │   ├─ macOS Keychain access
-│   ├─ Sidecar process lifecycle management (dev mode only)
+│   ├─ In-process gateway startup and runtime settings
 │   └─ File permissions
 ├─ Gateway Daemon
-│   ├─ Production: Rust in-process Axum HTTP server (no external sidecar)
-│   ├─ Development: Node.js / TypeScript sidecar (Hono, via tsx watch)
-│   ├─ MCP protocol: @modelcontextprotocol/sdk
+│   ├─ Rust in-process Axum HTTP server (production and development)
+│   ├─ MCP protocol: Rust 自实现 (JSON-RPC over Streamable HTTP / stdio) — _Evolved: 原 MVP 计划用 @modelcontextprotocol/sdk；移除 Node sidecar 后改为 Rust 自实现_
 │   ├─ Server management (stdio spawn + HTTP/SSE client)
 │   ├─ Profile management + tool filtering
 │   ├─ Request audit logging
@@ -214,6 +213,8 @@ AuditLog
 ```
 
 ## API Design (Sidecar HTTP API)
+
+> **Status Note**: 以下为 MVP 阶段规格。实际实现还包含 `/api/import/parse`、`/api/import/snippets`、`/api/health`、`/api/runtime`、`/api/events`、`/api/settings`(GET/PATCH)、`/api/settings/reset`、`/api/servers/order` 等端点。完整且最新的 API 列表以 `README.md` 的 API 章节为准。
 
 ```
 # Server Management
@@ -288,7 +289,7 @@ Based on Stitch project screens + interview decisions:
 
 ### 6. Settings
 
-- General: auto-start on login, auto-start servers on launch, minimize to tray, show window on launch
+- General: auto-start on login, auto-start servers on launch, minimize to tray, hide dock icon on close, show window on launch
 - Appearance: theme (System/Light/Dark)
 - Advanced: MCP request timeout, server start timeout, log retention, audit logging toggle, sidecar port, API token display
 - Reset to defaults with confirmation

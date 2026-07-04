@@ -202,8 +202,7 @@ Moor.app
 │       ├── Profile routing        Global active Profile, hot-swap
 │       ├── Audit logging          Tool call recording
 │       └── SSE push               Real-time status sync to WebView
-├── Dev Sidecar      Node.js / TypeScript (Hono — 开发模式 & SEA 独立运行)
-└── Storage           SQLite (rusqlite / node:sqlite)
+└── Storage           SQLite (rusqlite)
     ├── servers (configs, status)
     ├── profiles (server groups + tool toggles)
     └── audit_logs (tool calls, params, results, errors)
@@ -217,11 +216,12 @@ Moor.app
 AI Agent ──HTTP──▶ POST /mcp ──▶ Moor Gateway ──stdio/HTTP──▶ MCP Servers
                               │
 WebView ──IPC──▶ get_sidecar_info ─┐
-WebView ──fetch──▶ /api/* ────────┘
+WebView ──fetch──▶ /api/runtime ───┤ (纯浏览器开发模式回退)
+WebView ──fetch──▶ /api/* ─────────┘
 WebView ◀──SSE──── /api/events
 ```
 
-- **运行时发现**: WebView → Tauri IPC (`get_sidecar_info`) → Rust（端口、token）；浏览器开发模式回退到 `/api/runtime`
+- **运行时发现**: WebView → Tauri IPC (`get_sidecar_info`) → Rust（端口、token）；纯浏览器开发模式下回退到 HTTP `GET /api/runtime`
 - **业务操作**: WebView → HTTP `fetch()` → 进程内 Axum 服务器（Rust）
 - **系统操作**: WebView → Tauri IPC → Rust（托盘、窗口、自启动）
 
@@ -243,20 +243,13 @@ pnpm install
 
 ### 开发模式
 
-同时启动前端和 Sidecar：
-
-```bash
-pnpm dev:all
-```
-
-- 前端: http://localhost:1420
-- Sidecar API: http://localhost:9223
-
-启动完整桌面应用（Tauri）：
+启动完整桌面应用（Tauri，内置进程内 Rust 网关）：
 
 ```bash
 pnpm tauri dev
 ```
+
+- 前端: http://localhost:1420（WebView 内置 Vite HMR）
 
 ### 生产构建
 
@@ -282,10 +275,10 @@ vp fmt         # 格式化
 ### 测试
 
 ```bash
-# Sidecar 测试
-cd sidecar && vp test run
+# Rust 网关测试
+cargo test --manifest-path src-tauri/Cargo.toml
 
-# 前端测试
+# 前端 + 脚本测试
 vp test
 ```
 
@@ -313,14 +306,14 @@ vp test
 
 ### Profile 管理
 
-| 方法     | 路径                             | 说明                        |
-| -------- | -------------------------------- | --------------------------- |
-| `GET`    | `/api/profiles`                  | 列出所有 Profile            |
-| `POST`   | `/api/profiles`                  | 创建 Profile                |
-| `PUT`    | `/api/profiles/:id`              | 更新 Profile                |
-| `DELETE` | `/api/profiles/:id`              | 删除 Profile                |
-| `PUT`    | `/api/profiles/:id/activate`     | 激活 Profile                |
-| `PUT`    | `/api/profiles/:id/servers/:sid` | 更新 Server 开关 + 禁用工具 |
+| 方法     | 路径                                  | 说明                        |
+| -------- | ------------------------------------- | --------------------------- |
+| `GET`    | `/api/profiles`                       | 列出所有 Profile            |
+| `POST`   | `/api/profiles`                       | 创建 Profile                |
+| `PUT`    | `/api/profiles/:id`                   | 更新 Profile                |
+| `DELETE` | `/api/profiles/:id`                   | 删除 Profile                |
+| `PUT`    | `/api/profiles/:id/activate`          | 激活 Profile                |
+| `PUT`    | `/api/profiles/:id/servers/:serverId` | 更新 Server 开关 + 禁用工具 |
 
 ### 审计日志
 
@@ -352,18 +345,17 @@ vp test
 
 ## 技术栈
 
-| 层级     | 技术                                                    |
-| -------- | ------------------------------------------------------- |
-| 前端     | React 19, vite-plus, TypeScript 5.7, Tailwind CSS v4    |
-| UI 基础  | Radix UI                                                |
-| UI 组件  | shadcn/ui (New York style)                              |
-| 桌面框架 | Tauri 2 (Rust)                                          |
-| 网关     | Rust, Axum, Tokio, rusqlite (进程内)                    |
-| 开发侧车 | Node.js, TypeScript, Hono, @hono/node-server, @hono/mcp |
-| 数据库   | SQLite (rusqlite / node:sqlite)                         |
-| MCP 协议 | @modelcontextprotocol/sdk (stdio + HTTP/SSE)            |
-| 图标     | Lucide React                                            |
-| 工具链   | vite-plus (vp CLI), Oxlint, Oxfmt, Vitest               |
+| 层级     | 技术                                                 |
+| -------- | ---------------------------------------------------- |
+| 前端     | React 19, vite-plus, TypeScript 5.7, Tailwind CSS v4 |
+| UI 基础  | Radix UI                                             |
+| UI 组件  | shadcn/ui (New York style)                           |
+| 桌面框架 | Tauri 2 (Rust)                                       |
+| 网关     | Rust, Axum, Tokio, rusqlite (进程内)                 |
+| 数据库   | SQLite (rusqlite)                                    |
+| MCP 协议 | Rust 自实现 (JSON-RPC over Streamable HTTP / stdio)  |
+| 图标     | Lucide React                                         |
+| 工具链   | vite-plus (vp CLI), Oxlint, Oxfmt, Vitest            |
 
 ## 鸣谢
 
@@ -375,7 +367,7 @@ vp test
 
 ## 🌟 Star 历史
 
-[![Star History Chart](https://api.star-history.com/svg?repos=varandrew/moor&type=Date)](https://www.star-history.com/#varandrew/moor&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=maqibg/moor&type=Date)](https://www.star-history.com/#maqibg/moor&Date)
 
 ## 许可证
 

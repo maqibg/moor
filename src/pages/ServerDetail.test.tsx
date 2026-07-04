@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { ReactNode } from "react";
+import { I18nContext } from "@/contexts/I18nContext";
 import { hasChanges, type EditForm } from "@/lib/server-form";
 import { ServerEditFields } from "./ServerDetail";
 import { ToolCategoryBadge } from "@/components/shared/ToolCategoryBadge";
@@ -14,6 +16,14 @@ const baseForm: EditForm = {
   workingDir: "/tmp/project",
 };
 
+function renderWithI18n(children: ReactNode) {
+  return renderToStaticMarkup(
+    <I18nContext.Provider value={{ language: "en", setLanguage: () => undefined, t: (key) => key }}>
+      {children}
+    </I18nContext.Provider>,
+  );
+}
+
 describe("ServerDetail", () => {
   it("classifies tools from the original tool name", () => {
     const markup = renderToStaticMarkup(<ToolCategoryBadge name="search" />);
@@ -24,7 +34,7 @@ describe("ServerDetail", () => {
   });
 
   it("keeps working directory editable for stdio servers", () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderWithI18n(
       <ServerEditFields form={baseForm} connectionType="stdio" onChange={() => undefined} />,
     );
 
@@ -33,7 +43,7 @@ describe("ServerDetail", () => {
   });
 
   it("hides working directory editing for HTTP servers", () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderWithI18n(
       <ServerEditFields
         form={{ ...baseForm, command: "", url: "http://localhost:3000/mcp" }}
         connectionType="http"

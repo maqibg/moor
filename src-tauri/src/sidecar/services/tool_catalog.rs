@@ -213,22 +213,22 @@ mod tests {
     }
 
     fn insert_server(db: &Database, id: &str, name: &str) {
-        let now = chrono::Utc::now().to_rfc3339();
+        use crate::sidecar::db::server_repo::ServerInsertInput;
         ServerRepository::new(db)
-            .insert(
+            .insert_one_with_id(
                 id,
-                name,
-                "stdio",
-                Some("node"),
-                None,
-                None,
-                None,
-                None,
-                None,
-                false,
                 0,
-                &now,
-                &now,
+                &ServerInsertInput {
+                    name: name.into(),
+                    connection_type: "stdio".into(),
+                    command: Some("node".into()),
+                    args: None,
+                    url: None,
+                    env: None,
+                    headers: None,
+                    working_dir: None,
+                    auto_start: false,
+                },
             )
             .expect("failed to insert server");
     }

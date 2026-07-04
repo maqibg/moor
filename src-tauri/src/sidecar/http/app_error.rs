@@ -7,6 +7,7 @@ pub struct AppError {
     status: StatusCode,
     code: &'static str,
     message: String,
+    client_message: Option<String>,
 }
 
 impl AppError {
@@ -34,12 +35,33 @@ impl AppError {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", msg)
     }
 
+    pub fn internal_public(msg: impl Into<String>, client_msg: impl Into<String>) -> Self {
+        Self::new(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", msg)
+            .with_client_message(client_msg)
+    }
+
     fn new(status: StatusCode, code: &'static str, msg: impl Into<String>) -> Self {
         Self {
             status,
             code,
             message: msg.into(),
+            client_message: None,
         }
+    }
+
+    fn with_client_message(mut self, msg: impl Into<String>) -> Self {
+        self.client_message = Some(msg.into());
+        self
+    }
+
+    #[cfg(test)]
+    pub fn status_code(&self) -> StatusCode {
+        self.status
+    }
+
+    #[cfg(test)]
+    pub fn code(&self) -> &str {
+        self.code
     }
 }
 
@@ -51,18 +73,40 @@ impl std::fmt::Display for AppError {
 
 impl std::error::Error for AppError {}
 
-impl From<String> for AppError {
-    fn from(msg: String) -> Self {
-        Self::internal(msg)
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        // 5xx 可能包含底层细节；默认隐藏，只返回显式标记为可公开的消息。
+        let client_message = if self.status.is_server_error() {
+            tracing::error!(code = self.code, error = %self.message, "请求处理失败");
+            self.client_message
+                .unwrap_or_else(|| "服务器内部错误".to_string())
+        } else {
+            self.message
+        };
+        (
+            self.status,
+            Json(json!({ "error": { "code": self.code, "message": client_message } })),
+        )
+            .into_response()
     }
 }
 
-impl IntoResponse for AppError {
-    fn into_response(self) -> Response {
-        (
-            self.status,
-            Json(json!({ "error": { "code": self.code, "message": self.message } })),
-        )
-            .into_response()
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validation_uses_bad_request_status_and_code() {
+        let err = AppError::validation("advanced.sidecarPort must be between 1024 and 65535");
+        assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
+        assert_eq!(err.code(), "VALIDATION_ERROR");
+        assert_eq!(err.into_response().status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn internal_uses_server_error_status_and_code() {
+        let err = AppError::internal("boom");
+        assert_eq!(err.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.code(), "INTERNAL_ERROR");
     }
 }

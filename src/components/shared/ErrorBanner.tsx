@@ -3,10 +3,11 @@ import { cn } from "@/lib/utils";
 
 interface ErrorBannerProps {
   message: string;
+  variant?: "default" | "mono";
   className?: string;
 }
 
-export function ErrorBanner({ message, className }: ErrorBannerProps) {
+export function ErrorBanner({ message, variant = "default", className }: ErrorBannerProps) {
   return (
     <div
       role="alert"
@@ -16,7 +17,13 @@ export function ErrorBanner({ message, className }: ErrorBannerProps) {
       )}
     >
       <AlertTriangle className="h-4 w-4 shrink-0 text-error-warm" />
-      <p className="min-w-0 break-words font-body text-xs text-error-warm" title={message}>
+      <p
+        className={cn(
+          "min-w-0 text-error-warm",
+          variant === "mono" ? "truncate font-mono text-[11px]" : "break-words font-body text-xs",
+        )}
+        title={message}
+      >
         {message}
       </p>
     </div>

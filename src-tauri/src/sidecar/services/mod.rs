@@ -1,6 +1,8 @@
+pub mod audit_recorder;
 pub mod audit_redaction;
 pub mod event_bus;
 pub mod import_service;
+pub mod profile_service;
 pub mod server_manager;
 pub mod server_service;
 pub mod settings;

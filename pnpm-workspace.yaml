@@ -1,5 +1,5 @@
 packages:
-  - "sidecar"
+  - "."
   - "packages/types"
 allowBuilds:
   esbuild: true

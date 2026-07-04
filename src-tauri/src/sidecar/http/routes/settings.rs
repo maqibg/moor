@@ -1,5 +1,6 @@
 use crate::sidecar::http::app_error::AppError;
 use crate::sidecar::http::AppState;
+use crate::sidecar::services::event_bus::Evt;
 use crate::sidecar::services::settings as settings_store;
 use axum::{
     extract::State,
@@ -17,7 +18,7 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 async fn get_settings(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
-    let settings = settings_store::get_settings(&state.db)?;
+    let settings = settings_store::get_settings(&state.db).map_err(AppError::internal)?;
     Ok(Json(
         serde_json::to_value(settings).map_err(|e| AppError::internal(e.to_string()))?,
     ))
@@ -27,33 +28,32 @@ async fn update_settings(
     State(state): State<Arc<AppState>>,
     axum::Json(body): axum::Json<Value>,
 ) -> Result<Json<Value>, AppError> {
-    let settings = settings_store::update_settings(&state.db, body)
-        .map_err(|e| AppError::validation(e.to_string()))?;
+    let settings = settings_store::update_settings(&state.db, body).map_err(|e| match e {
+        settings_store::SettingsError::Validation(m) => AppError::validation(m),
+        settings_store::SettingsError::Internal(m) => AppError::internal(m),
+    })?;
     let settings_value =
         serde_json::to_value(&settings).map_err(|e| AppError::internal(e.to_string()))?;
 
-    state
-        .event_bus
-        .emit("settings:changed", settings_value.clone());
+    state.event_bus.emit(Evt::SettingsChanged {
+        settings: settings_value.clone(),
+    });
     Ok(Json(settings_value))
 }
 
 async fn reset_settings(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
-    let defaults = settings_store::reset_settings(&state.db)?;
+    let defaults = settings_store::reset_settings(&state.db).map_err(AppError::internal)?;
     let defaults_value =
         serde_json::to_value(&defaults).map_err(|e| AppError::internal(e.to_string()))?;
-    state
-        .event_bus
-        .emit("settings:changed", defaults_value.clone());
+    state.event_bus.emit(Evt::SettingsChanged {
+        settings: defaults_value.clone(),
+    });
     Ok(Json(defaults_value))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sidecar::db::Database;
-    use crate::sidecar::services::event_bus::EventBus;
-    use crate::sidecar::services::server_manager::ServerManager;
     use std::sync::Arc;
     use std::time::SystemTime;
 
@@ -66,20 +66,7 @@ mod tests {
     }
 
     fn test_state(data_dir: std::path::PathBuf) -> Arc<AppState> {
-        std::fs::create_dir_all(&data_dir).expect("failed to create temp data dir");
-        let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
-        db.run_migrations().expect("failed to migrate db");
-        settings_store::init_settings(db.as_ref(), &data_dir)
-            .expect("failed to initialize settings");
-        let event_bus = Arc::new(EventBus::new(16));
-        Arc::new(AppState {
-            db: db.clone(),
-            api_token: "test-token".to_string(),
-            version: "test".to_string(),
-            port: 19323,
-            event_bus: event_bus.clone(),
-            server_manager: Arc::new(ServerManager::new(db, event_bus)),
-        })
+        AppState::for_test(&data_dir)
     }
 
     #[tokio::test]
@@ -130,6 +117,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn update_settings_rejects_invalid_port_with_validation_error() {
+        let data_dir = temp_data_dir("invalid-port");
+        let err = update_settings(
+            State(test_state(data_dir.clone())),
+            axum::Json(serde_json::json!({ "advanced": { "sidecarPort": 80 } })),
+        )
+        .await
+        .expect_err("invalid port should be rejected");
+        assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(err.code(), "VALIDATION_ERROR");
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
     async fn settings_changed_event_payload_is_settings_object() {
         let data_dir = temp_data_dir("event-payload");
         let state = test_state(data_dir.clone());
@@ -144,11 +145,12 @@ mod tests {
         .await
         .expect("settings update should succeed");
 
-        let (event, payload) = events
+        let evt = events
             .recv()
             .await
             .expect("settings event should be emitted");
-        assert_eq!(event, "settings:changed");
+        assert_eq!(evt.name(), "settings:changed");
+        let payload = evt.payload();
         assert_eq!(payload, value);
         assert_eq!(payload["general"]["minimizeToTrayOnClose"], false);
         let _ = std::fs::remove_dir_all(data_dir);

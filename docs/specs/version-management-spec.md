@@ -2,15 +2,14 @@
 
 ## Overview
 
-Moor uses `@changesets/cli` for automatic version management and changelog generation. The version number in `sidecar/package.json` is the single source of truth (since it is the workspace member directly managed by changeset), and is automatically synchronized to all target files during the build.
+Moor uses `@changesets/cli` for automatic version management and changelog generation. The version number in the root `package.json` is the single source of truth and is automatically synchronized to all target files during the build.
 
 ## Version Number Distribution
 
-The version number in `sidecar/package.json` is the single source of truth (a workspace member directly managed by changeset), and is synchronized to the following locations via `sync-version.mjs`:
+The version number in root `package.json` is synchronized to the following locations via `sync-version.mjs`:
 
 | File                          | Sync Method                                             |
 | ----------------------------- | ------------------------------------------------------- |
-| `package.json` (root)         | Script writes to `version` field                        |
 | `packages/types/package.json` | Script writes to `version` field                        |
 | `src-tauri/tauri.conf.json`   | Script writes to `version` field                        |
 | `src-tauri/Cargo.toml`        | Script regex replaces `version = "..."`                 |
@@ -18,11 +17,10 @@ The version number in `sidecar/package.json` is the single source of truth (a wo
 
 Runtime version numbers are obtained via build-time injection:
 
-| Location                                            | Injection Method                           |
-| --------------------------------------------------- | ------------------------------------------ |
-| `sidecar/src/mcp/gateway.ts`                        | esbuild `define` → `APP_VERSION` constant  |
-| `sidecar/src/services/server-manager.ts` (2 places) | esbuild `define` → `APP_VERSION` constant  |
-| `src/components/layout/Sidebar.tsx`                 | Vite `define` → `__APP_VERSION__` constant |
+| Location                            | Injection Method                           |
+| ----------------------------------- | ------------------------------------------ |
+| `src/components/layout/Sidebar.tsx` | Vite `define` → `__APP_VERSION__` constant |
+| `src/pages/Settings.tsx`            | Vite `define` → `__APP_VERSION__` constant |
 
 ## Daily Development Workflow
 
@@ -79,8 +77,8 @@ pnpm release:exit
 
 `scripts/sync-version.mjs` is responsible for version synchronization:
 
-- Reads the `version` from `sidecar/package.json` as the source of truth.
-- Syncs to root `package.json`, `tauri.conf.json`, `Cargo.toml`.
+- Reads the `version` from root `package.json` as the source of truth.
+- Syncs to `packages/types/package.json`, `tauri.conf.json`, `Cargo.toml`, and `Cargo.lock`.
 - `--check` mode: only verifies consistency, does not write (used in CI).
 
 ### Build-time Auto-sync
@@ -101,7 +99,7 @@ The GitHub Actions Release workflow executes `node scripts/sync-version.mjs --ch
 
 ### Changesets Config (`.changeset/config.json`)
 
-- **Version sync**: Via `sync-version.mjs`, sync `sidecar/package.json` version number to root `package.json`, `tauri.conf.json`, `Cargo.toml`.
+- **Version sync**: Via `sync-version.mjs`, sync root `package.json` version number to `packages/types/package.json`, `tauri.conf.json`, `Cargo.toml`, and `Cargo.lock`.
 - **No npm publish**: `privatePackages: { version: true, tag: false }`
 - **No auto commit**: `commit: false` (controlled by release script)
 

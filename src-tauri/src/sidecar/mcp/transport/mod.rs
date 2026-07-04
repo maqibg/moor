@@ -6,7 +6,7 @@ pub mod streamable_http_server;
 use std::time::Duration;
 
 pub(crate) fn format_timeout_duration(timeout: Duration) -> String {
-    if timeout.as_millis() % 1000 == 0 {
+    if timeout.as_millis().is_multiple_of(1000) {
         format!("{}s", timeout.as_secs())
     } else {
         format!("{}ms", timeout.as_millis())

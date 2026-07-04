@@ -17,6 +17,7 @@ mod login_autostart;
 mod sidecar;
 
 const LEGACY_BUNDLE_IDENTIFIER: &str = "dev.moor.app";
+const AUTOSTART_ARG: &str = "--moor-autostart";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,6 +56,7 @@ struct MoorInner {
     api_token: String,
     db: Arc<sidecar::db::Database>,
     minimize_to_tray: AtomicBool,
+    hide_dock_icon_on_close: AtomicBool,
 }
 
 impl MoorState {
@@ -72,6 +74,16 @@ impl MoorState {
 
     fn set_minimize_to_tray(&self, value: bool) {
         self.inner.minimize_to_tray.store(value, Ordering::SeqCst);
+    }
+
+    fn get_hide_dock_icon_on_close(&self) -> bool {
+        self.inner.hide_dock_icon_on_close.load(Ordering::SeqCst)
+    }
+
+    fn set_hide_dock_icon_on_close(&self, value: bool) {
+        self.inner
+            .hide_dock_icon_on_close
+            .store(value, Ordering::SeqCst);
     }
 }
 
@@ -96,13 +108,25 @@ fn apply_autostart_setting(app: &tauri::AppHandle, enabled: bool) -> Result<(), 
     }
 }
 
+fn show_main_window(app: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    let _ = app.set_dock_visibility(true);
+
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 fn sync_runtime_settings_from_db(
     state: &MoorState,
     db: &sidecar::db::Database,
 ) -> Result<(), String> {
     let settings = sidecar::services::settings::get_settings(db)?;
     let minimize_to_tray = settings.general.minimize_to_tray_on_close;
+    let hide_dock_icon_on_close = settings.general.hide_dock_icon_on_close;
     state.set_minimize_to_tray(minimize_to_tray);
+    state.set_hide_dock_icon_on_close(hide_dock_icon_on_close);
     Ok(())
 }
 
@@ -114,11 +138,6 @@ fn sync_runtime_settings(state: State<'_, MoorState>) -> Result<(), String> {
 #[tauri::command]
 fn apply_login_autostart_setting(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     apply_autostart_setting(&app, enabled)
-}
-
-#[tauri::command]
-fn restart_sidecar() -> Result<(), String> {
-    Err("The Rust sidecar runs in-process. Restart Moor to apply runtime port changes.".to_string())
 }
 
 fn find_available_port(host: &str, start: u16, max: u16) -> Result<u16, String> {
@@ -161,14 +180,19 @@ fn migrate_legacy_data_dir(data_dir: &PathBuf, legacy_data_dir: Option<&PathBuf>
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if args.iter().any(|arg| arg == AUTOSTART_ARG) {
+                return;
+            }
+            show_main_window(app);
+        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec![]),
+            Some(vec![AUTOSTART_ARG]),
         ))
         .invoke_handler(tauri::generate_handler![
             get_sidecar_info,
-            restart_sidecar,
             sync_runtime_settings,
             apply_login_autostart_setting,
         ])
@@ -199,6 +223,7 @@ pub fn run() {
                 .map_err(|e| format!("Failed to initialize settings: {e}"))?;
             let configured_port = settings.advanced.sidecar_port;
             let minimize_to_tray = settings.general.minimize_to_tray_on_close;
+            let hide_dock_icon_on_close = settings.general.hide_dock_icon_on_close;
             let show_window_on_launch = settings.general.show_window_on_launch;
             let should_show_window =
                 should_show_main_window_on_launch(minimize_to_tray, show_window_on_launch);
@@ -235,14 +260,14 @@ pub fn run() {
                 db_arc.clone(),
                 event_bus.clone(),
             ));
-            let app_state = Arc::new(sidecar::http::AppState {
-                db: db_arc.clone(),
-                api_token: api_token.clone(),
-                version: env!("CARGO_PKG_VERSION").to_string(),
+            let app_state = Arc::new(sidecar::http::AppState::new(
+                db_arc.clone(),
+                api_token.clone(),
+                env!("CARGO_PKG_VERSION").to_string(),
                 port,
-                event_bus: event_bus.clone(),
-                server_manager: server_manager.clone(),
-            });
+                event_bus.clone(),
+                server_manager.clone(),
+            ));
 
             let state = MoorState {
                 inner: Arc::new(MoorInner {
@@ -250,6 +275,7 @@ pub fn run() {
                     api_token,
                     db: db_arc.clone(),
                     minimize_to_tray: AtomicBool::new(minimize_to_tray),
+                    hide_dock_icon_on_close: AtomicBool::new(hide_dock_icon_on_close),
                 }),
             };
             app.manage(state);
@@ -288,10 +314,7 @@ pub fn run() {
                             app.exit(0);
                         }
                         "show" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
+                            show_main_window(app);
                         }
                         _ => {}
                     });
@@ -313,10 +336,10 @@ pub fn run() {
             };
 
             if should_show_window {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                show_main_window(app.handle());
+            } else if minimize_to_tray && hide_dock_icon_on_close {
+                #[cfg(target_os = "macos")]
+                let _ = app.handle().set_dock_visibility(false);
             }
 
             Ok(())
@@ -326,6 +349,13 @@ pub fn run() {
         .run(|app_handle, event| match event {
             RunEvent::Exit | RunEvent::ExitRequested { .. } => {
                 // Server will be dropped automatically when the process exits
+            }
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen {
+                has_visible_windows: false,
+                ..
+            } => {
+                show_main_window(app_handle);
             }
             RunEvent::WindowEvent {
                 event: tauri::WindowEvent::CloseRequested { api, .. },
@@ -337,6 +367,10 @@ pub fn run() {
                     api.prevent_close();
                     if let Some(window) = app_handle.get_webview_window("main") {
                         let _ = window.hide();
+                    }
+                    if state.get_hide_dock_icon_on_close() {
+                        #[cfg(target_os = "macos")]
+                        let _ = app_handle.set_dock_visibility(false);
                     }
                 }
             }
@@ -383,6 +417,7 @@ mod tests {
                         .expect("failed to open temp db"),
                 ),
                 minimize_to_tray: AtomicBool::new(true),
+                hide_dock_icon_on_close: AtomicBool::new(false),
             }),
         };
         state.set_minimize_to_tray(false);
@@ -420,6 +455,7 @@ mod tests {
                 api_token: "token".to_string(),
                 db: Arc::new(db),
                 minimize_to_tray: AtomicBool::new(true),
+                hide_dock_icon_on_close: AtomicBool::new(false),
             }),
         };
 
@@ -431,6 +467,7 @@ mod tests {
                 .general
                 .minimize_to_tray_on_close
         );
+        drop(state);
         fs::remove_dir_all(data_dir).expect("failed to remove temp settings dir");
     }
 

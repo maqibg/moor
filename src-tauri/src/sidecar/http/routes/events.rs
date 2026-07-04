@@ -27,8 +27,10 @@ async fn events(
     });
 
     let event_stream = stream.filter_map(|result| match result {
-        Ok((event_type, data)) => {
-            let event = Event::default().event(&event_type).data(data.to_string());
+        Ok(evt) => {
+            let event = Event::default()
+                .event(evt.name())
+                .data(evt.payload().to_string());
             Some(Ok(event))
         }
         Err(_) => None,
@@ -46,10 +48,6 @@ async fn events(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sidecar::db::Database;
-    use crate::sidecar::services::event_bus::EventBus;
-    use crate::sidecar::services::server_manager::ServerManager;
-    use std::sync::Arc;
     use std::time::SystemTime;
 
     fn temp_data_dir(test_name: &str) -> std::path::PathBuf {
@@ -61,19 +59,7 @@ mod tests {
     }
 
     fn test_state(data_dir: std::path::PathBuf) -> Arc<AppState> {
-        std::fs::create_dir_all(&data_dir).expect("failed to create temp data dir");
-        let db = Arc::new(Database::open(&data_dir.join("moor.db")).expect("failed to open db"));
-        db.run_migrations().expect("failed to run migrations");
-        let event_bus = Arc::new(EventBus::new(16));
-
-        Arc::new(AppState {
-            db: db.clone(),
-            api_token: "test-token".to_string(),
-            version: "test".to_string(),
-            port: 19323,
-            event_bus: event_bus.clone(),
-            server_manager: Arc::new(ServerManager::new(db, event_bus)),
-        })
+        AppState::for_test(&data_dir)
     }
 
     #[tokio::test]
