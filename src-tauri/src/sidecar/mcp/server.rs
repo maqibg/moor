@@ -3,6 +3,37 @@ use crate::sidecar::http::AppState;
 use crate::sidecar::services::audit_recorder::{AuditRecorder, ToolCallRecord};
 use std::sync::Arc;
 
+pub const LEGACY_PROTOCOL_VERSION: &str = "2024-11-05";
+pub const LATEST_PROTOCOL_VERSION: &str = "2025-11-25";
+const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &[
+    LEGACY_PROTOCOL_VERSION,
+    "2025-03-26",
+    "2025-06-18",
+    LATEST_PROTOCOL_VERSION,
+];
+
+pub fn is_supported_protocol_version(version: &str) -> bool {
+    SUPPORTED_PROTOCOL_VERSIONS.contains(&version)
+}
+
+pub fn negotiated_protocol_version(params: Option<&serde_json::Value>) -> &'static str {
+    let requested = params
+        .and_then(|value| value.get("protocolVersion"))
+        .and_then(|value| value.as_str());
+    match requested {
+        Some(version) => SUPPORTED_PROTOCOL_VERSIONS
+            .iter()
+            .copied()
+            .find(|supported| *supported == version)
+            .unwrap_or(LATEST_PROTOCOL_VERSION),
+        None => LEGACY_PROTOCOL_VERSION,
+    }
+}
+
+pub fn protocol_uses_sessions(version: &str) -> bool {
+    version != LEGACY_PROTOCOL_VERSION
+}
+
 /// Handle an incoming MCP JSON-RPC request and produce a response.
 /// This implements the MCP Gateway: aggregates tools from all running servers
 /// and routes tool calls to the correct server.
@@ -14,7 +45,7 @@ pub async fn handle_request(
     agent_info: Option<&str>,
 ) -> serde_json::Value {
     match method {
-        "initialize" => handle_initialize(id),
+        "initialize" => handle_initialize(id, params.as_ref()),
         "tools/list" => handle_tools_list(id, state).await,
         "tools/call" => handle_tools_call(id, params, state, agent_info).await,
         "ping" => jsonrpc::make_response(id, serde_json::json!({})),
@@ -26,11 +57,12 @@ pub async fn handle_request(
     }
 }
 
-fn handle_initialize(id: jsonrpc::Id) -> serde_json::Value {
+fn handle_initialize(id: jsonrpc::Id, params: Option<&serde_json::Value>) -> serde_json::Value {
+    let protocol_version = negotiated_protocol_version(params);
     jsonrpc::make_response(
         id,
         serde_json::json!({
-            "protocolVersion": "2024-11-05",
+            "protocolVersion": protocol_version,
             "capabilities": { "tools": { "listChanged": true } },
             "serverInfo": { "name": "Moor", "version": env!("CARGO_PKG_VERSION") },
         }),
@@ -151,6 +183,25 @@ mod tests {
     use std::sync::Arc;
     use std::time::SystemTime;
 
+    #[test]
+    fn negotiates_supported_and_fallback_protocol_versions() {
+        assert_eq!(
+            negotiated_protocol_version(Some(&serde_json::json!({
+                "protocolVersion": "2025-06-18"
+            }))),
+            "2025-06-18"
+        );
+        assert_eq!(
+            negotiated_protocol_version(Some(&serde_json::json!({
+                "protocolVersion": "2099-01-01"
+            }))),
+            LATEST_PROTOCOL_VERSION
+        );
+        assert_eq!(negotiated_protocol_version(None), LEGACY_PROTOCOL_VERSION);
+        assert!(!protocol_uses_sessions(LEGACY_PROTOCOL_VERSION));
+        assert!(protocol_uses_sessions(LATEST_PROTOCOL_VERSION));
+    }
+
     fn temp_data_dir(test_name: &str) -> std::path::PathBuf {
         let timestamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -240,6 +291,9 @@ process.stdin.on("data", (chunk) => {
             api_token: "test-token".to_string(),
             version: "test".to_string(),
             port: 19323,
+            mcp_sessions: Arc::new(
+                crate::sidecar::mcp::transport::mcp_session::McpSessionStore::new(),
+            ),
             event_bus,
             server_manager,
         });

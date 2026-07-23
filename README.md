@@ -116,7 +116,7 @@ Point any MCP-compatible client to Moor's single endpoint:
 http://127.0.0.1:9223/mcp
 ```
 
-`9223` is the default gateway port. If it is already in use, Moor picks the next available port and shows the actual endpoint in the Dashboard and Client Config pages.
+`9223` is the default gateway port. If it is already in use, Moor picks the next available port, saves that port for future launches, and shows a warning with the actual endpoint. Update existing MCP client configs when this happens.
 
 The `/mcp` endpoint is loopback-only and does not require `X-Moor-Token`. Moor uses `X-Moor-Token` only for local management APIs between the WebView and gateway, so you do not need to paste it into agent configs.
 
@@ -280,9 +280,11 @@ vp test
 
 ### MCP Gateway
 
-| Method | Path   | Description                             |
-| ------ | ------ | --------------------------------------- |
-| `ALL`  | `/mcp` | MCP protocol endpoint (Streamable HTTP) |
+| Method   | Path   | Description                                      |
+| -------- | ------ | ------------------------------------------------ |
+| `POST`   | `/mcp` | Send MCP JSON-RPC requests and notifications     |
+| `GET`    | `/mcp` | Open the Streamable HTTP SSE notification stream |
+| `DELETE` | `/mcp` | Terminate an MCP session                         |
 
 ### Server Management
 

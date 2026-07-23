@@ -120,7 +120,7 @@ Apunta cualquier cliente compatible con MCP al único endpoint de Moor:
 http://127.0.0.1:9223/mcp
 ```
 
-`9223` es el puerto sidecar por defecto. Si ya está en uso, Moor elige el siguiente puerto disponible y muestra el endpoint real en el Dashboard y las páginas de Client Config.
+`9223` es el puerto sidecar por defecto. Si ya está en uso, Moor elige el siguiente puerto disponible, lo guarda para futuros inicios y muestra una advertencia con el endpoint real. Cuando esto ocurra, actualiza las configuraciones MCP existentes.
 
 El endpoint `/mcp` es solo para loopback y no requiere `X-Moor-Token`. Moor usa `X-Moor-Token` solo para APIs de gestión local entre el WebView y el sidecar, por lo que no necesitas pegarlo en las configuraciones del agente.
 
@@ -292,9 +292,11 @@ vp test
 
 ### Gateway MCP
 
-| Método | Ruta   | Descripción                                 |
-| ------ | ------ | ------------------------------------------- |
-| `ALL`  | `/mcp` | Endpoint de protocolo MCP (Streamable HTTP) |
+| Método   | Ruta   | Descripción                                     |
+| -------- | ------ | ----------------------------------------------- |
+| `POST`   | `/mcp` | Envía solicitudes y notificaciones MCP JSON-RPC |
+| `GET`    | `/mcp` | Abre el flujo SSE de Streamable HTTP            |
+| `DELETE` | `/mcp` | Finaliza una sesión MCP                         |
 
 ### Gestión de servidores
 

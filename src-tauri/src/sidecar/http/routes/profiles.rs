@@ -128,6 +128,7 @@ async fn upsert_profile_server(
 ) -> Result<Json<Value>, AppError> {
     let result = ProfileService::upsert_profile_server(
         &state.db,
+        &state.event_bus,
         &profile_id,
         &server_id,
         body.enabled,

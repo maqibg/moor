@@ -17,6 +17,7 @@ function runtime(port: number, apiToken: string): SidecarInfo {
     port,
     baseUrl: `http://127.0.0.1:${port}`,
     apiToken,
+    portFallbackFrom: null,
   };
 }
 

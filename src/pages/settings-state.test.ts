@@ -13,6 +13,7 @@ const runtimeInfo = (port: number): SidecarInfo => ({
   port,
   baseUrl: `http://127.0.0.1:${port}`,
   apiToken: "token",
+  portFallbackFrom: null,
 });
 
 describe("settings page state helpers", () => {
@@ -30,26 +31,36 @@ describe("settings page state helpers", () => {
     });
   });
 
-  it("does not show a page banner for automatic runtime port fallback", () => {
+  it("shows a page banner for a persisted automatic runtime port fallback", () => {
     expect(
       getPortBannerState({
-        runtimeInfo: runtimeInfo(9224),
-        configuredPort: 9223,
+        runtimeInfo: {
+          ...runtimeInfo(9224),
+          portFallbackFrom: 9223,
+        },
+        configuredPort: 9224,
         portChangeApplied: false,
       }),
-    ).toBeNull();
+    ).toEqual({
+      kind: "fallback",
+      previousPort: 9223,
+      currentPort: 9224,
+    });
   });
 
   it("shows automatic runtime port fallback as an advanced inline status", () => {
     expect(
       getAdvancedPortStatus({
-        runtimeInfo: runtimeInfo(9224),
-        configuredPort: 9223,
+        runtimeInfo: {
+          ...runtimeInfo(9224),
+          portFallbackFrom: 9223,
+        },
+        configuredPort: 9224,
       }),
     ).toEqual({
-      kind: "mismatch",
+      kind: "fallback",
+      previousPort: 9223,
       currentPort: 9224,
-      configuredPort: 9223,
     });
   });
 

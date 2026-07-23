@@ -255,5 +255,9 @@
   "request timeout": "请求超时",
   "server start timeout": "服务器启动超时",
   "Failed to update request timeout": "更新请求超时失败",
-  "Failed to update server start timeout": "更新服务器启动超时失败"
+  "Failed to update server start timeout": "更新服务器启动超时失败",
+  "Moor changed the MCP gateway port": "Moor 已更改 MCP 网关端口",
+  "Port {{previousPort}} was unavailable. Moor switched to {{currentPort}} and saved the new port for future launches. Update your MCP client configuration.": "端口 {{previousPort}} 不可用。Moor 已切换到 {{currentPort}} 并保存为后续启动端口，请更新 MCP 客户端配置。",
+  "The gateway moved from port {{previousPort}} to {{currentPort}}.": "网关已从端口 {{previousPort}} 移至 {{currentPort}}。",
+  "Port {{previousPort}} was unavailable; update clients to use port {{currentPort}}.": "端口 {{previousPort}} 不可用；请将客户端更新为使用端口 {{currentPort}}。"
 }

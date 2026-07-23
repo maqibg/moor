@@ -13,6 +13,7 @@ pub struct ProfileService;
 
 /// profile 操作可能产生的领域错误。与 ServerServiceError 对齐,
 /// 让路由层能把 NotFound 等映射到正确的 HTTP 状态码。
+#[derive(Debug)]
 pub enum ProfileServiceError {
     NotFound(String),
     Validation(String),
@@ -123,14 +124,25 @@ impl ProfileService {
 
     pub fn upsert_profile_server(
         db: &Database,
+        event_bus: &Arc<EventBus>,
         profile_id: &str,
         server_id: &str,
         enabled: Option<bool>,
         disabled_tools: Option<&Vec<String>>,
     ) -> Result<ProfileServerState, ProfileServiceError> {
-        ProfileRepository::new(db)
+        let repo = ProfileRepository::new(db);
+        let state = repo
             .upsert_profile_server(profile_id, server_id, enabled, disabled_tools)
-            .map_err(ProfileServiceError::Internal)
+            .map_err(ProfileServiceError::Internal)?;
+        let active_profile_id = repo
+            .find_active_id()
+            .map_err(ProfileServiceError::Internal)?;
+        if active_profile_id.as_deref() == Some(profile_id) {
+            event_bus.emit(Evt::ServerTools {
+                server_id: server_id.to_string(),
+            });
+        }
+        Ok(state)
     }
 }
 
@@ -138,6 +150,15 @@ impl ProfileService {
 mod tests {
     use super::*;
     use axum::http::StatusCode;
+    use std::time::SystemTime;
+
+    fn temp_db_path(test_name: &str) -> std::path::PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("system time is before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("moor-profile-service-{test_name}-{timestamp}.db"))
+    }
 
     #[test]
     fn validation_error_maps_to_bad_request() {
@@ -146,5 +167,61 @@ mod tests {
 
         assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
         assert_eq!(err.code(), "VALIDATION_ERROR");
+    }
+
+    #[test]
+    fn active_profile_tool_changes_emit_catalog_event() {
+        let db_path = temp_db_path("catalog-event");
+        let db = Database::open(&db_path).expect("failed to open db");
+        db.run_migrations().expect("failed to migrate db");
+        let profile_repo = ProfileRepository::new(&db);
+        profile_repo.seed_default().expect("failed to seed profile");
+        let profile_id = profile_repo
+            .find_active_id()
+            .expect("failed to read active profile")
+            .expect("active profile should exist");
+        let server_id = "server-a";
+        crate::sidecar::db::server_repo::ServerRepository::new(&db)
+            .insert_one_with_id(
+                server_id,
+                0,
+                &crate::sidecar::db::server_repo::ServerInsertInput {
+                    name: "Server A".to_string(),
+                    connection_type: "stdio".to_string(),
+                    command: Some("node".to_string()),
+                    args: None,
+                    url: None,
+                    env: None,
+                    headers: None,
+                    working_dir: None,
+                    auto_start: false,
+                },
+            )
+            .expect("failed to insert server");
+        profile_repo
+            .assign_to_active_profile(&[server_id.to_string()])
+            .expect("failed to assign server");
+
+        let event_bus = Arc::new(EventBus::new(4));
+        let mut receiver = event_bus.subscribe();
+        ProfileService::upsert_profile_server(
+            &db,
+            &event_bus,
+            &profile_id,
+            server_id,
+            Some(false),
+            None,
+        )
+        .expect("profile server update should succeed");
+
+        match receiver
+            .try_recv()
+            .expect("catalog event should be emitted")
+        {
+            Evt::ServerTools { server_id: emitted } => assert_eq!(emitted, server_id),
+            event => panic!("unexpected event: {}", event.name()),
+        }
+        drop(db);
+        let _ = std::fs::remove_file(db_path);
     }
 }

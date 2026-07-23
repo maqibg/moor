@@ -66,6 +66,32 @@ function RestartBanner() {
   );
 }
 
+function PortFallbackBanner({
+  previousPort,
+  currentPort,
+}: {
+  previousPort: number;
+  currentPort: number;
+}) {
+  const { t } = useI18n();
+  const description = t(
+    "Port {{previousPort}} was unavailable. Moor switched to {{currentPort}} and saved the new port for future launches. Update your MCP client configuration.",
+    { previousPort: String(previousPort), currentPort: String(currentPort) },
+  );
+
+  return (
+    <div className="flex items-start gap-3 bg-cursor-orange/10 border border-cursor-orange/20 rounded-xl px-4 py-3">
+      <AlertTriangle className="h-4 w-4 text-cursor-orange shrink-0 mt-0.5" />
+      <div className="min-w-0 space-y-0.5">
+        <p className="font-headline text-sm text-cursor-dark">
+          {t("Moor changed the MCP gateway port")}
+        </p>
+        <p className="font-body text-xs text-[var(--fg-55)]">{description}</p>
+      </div>
+    </div>
+  );
+}
+
 // --- Group Nav Item ---
 
 interface GroupNavItemProps {
@@ -475,9 +501,21 @@ function AdvancedSection({
             </SettingRow>
             {portStatus?.kind === "mismatch" && (
               <p className="px-4 pb-3 -mt-1 font-body text-xs text-[var(--fg-45)]">
-                Currently running on port {portStatus.currentPort}; configured for port{" "}
-                {portStatus.configuredPort}. The configured port may already be used by another Moor
-                instance.
+                {t(
+                  "Currently running on port {{currentPort}}; configured for port {{configuredPort}}. The configured port may already be used by another Moor instance.",
+                  {
+                    currentPort: String(portStatus.currentPort),
+                    configuredPort: String(portStatus.configuredPort),
+                  },
+                )}
+              </p>
+            )}
+            {portStatus?.kind === "fallback" && (
+              <p className="px-4 pb-3 -mt-1 font-body text-xs text-[var(--fg-45)]">
+                {t("The gateway moved from port {{previousPort}} to {{currentPort}}.", {
+                  previousPort: String(portStatus.previousPort),
+                  currentPort: String(portStatus.currentPort),
+                })}
               </p>
             )}
           </div>
@@ -606,6 +644,12 @@ export function SettingsPage() {
 
       {loadState.kind === "error" && <ErrorBanner message={loadState.message} />}
       {portBannerState?.kind === "restart" && <RestartBanner />}
+      {portBannerState?.kind === "fallback" && (
+        <PortFallbackBanner
+          previousPort={portBannerState.previousPort}
+          currentPort={portBannerState.currentPort}
+        />
+      )}
       {errorMessage && <ErrorBanner message={errorMessage} />}
 
       {loadState.canRenderControls && (

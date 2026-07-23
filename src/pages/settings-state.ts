@@ -10,9 +10,21 @@ export type SettingsPageLoadState =
   | { kind: "error"; canRenderControls: false; message: string }
   | { kind: "ready"; canRenderControls: true };
 
-export type PortBannerState = { kind: "restart" };
+export type PortBannerState =
+  | { kind: "restart" }
+  | {
+      kind: "fallback";
+      previousPort: number;
+      currentPort: number;
+    };
 
-export type AdvancedPortStatus = { kind: "mismatch"; currentPort: number; configuredPort: number };
+export type AdvancedPortStatus =
+  | { kind: "mismatch"; currentPort: number; configuredPort: number }
+  | {
+      kind: "fallback";
+      previousPort: number;
+      currentPort: number;
+    };
 
 export type GeneralSettingRuntimeAction = "loginAutostart" | "settingsOnly" | "windowRuntime";
 
@@ -55,10 +67,20 @@ export function getPortBannerState({
   configuredPort: number;
   portChangeApplied: boolean;
 }): PortBannerState | null {
-  if (!runtimeInfo || runtimeInfo.port === configuredPort) {
+  if (!runtimeInfo) {
     return null;
   }
-  return portChangeApplied ? { kind: "restart" } : null;
+  if (portChangeApplied && runtimeInfo.port !== configuredPort) {
+    return { kind: "restart" };
+  }
+  if (runtimeInfo.portFallbackFrom !== null) {
+    return {
+      kind: "fallback",
+      previousPort: runtimeInfo.portFallbackFrom,
+      currentPort: runtimeInfo.port,
+    };
+  }
+  return null;
 }
 
 export function getAdvancedPortStatus({
@@ -68,9 +90,17 @@ export function getAdvancedPortStatus({
   runtimeInfo: SidecarInfo | null;
   configuredPort: number;
 }): AdvancedPortStatus | null {
-  if (!runtimeInfo || runtimeInfo.port === configuredPort) {
+  if (!runtimeInfo) {
     return null;
   }
+  if (runtimeInfo.portFallbackFrom !== null) {
+    return {
+      kind: "fallback",
+      previousPort: runtimeInfo.portFallbackFrom,
+      currentPort: runtimeInfo.port,
+    };
+  }
+  if (runtimeInfo.port === configuredPort) return null;
   return { kind: "mismatch", currentPort: runtimeInfo.port, configuredPort };
 }
 

@@ -116,7 +116,7 @@ Profile 让你按场景分组 Server，并控制哪些工具暴露给 Agent：
 http://127.0.0.1:9223/mcp
 ```
 
-`9223` 是默认的 Sidecar 端口。如果该端口已被占用，Moor 会自动选择下一个可用端口，并在 Dashboard 和 Client Config 页面显示实际端点。
+`9223` 是默认的 Sidecar 端口。如果该端口已被占用，Moor 会自动选择下一个可用端口、保存为后续启动端口，并显示包含实际端点的警告。发生这种情况时，需要更新已有 MCP 客户端配置。
 
 `/mcp` 端点仅限本地回环访问，不需要 `X-Moor-Token`。Moor 仅在 WebView 与 Sidecar 之间的本地管理 API 中使用 `X-Moor-Token`，因此你无需将它粘贴到 Agent 配置中。
 
@@ -286,9 +286,11 @@ vp test
 
 ### MCP 网关
 
-| 方法  | 路径   | 说明                            |
-| ----- | ------ | ------------------------------- |
-| `ALL` | `/mcp` | MCP 协议端点（Streamable HTTP） |
+| 方法     | 路径   | 说明                            |
+| -------- | ------ | ------------------------------- |
+| `POST`   | `/mcp` | 发送 MCP JSON-RPC 请求和通知    |
+| `GET`    | `/mcp` | 打开 Streamable HTTP SSE 通知流 |
+| `DELETE` | `/mcp` | 终止 MCP Session                |
 
 ### Server 管理
 

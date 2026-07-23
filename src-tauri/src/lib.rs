@@ -25,6 +25,7 @@ struct SidecarInfo {
     port: u16,
     base_url: String,
     api_token: String,
+    port_fallback_from: Option<u16>,
 }
 
 fn should_show_main_window_on_launch(
@@ -55,6 +56,7 @@ struct MoorInner {
     port: u16,
     api_token: String,
     db: Arc<sidecar::db::Database>,
+    port_fallback_from: Option<u16>,
     minimize_to_tray: AtomicBool,
     hide_dock_icon_on_close: AtomicBool,
 }
@@ -65,6 +67,7 @@ impl MoorState {
             port: self.inner.port,
             base_url: format!("http://127.0.0.1:{}", self.inner.port),
             api_token: self.inner.api_token.clone(),
+            port_fallback_from: self.inner.port_fallback_from,
         }
     }
 
@@ -147,6 +150,22 @@ fn find_available_port(host: &str, start: u16, max: u16) -> Result<u16, String> 
         }
     }
     Err(format!("No available port in range {start}-{max}"))
+}
+
+fn persist_fallback_port(
+    db: &sidecar::db::Database,
+    configured_port: u16,
+    actual_port: u16,
+) -> Result<(), String> {
+    if configured_port == actual_port {
+        return Ok(());
+    }
+    sidecar::services::settings::update_settings(
+        db,
+        serde_json::json!({ "advanced": { "sidecarPort": actual_port } }),
+    )
+    .map_err(|error| format!("Failed to persist fallback port {actual_port}: {error}"))?;
+    Ok(())
 }
 
 fn migrate_legacy_data_dir(data_dir: &PathBuf, legacy_data_dir: Option<&PathBuf>) {
@@ -246,6 +265,8 @@ pub fn run() {
             let max_port = configured_port.saturating_add(10);
             let port = find_available_port("127.0.0.1", configured_port, max_port)
                 .map_err(|e| format!("Failed to find available port: {e}"))?;
+            let port_fallback_from = (port != configured_port).then_some(configured_port);
+            persist_fallback_port(&db, configured_port, port)?;
 
             // Write port file for external tool discovery
             let port_file = data_dir.join("port");
@@ -268,12 +289,19 @@ pub fn run() {
                 event_bus.clone(),
                 server_manager.clone(),
             ));
+            tauri::async_runtime::spawn(
+                sidecar::mcp::transport::mcp_session::forward_tool_list_changes(
+                    event_bus.subscribe(),
+                    app_state.mcp_sessions.clone(),
+                ),
+            );
 
             let state = MoorState {
                 inner: Arc::new(MoorInner {
                     port,
                     api_token,
                     db: db_arc.clone(),
+                    port_fallback_from,
                     minimize_to_tray: AtomicBool::new(minimize_to_tray),
                     hide_dock_icon_on_close: AtomicBool::new(hide_dock_icon_on_close),
                 }),
@@ -416,6 +444,7 @@ mod tests {
                     sidecar::db::Database::open(std::path::Path::new(":memory:"))
                         .expect("failed to open temp db"),
                 ),
+                port_fallback_from: None,
                 minimize_to_tray: AtomicBool::new(true),
                 hide_dock_icon_on_close: AtomicBool::new(false),
             }),
@@ -454,6 +483,7 @@ mod tests {
                 port: 9223,
                 api_token: "token".to_string(),
                 db: Arc::new(db),
+                port_fallback_from: None,
                 minimize_to_tray: AtomicBool::new(true),
                 hide_dock_icon_on_close: AtomicBool::new(false),
             }),
@@ -486,5 +516,28 @@ mod tests {
     fn finds_available_port() {
         let port = find_available_port("127.0.0.1", 19223, 19233).unwrap();
         assert!((19223..=19233).contains(&port));
+    }
+
+    #[test]
+    fn persists_selected_fallback_port_for_future_launches() {
+        let data_dir = temp_data_dir("fallback-port");
+        fs::create_dir_all(&data_dir).expect("failed to create temp settings dir");
+        let db = sidecar::db::Database::open(&data_dir.join("moor.db"))
+            .expect("failed to open settings db");
+        db.run_migrations().expect("failed to migrate settings db");
+        sidecar::services::settings::init_settings(&db, &data_dir)
+            .expect("settings should initialize");
+
+        persist_fallback_port(&db, 9223, 9224).expect("fallback should persist");
+        assert_eq!(
+            sidecar::services::settings::get_settings(&db)
+                .expect("settings should load")
+                .advanced
+                .sidecar_port,
+            9224
+        );
+        persist_fallback_port(&db, 9224, 9224).expect("matching port is a no-op");
+        drop(db);
+        fs::remove_dir_all(data_dir).expect("failed to remove temp settings dir");
     }
 }

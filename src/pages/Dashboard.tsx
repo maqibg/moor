@@ -6,11 +6,7 @@ import { useServerList } from "@/hooks/useServers";
 import { useProfiles } from "@/hooks/useProfiles";
 import { useLogs } from "@/hooks/useLogs";
 import { getApiRuntime } from "@/lib/api/runtime";
-
-async function getMcpEndpoint(): Promise<string> {
-  const runtime = await getApiRuntime();
-  return `${runtime.baseUrl}/mcp`;
-}
+import type { SidecarInfo } from "@moor/types";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { StatCard } from "@/components/shared/StatCard";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -36,10 +32,11 @@ export function Dashboard() {
   const { servers } = useServerList();
   const { profiles } = useProfiles();
   const { logs } = useLogs();
-  const [mcpEndpoint, setMcpEndpoint] = useState("http://127.0.0.1:9223/mcp");
+  const [runtimeInfo, setRuntimeInfo] = useState<SidecarInfo | null>(null);
+  const mcpEndpoint = `${runtimeInfo?.baseUrl ?? "http://127.0.0.1:9223"}/mcp`;
 
   useEffect(() => {
-    void getMcpEndpoint().then(setMcpEndpoint);
+    void getApiRuntime().then(setRuntimeInfo);
   }, []);
 
   const running = servers.filter((s) => s.status === "running").length;
@@ -75,6 +72,17 @@ export function Dashboard() {
               <div className="flex items-center gap-2 bg-surface-100 border border-[var(--fg-08)] rounded-lg px-3 py-1.5 font-mono text-xs text-[var(--fg-55)] w-fit">
                 {mcpEndpoint}
               </div>
+              {runtimeInfo && runtimeInfo.portFallbackFrom !== null && (
+                <p className="mt-1.5 font-body text-xs text-cursor-orange">
+                  {t(
+                    "Port {{previousPort}} was unavailable; update clients to use port {{currentPort}}.",
+                    {
+                      previousPort: String(runtimeInfo.portFallbackFrom),
+                      currentPort: String(runtimeInfo.port),
+                    },
+                  )}
+                </p>
+              )}
             </div>
           </div>
           <CopyButton text={mcpEndpoint} />

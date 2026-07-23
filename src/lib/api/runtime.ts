@@ -5,6 +5,7 @@ const defaultRuntime = (): SidecarInfo => ({
   port: 9223,
   baseUrl: import.meta.env.VITE_MOOR_API_URL ?? "http://127.0.0.1:9223",
   apiToken: import.meta.env.VITE_MOOR_API_TOKEN ?? "dev-token",
+  portFallbackFrom: null,
 });
 
 async function getRuntimeInfo(): Promise<SidecarInfo> {
