@@ -1394,7 +1394,10 @@ process.stdin.on("data", (chunk) => {{
         .expect("server start should return before the outer timeout");
         let err = result.expect_err("slow first start should fail");
 
-        assert!(err.contains("Server start timed out after 5s"));
+        assert!(
+            err.contains("timed out after 5s"),
+            "unexpected start timeout error: {err}"
+        );
         let runtime = manager
             .get_server(&server_id)
             .await
