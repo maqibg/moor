@@ -104,6 +104,9 @@ jobs:
       - name: Test frontend
         run: pnpm run test
 
+      - name: Build frontend
+        run: pnpm run build:frontend
+
       - name: Extract changelog for release
         id: changelog
         shell: bash
