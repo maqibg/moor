@@ -8,6 +8,8 @@
     "dev": "vp dev",
     "build": "pnpm build:frontend",
     "build:frontend": "tsc -b && vp build",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vp test run",
     "preview": "vp preview",
     "tauri": "tauri",
     "lint": "vp lint src",

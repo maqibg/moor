@@ -1,7 +1,11 @@
 use crate::sidecar::db::{settings_repo, Database};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::Path,
+    sync::{Arc, RwLock},
+};
 
 const SETTINGS_FILE: &str = "settings.json";
 pub const MCP_TIMEOUT_MS_MIN: u32 = 5_000;
@@ -56,6 +60,27 @@ pub struct Settings {
     pub general: GeneralSettings,
     pub appearance: AppearanceSettings,
     pub advanced: AdvancedSettings,
+}
+
+#[derive(Clone)]
+pub struct SettingsCache {
+    current: Arc<RwLock<Settings>>,
+}
+
+impl SettingsCache {
+    pub fn new(settings: Settings) -> Self {
+        Self {
+            current: Arc::new(RwLock::new(settings)),
+        }
+    }
+
+    pub fn snapshot(&self) -> Settings {
+        self.current.read().unwrap().clone()
+    }
+
+    pub fn replace(&self, settings: Settings) {
+        *self.current.write().unwrap() = settings;
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -344,6 +369,7 @@ fn validate_settings(settings: &Settings) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(test)]
 pub fn audit_logging_enabled(db: &Database) -> bool {
     get_settings(db)
         .map(|settings| settings.advanced.enable_audit_logging)

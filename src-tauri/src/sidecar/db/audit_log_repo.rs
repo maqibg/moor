@@ -42,6 +42,19 @@ pub struct TopServer {
     pub count: i64,
 }
 
+pub struct AuditLogInsert {
+    pub id: String,
+    pub timestamp: String,
+    pub profile_id: Option<String>,
+    pub server_id: Option<String>,
+    pub tool_name: String,
+    pub arguments: Option<serde_json::Value>,
+    pub result: Option<serde_json::Value>,
+    pub error: Option<String>,
+    pub duration_ms: i64,
+    pub agent_info: Option<String>,
+}
+
 fn map_audit_log(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditLogEntry> {
     let args_str: Option<String> = row.get("arguments")?;
     let result_str: Option<String> = row.get("result")?;
@@ -108,6 +121,7 @@ impl<'a> AuditLogRepository<'a> {
         self.db.query_all(&sql, &param_refs, map_audit_log)
     }
 
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub fn insert(
         &self,
@@ -129,6 +143,56 @@ impl<'a> AuditLogRepository<'a> {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             &[&id, &timestamp, &profile_id, &server_id, &tool_name, &args_json, &result_json, &error, &duration_ms, &agent_info],
         )
+    }
+
+    pub fn insert_batch(&self, entries: &[AuditLogInsert]) -> Result<(), String> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        self.db.transaction(|conn| {
+            let mut statement = conn
+                .prepare_cached(
+                    "INSERT INTO audit_logs (id, timestamp, profile_id, server_id, tool_name, arguments, result, error, duration_ms, agent_info)
+                     VALUES (?1, ?2, (SELECT id FROM profiles WHERE id = ?3), (SELECT id FROM mcp_servers WHERE id = ?4), ?5, ?6, ?7, ?8, ?9, ?10)",
+                )
+                .map_err(|error| error.to_string())?;
+            for entry in entries {
+                let arguments = entry
+                    .arguments
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()
+                    .map_err(|error| error.to_string())?;
+                let result = entry
+                    .result
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()
+                    .map_err(|error| error.to_string())?;
+                statement
+                    .execute(rusqlite::params![
+                        &entry.id,
+                        &entry.timestamp,
+                        entry.profile_id.as_deref(),
+                        entry.server_id.as_deref(),
+                        &entry.tool_name,
+                        arguments.as_deref(),
+                        result.as_deref(),
+                        entry.error.as_deref(),
+                        entry.duration_ms,
+                        entry.agent_info.as_deref(),
+                    ])
+                    .map_err(|error| error.to_string())?;
+            }
+            Ok(())
+        })
+    }
+
+    pub fn delete_before(&self, cutoff: &str) -> Result<usize, String> {
+        self.db.transaction(|conn| {
+            conn.execute("DELETE FROM audit_logs WHERE timestamp < ?1", [cutoff])
+                .map_err(|error| error.to_string())
+        })
     }
 
     pub fn get_stats(&self) -> Result<LogStats, String> {

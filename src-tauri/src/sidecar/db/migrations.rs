@@ -1,6 +1,21 @@
 use super::Database;
 
+const CURRENT_SCHEMA_VERSION: i64 = 2;
+
 pub fn run_migrations(db: &Database) -> Result<(), String> {
+    let version = schema_version(db)?;
+    if version < 1 {
+        migrate_initial_schema(db)?;
+        db.exec("PRAGMA user_version = 1")?;
+    }
+    if version < 2 {
+        migrate_audit_indexes(db)?;
+        db.exec(&format!("PRAGMA user_version = {CURRENT_SCHEMA_VERSION}"))?;
+    }
+    Ok(())
+}
+
+fn migrate_initial_schema(db: &Database) -> Result<(), String> {
     db.exec(
         "CREATE TABLE IF NOT EXISTS profiles (
             id TEXT PRIMARY KEY,
@@ -89,6 +104,23 @@ pub fn run_migrations(db: &Database) -> Result<(), String> {
     backfill_server_sort_order(db)?;
 
     Ok(())
+}
+
+fn migrate_audit_indexes(db: &Database) -> Result<(), String> {
+    db.exec(
+        "DROP INDEX IF EXISTS idx_audit_logs_tool_name;
+         DROP INDEX IF EXISTS idx_audit_logs_server_id;
+         DROP INDEX IF EXISTS idx_tool_discoveries_exposed_name;
+         CREATE INDEX IF NOT EXISTS idx_audit_logs_server_timestamp
+           ON audit_logs(server_id, timestamp DESC);
+         CREATE INDEX IF NOT EXISTS idx_audit_logs_tool_timestamp
+           ON audit_logs(tool_name, timestamp DESC);",
+    )
+}
+
+fn schema_version(db: &Database) -> Result<i64, String> {
+    db.query_one("PRAGMA user_version", &[], |row| row.get(0))
+        .map(|version| version.unwrap_or(0))
 }
 
 fn ensure_column(db: &Database, table: &str, column: &str, definition: &str) -> Result<(), String> {
@@ -188,5 +220,24 @@ mod tests {
                 ("old".to_string(), 2),
             ]
         );
+    }
+
+    #[test]
+    fn versions_schema_and_uses_composite_audit_indexes() {
+        let db = temp_db();
+
+        run_migrations(&db).expect("migrate");
+
+        assert_eq!(schema_version(&db).expect("read schema version"), 2);
+        let indexes = db
+            .query_all("PRAGMA index_list(audit_logs)", &[], |row| {
+                row.get::<_, String>(1)
+            })
+            .expect("read audit indexes");
+        assert!(indexes.contains(&"idx_audit_logs_timestamp".to_string()));
+        assert!(indexes.contains(&"idx_audit_logs_server_timestamp".to_string()));
+        assert!(indexes.contains(&"idx_audit_logs_tool_timestamp".to_string()));
+        assert!(!indexes.contains(&"idx_audit_logs_server_id".to_string()));
+        assert!(!indexes.contains(&"idx_audit_logs_tool_name".to_string()));
     }
 }

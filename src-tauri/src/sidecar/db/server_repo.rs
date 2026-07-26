@@ -212,14 +212,30 @@ impl<'a> ServerRepository<'a> {
                     .map_err(|e| e.to_string())?;
                 }
 
-                let server = conn
-                    .query_row(
-                        "SELECT * FROM mcp_servers WHERE id = ?1",
-                        rusqlite::params![&id],
-                        map_server,
-                    )
-                    .map_err(|e| e.to_string())?;
-                servers.push(server);
+                servers.push(Server {
+                    id,
+                    name: input.name.clone(),
+                    connection_type: input.connection_type.clone(),
+                    status: "stopped".to_string(),
+                    auto_start: input.auto_start,
+                    command: input.command.clone(),
+                    args: args_json
+                        .as_deref()
+                        .and_then(|value| serde_json::from_str(value).ok())
+                        .or_else(|| Some(serde_json::Value::Array(Vec::new()))),
+                    url: input.url.clone(),
+                    env: env_json
+                        .as_deref()
+                        .and_then(|value| serde_json::from_str(value).ok()),
+                    headers: headers_json
+                        .as_deref()
+                        .and_then(|value| serde_json::from_str(value).ok()),
+                    working_dir: input.working_dir.clone(),
+                    error_message: None,
+                    sort_order: Some(next_sort_order),
+                    created_at: now.clone(),
+                    updated_at: now,
+                });
                 next_sort_order -= 1;
             }
             Ok(servers)

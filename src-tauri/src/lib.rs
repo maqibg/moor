@@ -18,6 +18,7 @@ mod sidecar;
 
 const LEGACY_BUNDLE_IDENTIFIER: &str = "dev.moor.app";
 const AUTOSTART_ARG: &str = "--moor-autostart";
+const LEGACY_MIGRATION_MARKER: &str = ".legacy-migration-complete";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -168,32 +169,50 @@ fn persist_fallback_port(
     Ok(())
 }
 
-fn migrate_legacy_data_dir(data_dir: &PathBuf, legacy_data_dir: Option<&PathBuf>) {
+fn migrate_legacy_data_dir(
+    data_dir: &PathBuf,
+    legacy_data_dir: Option<&PathBuf>,
+) -> Result<(), String> {
     let Some(legacy) = legacy_data_dir else {
-        return;
+        return Ok(());
     };
     if data_dir == legacy {
-        return;
-    };
-    let _ = fs::create_dir_all(data_dir);
+        return Ok(());
+    }
+    fs::create_dir_all(data_dir).map_err(|error| error.to_string())?;
+    let marker = data_dir.join(LEGACY_MIGRATION_MARKER);
+    if marker.exists() {
+        return Ok(());
+    }
 
     let current_settings = data_dir.join("settings.json");
     let legacy_settings = legacy.join("settings.json");
     if !current_settings.exists() && legacy_settings.exists() {
-        let _ = fs::copy(&legacy_settings, current_settings);
+        if let Err(error) = fs::copy(&legacy_settings, &current_settings) {
+            let _ = fs::remove_file(&current_settings);
+            return Err(error.to_string());
+        }
     }
 
     let current_db = data_dir.join("moor.db");
     let legacy_db = legacy.join("moor.db");
-    if current_db.exists() || !legacy_db.exists() {
-        return;
-    };
-    for name in &["moor.db", "moor.db-wal", "moor.db-shm"] {
-        let src = legacy.join(name);
-        if src.exists() {
-            let _ = fs::copy(&src, data_dir.join(name));
+    if !current_db.exists() && legacy_db.exists() {
+        let mut copied_files = Vec::new();
+        for name in &["moor.db", "moor.db-wal", "moor.db-shm"] {
+            let source = legacy.join(name);
+            if source.exists() {
+                let destination = data_dir.join(name);
+                copied_files.push(destination.clone());
+                if let Err(error) = fs::copy(&source, destination) {
+                    for copied_file in copied_files {
+                        let _ = fs::remove_file(copied_file);
+                    }
+                    return Err(error.to_string());
+                }
+            }
         }
     }
+    fs::write(marker, b"1").map_err(|error| error.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -227,7 +246,9 @@ pub fn run() {
                 .map(|dir| dir.join(LEGACY_BUNDLE_IDENTIFIER));
 
             // Legacy data migration
-            migrate_legacy_data_dir(&data_dir, legacy_data_dir.as_ref());
+            if let Err(error) = migrate_legacy_data_dir(&data_dir, legacy_data_dir.as_ref()) {
+                tracing::warn!("Legacy data migration will be retried: {error}");
+            }
 
             // Init database
             fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
@@ -326,7 +347,12 @@ pub fn run() {
                 }
             });
 
-            let _ = apply_autostart_setting(app.handle(), auto_start);
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Err(error) = apply_autostart_setting(&app_handle, auto_start) {
+                    tracing::warn!("Failed to apply login autostart setting: {error}");
+                }
+            });
 
             // Tray menu
             let quit = MenuItem::with_id(app, "quit", "Quit Moor", true, None::<&str>)?;
@@ -539,5 +565,40 @@ mod tests {
         persist_fallback_port(&db, 9224, 9224).expect("matching port is a no-op");
         drop(db);
         fs::remove_dir_all(data_dir).expect("failed to remove temp settings dir");
+    }
+
+    #[test]
+    fn legacy_data_migration_uses_completion_marker_after_success() {
+        let root = temp_data_dir("legacy-migration");
+        let data_dir = root.join("current");
+        let legacy_dir = root.join("legacy");
+        fs::create_dir_all(&legacy_dir).expect("create legacy data dir");
+        fs::write(legacy_dir.join("settings.json"), b"legacy-settings")
+            .expect("write legacy settings");
+        fs::write(legacy_dir.join("moor.db"), b"legacy-database").expect("write legacy database");
+
+        migrate_legacy_data_dir(&data_dir, Some(&legacy_dir)).expect("migrate legacy data");
+        assert_eq!(
+            fs::read(data_dir.join("settings.json")).expect("read migrated settings"),
+            b"legacy-settings"
+        );
+        assert_eq!(
+            fs::read(data_dir.join("moor.db")).expect("read migrated database"),
+            b"legacy-database"
+        );
+        assert!(data_dir.join(LEGACY_MIGRATION_MARKER).exists());
+
+        fs::write(data_dir.join("settings.json"), b"current-settings")
+            .expect("update current settings");
+        fs::write(legacy_dir.join("settings.json"), b"changed-legacy-settings")
+            .expect("update legacy settings");
+        migrate_legacy_data_dir(&data_dir, Some(&legacy_dir))
+            .expect("completed migration should be a no-op");
+        assert_eq!(
+            fs::read(data_dir.join("settings.json")).expect("read current settings"),
+            b"current-settings"
+        );
+
+        fs::remove_dir_all(root).expect("remove migration test data");
     }
 }

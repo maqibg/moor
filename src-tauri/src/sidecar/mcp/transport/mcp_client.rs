@@ -3,11 +3,13 @@ use crate::sidecar::mcp::transport::http_client::HttpClientTransport;
 use crate::sidecar::mcp::transport::stdio_client::StdioClientTransport;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 pub struct McpClient {
     transport: McpTransport,
     server_name: String,
+    next_id: AtomicI64,
 }
 
 enum McpTransport {
@@ -41,9 +43,10 @@ impl McpClient {
             Duration::from_millis(config.request_timeout_ms as u64),
         )
         .await?;
-        let mut client = Self {
+        let client = Self {
             transport: McpTransport::Stdio(transport),
             server_name: config.server_name,
+            next_id: AtomicI64::new(1),
         };
         client.handshake().await?;
         Ok(client)
@@ -55,9 +58,10 @@ impl McpClient {
             config.headers,
             Duration::from_millis(config.request_timeout_ms as u64),
         );
-        let mut client = Self {
+        let client = Self {
             transport: McpTransport::Http(transport),
             server_name: config.server_name,
+            next_id: AtomicI64::new(1),
         };
         client.handshake().await?;
         Ok(client)
@@ -70,7 +74,7 @@ impl McpClient {
                 .await
                 .map_err(|err| self.enrich_stdio_error(&err))?,
             McpTransport::Http(t) => {
-                let id = chrono::Utc::now().timestamp_millis();
+                let id = self.next_id.fetch_add(1, Ordering::Relaxed);
                 t.send_request(id, "tools/list", Some(serde_json::json!({})))
                     .await?
             }
@@ -89,22 +93,22 @@ impl McpClient {
                 .await
                 .map_err(|err| self.enrich_stdio_error(&err)),
             McpTransport::Http(t) => {
-                let id = chrono::Utc::now().timestamp_millis();
+                let id = self.next_id.fetch_add(1, Ordering::Relaxed);
                 t.send_request(id, "tools/call", Some(params)).await
             }
         }
     }
 
-    pub async fn disconnect(&mut self) -> Result<(), String> {
-        match &mut self.transport {
+    pub async fn disconnect(&self) -> Result<(), String> {
+        match &self.transport {
             McpTransport::Stdio(t) => t.close().await,
             McpTransport::Http(_) => Ok(()),
         }
     }
 
-    pub fn set_request_timeout_ms(&mut self, request_timeout_ms: u32) {
+    pub fn set_request_timeout_ms(&self, request_timeout_ms: u32) {
         let request_timeout = Duration::from_millis(request_timeout_ms as u64);
-        match &mut self.transport {
+        match &self.transport {
             McpTransport::Stdio(t) => t.set_request_timeout(request_timeout),
             McpTransport::Http(t) => t.set_request_timeout(request_timeout),
         }
@@ -117,7 +121,7 @@ impl McpClient {
         }
     }
 
-    async fn handshake(&mut self) -> Result<(), String> {
+    async fn handshake(&self) -> Result<(), String> {
         let init_params = serde_json::json!({
             "protocolVersion": "2024-11-05",
             "capabilities": {},
@@ -127,7 +131,7 @@ impl McpClient {
             }
         });
 
-        match &mut self.transport {
+        match &self.transport {
             McpTransport::Stdio(t) => {
                 let _ = t
                     .send_request("initialize", Some(init_params))
@@ -138,7 +142,7 @@ impl McpClient {
                     .map_err(|err| t.with_startup_stderr_summary(err))?;
             }
             McpTransport::Http(t) => {
-                let id = chrono::Utc::now().timestamp_millis();
+                let id = self.next_id.fetch_add(1, Ordering::Relaxed);
                 let _ = t.send_request(id, "initialize", Some(init_params)).await?;
                 t.send_notification("notifications/initialized", Some(serde_json::json!({})))
                     .await?;
@@ -201,12 +205,12 @@ impl crate::sidecar::services::server_manager::McpSession for McpClient {
     }
 
     fn disconnect(
-        &mut self,
+        &self,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + '_>> {
         Box::pin(async move { McpClient::disconnect(self).await })
     }
 
-    fn set_request_timeout_ms(&mut self, request_timeout_ms: u32) {
+    fn set_request_timeout_ms(&self, request_timeout_ms: u32) {
         McpClient::set_request_timeout_ms(self, request_timeout_ms);
     }
 

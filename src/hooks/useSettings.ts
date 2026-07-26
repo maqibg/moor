@@ -2,7 +2,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, apiPost } from "@/lib/api/client";
 import { routes } from "@/lib/api-routes";
 import { settingKeys } from "@/lib/query-keys";
-import { useSSEEvent } from "@/contexts/SSEContext";
 import { createDefaultSettings, type Settings, type SettingsUpdatePayload } from "@moor/types";
 
 const QUERY_KEY = settingKeys.all();
@@ -37,10 +36,6 @@ export function useSettings() {
     onSuccess: (defaults) => {
       queryClient.setQueryData(QUERY_KEY, defaults);
     },
-  });
-
-  useSSEEvent("settings:changed", (data) => {
-    queryClient.setQueryData(QUERY_KEY, data);
   });
 
   return {

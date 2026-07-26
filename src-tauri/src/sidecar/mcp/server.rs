@@ -1,6 +1,6 @@
 use super::jsonrpc;
 use crate::sidecar::http::AppState;
-use crate::sidecar::services::audit_recorder::{AuditRecorder, ToolCallRecord};
+use crate::sidecar::services::audit_recorder::ToolCallRecord;
 use std::sync::Arc;
 
 pub const LEGACY_PROTOCOL_VERSION: &str = "2024-11-05";
@@ -107,27 +107,21 @@ async fn handle_tools_call(
         .cloned()
         .unwrap_or(serde_json::json!({}));
 
-    let catalog = state.server_manager.get_tool_catalog(None).await;
-    let owner = match catalog
-        .iter()
-        .find(|t| t.exposed_name == tool_name)
-        .cloned()
-    {
+    let (profile_id, owner) = state.server_manager.resolve_tool(tool_name).await;
+    let owner = match owner {
         Some(t) => t,
         None => {
             let error = format!("Tool \"{tool_name}\" not found or disabled");
-            AuditRecorder::record(
-                &state.db,
-                ToolCallRecord {
-                    server_id: None,
-                    tool_name,
-                    arguments: &arguments,
-                    result: None,
-                    error: Some(&error),
-                    duration_ms: 0,
-                    agent_info,
-                },
-            );
+            state.audit_recorder.record(ToolCallRecord {
+                profile_id: profile_id.as_deref(),
+                server_id: None,
+                tool_name,
+                arguments: &arguments,
+                result: None,
+                error: Some(&error),
+                duration_ms: 0,
+                agent_info,
+            });
             return jsonrpc::make_error(id, jsonrpc::INVALID_PARAMS, &error);
         }
     };
@@ -135,37 +129,33 @@ async fn handle_tools_call(
     let start_time = std::time::Instant::now();
     match state
         .server_manager
-        .call_tool(tool_name, arguments.clone())
+        .call_tool(&owner, arguments.clone())
         .await
     {
         Ok(result) => {
-            AuditRecorder::record(
-                &state.db,
-                ToolCallRecord {
-                    server_id: Some(&owner.server_id),
-                    tool_name,
-                    arguments: &arguments,
-                    result: Some(&result),
-                    error: None,
-                    duration_ms: start_time.elapsed().as_millis() as i64,
-                    agent_info,
-                },
-            );
+            state.audit_recorder.record(ToolCallRecord {
+                profile_id: profile_id.as_deref(),
+                server_id: Some(&owner.server_id),
+                tool_name,
+                arguments: &arguments,
+                result: Some(&result),
+                error: None,
+                duration_ms: start_time.elapsed().as_millis() as i64,
+                agent_info,
+            });
             jsonrpc::make_response(id, result)
         }
         Err(err) => {
-            AuditRecorder::record(
-                &state.db,
-                ToolCallRecord {
-                    server_id: Some(&owner.server_id),
-                    tool_name,
-                    arguments: &arguments,
-                    result: None,
-                    error: Some(&err),
-                    duration_ms: start_time.elapsed().as_millis() as i64,
-                    agent_info,
-                },
-            );
+            state.audit_recorder.record(ToolCallRecord {
+                profile_id: profile_id.as_deref(),
+                server_id: Some(&owner.server_id),
+                tool_name,
+                arguments: &arguments,
+                result: None,
+                error: Some(&err),
+                duration_ms: start_time.elapsed().as_millis() as i64,
+                agent_info,
+            });
             jsonrpc::make_error(id, jsonrpc::INTERNAL_ERROR, &err)
         }
     }
@@ -286,17 +276,14 @@ process.stdin.on("data", (chunk) => {
             .await
             .expect("failed to start fake server");
 
-        let app_state = Arc::new(AppState {
-            db: db.clone(),
-            api_token: "test-token".to_string(),
-            version: "test".to_string(),
-            port: 19323,
-            mcp_sessions: Arc::new(
-                crate::sidecar::mcp::transport::mcp_session::McpSessionStore::new(),
-            ),
+        let app_state = Arc::new(AppState::new_for_test(
+            db.clone(),
+            "test-token".to_string(),
+            "test".to_string(),
+            19323,
             event_bus,
             server_manager,
-        });
+        ));
 
         let tools_response = handle_request(
             jsonrpc::Id::Number(0),
@@ -321,7 +308,7 @@ process.stdin.on("data", (chunk) => {
                 "name": "fake__echo",
                 "arguments": { "token": "secret", "value": "ok" }
             })),
-            app_state,
+            app_state.clone(),
             Some("test-agent"),
         )
         .await;
@@ -331,6 +318,8 @@ process.stdin.on("data", (chunk) => {
             .as_str()
             .unwrap()
             .contains("\"value\":\"ok\""));
+
+        app_state.audit_recorder.flush().await;
 
         let audit_repo = AuditLogRepository::new(&db);
         let logs = audit_repo

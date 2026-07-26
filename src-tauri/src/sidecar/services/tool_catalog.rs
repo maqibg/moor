@@ -26,24 +26,24 @@ pub struct ToolDetail {
 pub struct ToolCatalogService;
 
 impl ToolCatalogService {
-    pub fn get_tool_catalog(
+    pub fn get_tool_catalog_snapshot(
         db: &Database,
         profile_id: Option<&str>,
         visible_server_ids: Option<&std::collections::HashSet<String>>,
-    ) -> Vec<ToolCatalogEntry> {
+    ) -> (Option<String>, Vec<ToolCatalogEntry>) {
         let profile_repo = ProfileRepository::new(db);
         let active_id = match profile_id {
             Some(id) => id.to_string(),
             None => match profile_repo.find_active_id() {
                 Ok(Some(id)) => id,
-                _ => return vec![],
+                _ => return (None, vec![]),
             },
         };
 
         let tool_repo = ToolDiscoveryRepository::new(db);
         let profile_tools = match tool_repo.find_by_profile_id(&active_id) {
             Ok(t) => t,
-            Err(_) => return vec![],
+            Err(_) => return (Some(active_id), vec![]),
         };
 
         let visible = match visible_server_ids {
@@ -54,7 +54,15 @@ impl ToolCatalogService {
             None => profile_tools,
         };
 
-        build_tool_catalog_entries(visible)
+        (Some(active_id), build_tool_catalog_entries(visible))
+    }
+
+    pub fn get_tool_catalog(
+        db: &Database,
+        profile_id: Option<&str>,
+        visible_server_ids: Option<&std::collections::HashSet<String>>,
+    ) -> Vec<ToolCatalogEntry> {
+        Self::get_tool_catalog_snapshot(db, profile_id, visible_server_ids).1
     }
 
     pub fn get_tool_details(

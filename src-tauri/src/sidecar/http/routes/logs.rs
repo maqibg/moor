@@ -31,28 +31,35 @@ async fn list(
     State(state): State<Arc<AppState>>,
     Query(query): Query<LogQuery>,
 ) -> Result<Json<Value>, AppError> {
-    let repo = AuditLogRepository::new(&state.db);
-    let logs = repo
-        .query_logs(
+    let db = state.db.clone();
+    let value = tokio::task::spawn_blocking(move || {
+        let repo = AuditLogRepository::new(&db);
+        let logs = repo.query_logs(
             query.server_id.as_deref(),
             query.tool_name.as_deref(),
             query.from.as_deref(),
             query.to.as_deref(),
             query.limit,
             query.offset,
-        )
-        .map_err(AppError::internal)?;
-    Ok(Json(
-        serde_json::to_value(logs).map_err(|e| AppError::internal(e.to_string()))?,
-    ))
+        )?;
+        serde_json::to_value(logs).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| AppError::internal(format!("Audit log query task failed: {error}")))?
+    .map_err(AppError::internal)?;
+    Ok(Json(value))
 }
 
 async fn stats(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
-    let repo = AuditLogRepository::new(&state.db);
-    let stats = repo.get_stats().map_err(AppError::internal)?;
-    Ok(Json(
-        serde_json::to_value(stats).map_err(|e| AppError::internal(e.to_string()))?,
-    ))
+    let db = state.db.clone();
+    let value = tokio::task::spawn_blocking(move || {
+        let stats = AuditLogRepository::new(&db).get_stats()?;
+        serde_json::to_value(stats).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| AppError::internal(format!("Audit stats task failed: {error}")))?
+    .map_err(AppError::internal)?;
+    Ok(Json(value))
 }
 
 #[cfg(test)]

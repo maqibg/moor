@@ -4,6 +4,7 @@ pub mod routes;
 
 use crate::sidecar::db::Database;
 use crate::sidecar::mcp::transport::mcp_session::McpSessionStore;
+use crate::sidecar::services::audit_recorder::AuditRecorder;
 use crate::sidecar::services::event_bus::EventBus;
 use crate::sidecar::services::server_manager::ServerManager;
 use axum::{http::StatusCode, middleware, response::IntoResponse, Json, Router};
@@ -19,6 +20,7 @@ pub struct AppState {
     pub mcp_sessions: Arc<McpSessionStore>,
     pub event_bus: Arc<EventBus>,
     pub server_manager: Arc<ServerManager>,
+    pub audit_recorder: Arc<AuditRecorder>,
 }
 
 impl AppState {
@@ -31,6 +33,7 @@ impl AppState {
         event_bus: Arc<EventBus>,
         server_manager: Arc<ServerManager>,
     ) -> Self {
+        let audit_recorder = AuditRecorder::start(db.clone(), server_manager.settings_cache());
         Self {
             db,
             api_token,
@@ -39,6 +42,30 @@ impl AppState {
             mcp_sessions: Arc::new(McpSessionStore::new()),
             event_bus,
             server_manager,
+            audit_recorder,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn new_for_test(
+        db: Arc<Database>,
+        api_token: String,
+        version: String,
+        port: u16,
+        event_bus: Arc<EventBus>,
+        server_manager: Arc<ServerManager>,
+    ) -> Self {
+        let audit_recorder =
+            AuditRecorder::start_writer_only(db.clone(), server_manager.settings_cache());
+        Self {
+            db,
+            api_token,
+            version,
+            port,
+            mcp_sessions: Arc::new(McpSessionStore::new()),
+            event_bus,
+            server_manager,
+            audit_recorder,
         }
     }
 
@@ -54,7 +81,7 @@ impl AppState {
         db.run_migrations().expect("failed to run migrations");
         settings::init_settings(db.as_ref(), data_dir).expect("failed to init settings");
         let event_bus = Arc::new(EventBus::new(16));
-        Arc::new(Self::new(
+        Arc::new(Self::new_for_test(
             db.clone(),
             "test-token".to_string(),
             "test".to_string(),

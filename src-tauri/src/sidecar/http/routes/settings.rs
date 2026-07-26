@@ -18,7 +18,7 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 async fn get_settings(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
-    let settings = settings_store::get_settings(&state.db).map_err(AppError::internal)?;
+    let settings = state.server_manager.settings_cache().snapshot();
     Ok(Json(
         serde_json::to_value(settings).map_err(|e| AppError::internal(e.to_string()))?,
     ))
@@ -32,6 +32,7 @@ async fn update_settings(
         settings_store::SettingsError::Validation(m) => AppError::validation(m),
         settings_store::SettingsError::Internal(m) => AppError::internal(m),
     })?;
+    state.server_manager.apply_settings(settings.clone());
     let settings_value =
         serde_json::to_value(&settings).map_err(|e| AppError::internal(e.to_string()))?;
 
@@ -43,6 +44,7 @@ async fn update_settings(
 
 async fn reset_settings(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
     let defaults = settings_store::reset_settings(&state.db).map_err(AppError::internal)?;
+    state.server_manager.apply_settings(defaults.clone());
     let defaults_value =
         serde_json::to_value(&defaults).map_err(|e| AppError::internal(e.to_string()))?;
     state.event_bus.emit(Evt::SettingsChanged {

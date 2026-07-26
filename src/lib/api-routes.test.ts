@@ -18,7 +18,11 @@ describe("api routes", () => {
         server_id: "server/1",
         tool_name: "read&write",
         from: "2026-01-01T00:00:00Z",
+        limit: 50,
+        offset: 100,
       }),
-    ).toBe("/api/logs?server_id=server%2F1&tool_name=read%26write&from=2026-01-01T00%3A00%3A00Z");
+    ).toBe(
+      "/api/logs?server_id=server%2F1&tool_name=read%26write&from=2026-01-01T00%3A00%3A00Z&limit=50&offset=100",
+    );
   });
 });

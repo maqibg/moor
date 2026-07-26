@@ -305,6 +305,12 @@ function AdvancedSection({
   const [localStartTimeout, setLocalStartTimeout] = useState(
     String(settings.advanced.mcpServerStartTimeoutMs / 1000),
   );
+  const [dirtyDrafts, setDirtyDrafts] = useState({
+    retention: false,
+    port: false,
+    requestTimeout: false,
+    startTimeout: false,
+  });
   const [tokenVisible, setTokenVisible] = useState(false);
   const requestTimeoutState = parseTimeoutSecondsInput(localRequestTimeout);
   const startTimeoutState = parseTimeoutSecondsInput(localStartTimeout);
@@ -316,21 +322,37 @@ function AdvancedSection({
   });
 
   useEffect(() => {
-    setLocalRetention(String(settings.advanced.logRetentionDays));
-    setLocalPort(String(settings.advanced.sidecarPort));
-    setLocalRequestTimeout(String(settings.advanced.mcpRequestTimeoutMs / 1000));
-    setLocalStartTimeout(String(settings.advanced.mcpServerStartTimeoutMs / 1000));
+    if (!dirtyDrafts.retention) {
+      setLocalRetention(String(settings.advanced.logRetentionDays));
+    }
+    if (!dirtyDrafts.port) {
+      setLocalPort(String(settings.advanced.sidecarPort));
+    }
+    if (!dirtyDrafts.requestTimeout) {
+      setLocalRequestTimeout(String(settings.advanced.mcpRequestTimeoutMs / 1000));
+    }
+    if (!dirtyDrafts.startTimeout) {
+      setLocalStartTimeout(String(settings.advanced.mcpServerStartTimeoutMs / 1000));
+    }
   }, [
+    dirtyDrafts,
     settings.advanced.logRetentionDays,
     settings.advanced.sidecarPort,
     settings.advanced.mcpRequestTimeoutMs,
     settings.advanced.mcpServerStartTimeoutMs,
   ]);
 
+  const setDraftDirty = useCallback((field: keyof typeof dirtyDrafts, dirty: boolean) => {
+    setDirtyDrafts((current) =>
+      current[field] === dirty ? current : { ...current, [field]: dirty },
+    );
+  }, []);
+
   const applyRetention = async () => {
     try {
       onError(null);
       await updateSettings({ advanced: { logRetentionDays: Number(localRetention) } });
+      setDraftDirty("retention", false);
     } catch (err) {
       onError(getErrorMessage(err, t("Failed to update log retention")));
     }
@@ -341,6 +363,7 @@ function AdvancedSection({
       onError(null);
       const nextPort = Number(localPort);
       await updateSettings({ advanced: { sidecarPort: nextPort } });
+      setDraftDirty("port", false);
       onPortApplied(nextPort);
     } catch (err) {
       onError(getErrorMessage(err, t("Failed to update sidecar port")));
@@ -361,8 +384,9 @@ function AdvancedSection({
         return;
       }
       await updateSettings({ advanced: { [key]: parsed.milliseconds } });
+      setDraftDirty(key === "mcpRequestTimeoutMs" ? "requestTimeout" : "startTimeout", false);
     } catch (err) {
-      onError(getErrorMessage(err, t("Failed to update {{t(label)}}", { label })));
+      onError(getErrorMessage(err, t("Failed to update {{label}}", { label })));
     }
   };
 
@@ -380,7 +404,10 @@ function AdvancedSection({
                 min={0}
                 max={365}
                 value={localRetention}
-                onChange={(e) => setLocalRetention(e.target.value)}
+                onChange={(e) => {
+                  setLocalRetention(e.target.value);
+                  setDraftDirty("retention", true);
+                }}
                 className="w-20 h-8 text-center text-xs"
               />
               <Button variant="secondary" size="sm" onClick={() => void applyRetention()}>
@@ -413,7 +440,10 @@ function AdvancedSection({
                   value={localRequestTimeout}
                   aria-invalid={!requestTimeoutState.valid}
                   aria-describedby={requestTimeoutState.valid ? undefined : requestTimeoutErrorId}
-                  onChange={(e) => setLocalRequestTimeout(e.target.value)}
+                  onChange={(e) => {
+                    setLocalRequestTimeout(e.target.value);
+                    setDraftDirty("requestTimeout", true);
+                  }}
                   className="w-20 h-8 text-center text-xs"
                 />
                 <Button
@@ -450,7 +480,10 @@ function AdvancedSection({
                   value={localStartTimeout}
                   aria-invalid={!startTimeoutState.valid}
                   aria-describedby={startTimeoutState.valid ? undefined : startTimeoutErrorId}
-                  onChange={(e) => setLocalStartTimeout(e.target.value)}
+                  onChange={(e) => {
+                    setLocalStartTimeout(e.target.value);
+                    setDraftDirty("startTimeout", true);
+                  }}
                   className="w-20 h-8 text-center text-xs"
                 />
                 <Button
@@ -491,7 +524,10 @@ function AdvancedSection({
                   min={1024}
                   max={65535}
                   value={localPort}
-                  onChange={(e) => setLocalPort(e.target.value)}
+                  onChange={(e) => {
+                    setLocalPort(e.target.value);
+                    setDraftDirty("port", true);
+                  }}
                   className="w-24 h-8 text-center text-xs"
                 />
                 <Button variant="secondary" size="sm" onClick={() => void applyPort()}>

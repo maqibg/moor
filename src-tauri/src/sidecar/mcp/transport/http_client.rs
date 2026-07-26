@@ -1,6 +1,9 @@
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{
+    atomic::{AtomicU64, AtomicU8, Ordering},
+    OnceLock,
+};
 use std::time::Duration;
 use tokio::sync::Mutex;
 
@@ -9,6 +12,9 @@ use super::format_timeout_duration;
 static ENV_PATTERN: OnceLock<regex_lite::Regex> = OnceLock::new();
 const MCP_SESSION_ID_HEADER: &str = "mcp-session-id";
 const REMOTE_MCP_ERROR_PREFIX: &str = "Remote MCP server error: ";
+const MODE_UNKNOWN: u8 = 0;
+const MODE_STREAMABLE: u8 = 1;
+const MODE_SSE: u8 = 2;
 
 /// MCP Client over HTTP transport (Streamable HTTP or SSE).
 /// Uses reqwest to communicate with HTTP-based MCP servers.
@@ -16,15 +22,11 @@ pub struct HttpClientTransport {
     url: String,
     headers: HashMap<String, String>,
     client: reqwest::Client,
-    mode: Mutex<HttpMode>,
+    mode: AtomicU8,
+    mode_transition: Mutex<()>,
+    sse_state: Mutex<Option<SseState>>,
     session_id: Mutex<Option<String>>,
-    request_timeout: Duration,
-}
-
-enum HttpMode {
-    Unknown,
-    Streamable,
-    Sse(SseState),
+    request_timeout_ms: AtomicU64,
 }
 
 struct SseState {
@@ -49,14 +51,17 @@ impl HttpClientTransport {
             url: url.to_string(),
             headers,
             client: reqwest::Client::new(),
-            mode: Mutex::new(HttpMode::Unknown),
+            mode: AtomicU8::new(MODE_UNKNOWN),
+            mode_transition: Mutex::new(()),
+            sse_state: Mutex::new(None),
             session_id: Mutex::new(None),
-            request_timeout,
+            request_timeout_ms: AtomicU64::new(duration_millis(request_timeout)),
         }
     }
 
-    pub fn set_request_timeout(&mut self, request_timeout: Duration) {
-        self.request_timeout = request_timeout;
+    pub fn set_request_timeout(&self, request_timeout: Duration) {
+        self.request_timeout_ms
+            .store(duration_millis(request_timeout), Ordering::Relaxed);
     }
 
     /// Send a JSON-RPC request and get the response.
@@ -67,7 +72,7 @@ impl HttpClientTransport {
         method: &str,
         params: Option<Value>,
     ) -> Result<Value, String> {
-        let timeout = self.request_timeout;
+        let timeout = self.request_timeout();
         tokio::time::timeout(timeout, self.send_request_inner(id, method, params))
             .await
             .map_err(|_| {
@@ -84,31 +89,46 @@ impl HttpClientTransport {
         method: &str,
         params: Option<Value>,
     ) -> Result<Value, String> {
-        let mut mode = self.mode.lock().await;
-        match &mut *mode {
-            HttpMode::Streamable => self
-                .send_streamable_request(id, method, params)
-                .await
-                .map_err(StreamableError::into_message),
-            HttpMode::Sse(state) => self.send_sse_request(state, id, method, params).await,
-            HttpMode::Unknown => match self
-                .send_streamable_request(id, method, params.clone())
-                .await
-            {
-                Ok(value) => {
-                    *mode = HttpMode::Streamable;
-                    Ok(value)
+        loop {
+            match self.mode.load(Ordering::Acquire) {
+                MODE_STREAMABLE => {
+                    return self
+                        .send_streamable_request(id, method, params)
+                        .await
+                        .map_err(StreamableError::into_message);
                 }
-                Err(StreamableError::Unsupported(_)) => {
-                    let mut state = self.open_sse().await?;
-                    let value = self
-                        .send_sse_request(&mut state, id, method, params)
-                        .await?;
-                    *mode = HttpMode::Sse(state);
-                    Ok(value)
+                MODE_SSE => {
+                    let mut state = self.sse_state.lock().await;
+                    let state = state.as_mut().ok_or("SSE transport state is unavailable")?;
+                    return self.send_sse_request(state, id, method, params).await;
                 }
-                Err(StreamableError::Failed(message)) => Err(message),
-            },
+                MODE_UNKNOWN => {
+                    let _transition = self.mode_transition.lock().await;
+                    if self.mode.load(Ordering::Acquire) != MODE_UNKNOWN {
+                        continue;
+                    }
+                    match self
+                        .send_streamable_request(id, method, params.clone())
+                        .await
+                    {
+                        Ok(value) => {
+                            self.mode.store(MODE_STREAMABLE, Ordering::Release);
+                            return Ok(value);
+                        }
+                        Err(StreamableError::Unsupported(_)) => {
+                            let mut state = self.open_sse().await?;
+                            let value = self
+                                .send_sse_request(&mut state, id, method, params)
+                                .await?;
+                            *self.sse_state.lock().await = Some(state);
+                            self.mode.store(MODE_SSE, Ordering::Release);
+                            return Ok(value);
+                        }
+                        Err(StreamableError::Failed(message)) => return Err(message),
+                    }
+                }
+                _ => return Err("Invalid HTTP transport mode".to_string()),
+            }
         }
     }
 
@@ -168,7 +188,7 @@ impl HttpClientTransport {
         if content_type.contains("text/event-stream") {
             let mut response = response;
             let mut buffer = String::new();
-            read_sse_jsonrpc_response(&mut response, &mut buffer, Some(id), self.request_timeout)
+            read_sse_jsonrpc_response(&mut response, &mut buffer, Some(id), self.request_timeout())
                 .await
                 .map_err(StreamableError::Failed)
         } else {
@@ -194,30 +214,45 @@ impl HttpClientTransport {
         method: &str,
         params: Option<Value>,
     ) -> Result<(), String> {
-        let mut mode = self.mode.lock().await;
-        match &mut *mode {
-            HttpMode::Streamable => self
-                .send_streamable_notification(method, params)
-                .await
-                .map_err(StreamableError::into_message),
-            HttpMode::Sse(state) => self.send_sse_notification(state, method, params).await,
-            HttpMode::Unknown => match self
-                .send_streamable_notification(method, params.clone())
-                .await
-            {
-                Ok(()) => {
-                    *mode = HttpMode::Streamable;
-                    Ok(())
+        loop {
+            match self.mode.load(Ordering::Acquire) {
+                MODE_STREAMABLE => {
+                    return self
+                        .send_streamable_notification(method, params)
+                        .await
+                        .map_err(StreamableError::into_message);
                 }
-                Err(StreamableError::Unsupported(_)) => {
-                    let mut state = self.open_sse().await?;
-                    self.send_sse_notification(&mut state, method, params)
-                        .await?;
-                    *mode = HttpMode::Sse(state);
-                    Ok(())
+                MODE_SSE => {
+                    let mut state = self.sse_state.lock().await;
+                    let state = state.as_mut().ok_or("SSE transport state is unavailable")?;
+                    return self.send_sse_notification(state, method, params).await;
                 }
-                Err(StreamableError::Failed(message)) => Err(message),
-            },
+                MODE_UNKNOWN => {
+                    let _transition = self.mode_transition.lock().await;
+                    if self.mode.load(Ordering::Acquire) != MODE_UNKNOWN {
+                        continue;
+                    }
+                    match self
+                        .send_streamable_notification(method, params.clone())
+                        .await
+                    {
+                        Ok(()) => {
+                            self.mode.store(MODE_STREAMABLE, Ordering::Release);
+                            return Ok(());
+                        }
+                        Err(StreamableError::Unsupported(_)) => {
+                            let mut state = self.open_sse().await?;
+                            self.send_sse_notification(&mut state, method, params)
+                                .await?;
+                            *self.sse_state.lock().await = Some(state);
+                            self.mode.store(MODE_SSE, Ordering::Release);
+                            return Ok(());
+                        }
+                        Err(StreamableError::Failed(message)) => return Err(message),
+                    }
+                }
+                _ => return Err("Invalid HTTP transport mode".to_string()),
+            }
         }
     }
 
@@ -313,9 +348,12 @@ impl HttpClientTransport {
             buffer: String::new(),
         };
         loop {
-            let event =
-                read_next_sse_event(&mut state.response, &mut state.buffer, self.request_timeout)
-                    .await?;
+            let event = read_next_sse_event(
+                &mut state.response,
+                &mut state.buffer,
+                self.request_timeout(),
+            )
+            .await?;
             if event.event.as_deref() == Some("endpoint") {
                 state.endpoint = resolve_sse_endpoint(&self.url, &event.data)?;
                 return Ok(state);
@@ -341,7 +379,7 @@ impl HttpClientTransport {
             &mut state.response,
             &mut state.buffer,
             Some(id),
-            self.request_timeout,
+            self.request_timeout(),
         )
         .await
     }
@@ -378,6 +416,14 @@ impl HttpClientTransport {
             Err(format!("SSE message post failed: {}", response.status()))
         }
     }
+
+    fn request_timeout(&self) -> Duration {
+        Duration::from_millis(self.request_timeout_ms.load(Ordering::Relaxed))
+    }
+}
+
+fn duration_millis(duration: Duration) -> u64 {
+    duration.as_millis().min(u64::MAX as u128) as u64
 }
 
 impl StreamableError {
@@ -592,7 +638,10 @@ mod tests {
     };
     use futures::{stream::Stream, StreamExt};
     use std::convert::Infallible;
-    use std::sync::Arc;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering as AtomicOrdering},
+        Arc,
+    };
     use tokio::sync::{mpsc, Mutex};
 
     #[derive(Clone)]
@@ -668,6 +717,30 @@ mod tests {
 
     async fn delayed_streamable_json(Json(body): Json<Value>) -> impl IntoResponse {
         tokio::time::sleep(Duration::from_millis(200)).await;
+        let id = body.get("id").cloned().unwrap_or(Value::Null);
+        Json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": { "ok": true }
+        }))
+    }
+
+    #[derive(Clone)]
+    struct ConcurrentHttpState {
+        active: Arc<AtomicUsize>,
+        max_active: Arc<AtomicUsize>,
+    }
+
+    async fn concurrent_streamable_json(
+        State(state): State<ConcurrentHttpState>,
+        Json(body): Json<Value>,
+    ) -> impl IntoResponse {
+        let active = state.active.fetch_add(1, AtomicOrdering::SeqCst) + 1;
+        state.max_active.fetch_max(active, AtomicOrdering::SeqCst);
+        if body.get("method").and_then(Value::as_str) != Some("initialize") {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        state.active.fetch_sub(1, AtomicOrdering::SeqCst);
         let id = body.get("id").cloned().unwrap_or(Value::Null);
         Json(serde_json::json!({
             "jsonrpc": "2.0",
@@ -937,6 +1010,46 @@ mod tests {
             .expect_err("slow JSON response should time out");
 
         assert!(err.contains("timed out"));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn established_streamable_http_requests_run_concurrently() {
+        let state = ConcurrentHttpState {
+            active: Arc::new(AtomicUsize::new(0)),
+            max_active: Arc::new(AtomicUsize::new(0)),
+        };
+        let app = Router::new()
+            .route("/mcp", post(concurrent_streamable_json))
+            .with_state(state.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to bind test server");
+        let addr = listener.local_addr().expect("failed to read local addr");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server failed");
+        });
+        let transport = HttpClientTransport::new(
+            &format!("http://{addr}/mcp"),
+            HashMap::new(),
+            Duration::from_secs(5),
+        );
+        transport
+            .send_request(1, "initialize", Some(serde_json::json!({})))
+            .await
+            .expect("initialize streamable mode");
+        state.max_active.store(0, AtomicOrdering::SeqCst);
+
+        let (first, second) = tokio::join!(
+            transport.send_request(2, "tools/call", Some(serde_json::json!({}))),
+            transport.send_request(3, "tools/call", Some(serde_json::json!({}))),
+        );
+
+        assert!(first.is_ok());
+        assert!(second.is_ok());
+        assert_eq!(state.max_active.load(AtomicOrdering::SeqCst), 2);
         server.abort();
     }
 

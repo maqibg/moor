@@ -31,7 +31,7 @@ export function Dashboard() {
   const { t } = useI18n();
   const { servers } = useServerList();
   const { profiles } = useProfiles();
-  const { logs } = useLogs();
+  const { logs } = useLogs({ limit: 6 });
   const [runtimeInfo, setRuntimeInfo] = useState<SidecarInfo | null>(null);
   const mcpEndpoint = `${runtimeInfo?.baseUrl ?? "http://127.0.0.1:9223"}/mcp`;
 
@@ -44,7 +44,7 @@ export function Dashboard() {
   const errored = servers.filter((s) => s.status === "error").length;
   const activeProfile = profiles.find((p) => p.isActive);
 
-  const recentLogs = logs.slice(0, 6);
+  const recentLogs = logs;
   const recentServers = servers.slice(0, 5);
 
   return (

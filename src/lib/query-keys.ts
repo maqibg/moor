@@ -17,7 +17,12 @@ export const settingKeys = {
 
 export const logKeys = {
   all: () => ["logs"] as const,
-  list: (filters?: { server_id?: string; tool_name?: string; from?: string; to?: string }) =>
-    ["logs", filters] as const,
+  list: (filters?: {
+    server_id?: string;
+    tool_name?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+  }) => ["logs", "list", filters] as const,
   stats: () => ["logs", "stats"] as const,
 };

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
-import { parseMoorSSEEvent } from "./SSEContext";
+import { QueryClient } from "@tanstack/react-query";
+import { serverKeys } from "@/lib/query-keys";
+import type { Server } from "@moor/types";
+import { applyMoorEventToQueryCache, parseMoorSSEEvent } from "./SSEContext";
 
 describe("parseMoorSSEEvent", () => {
   it("accepts valid typed event payloads", () => {
@@ -43,5 +46,28 @@ describe("parseMoorSSEEvent", () => {
       ),
     ).toBeNull();
     expect(warnings).toHaveLength(1);
+  });
+});
+
+describe("applyMoorEventToQueryCache", () => {
+  it("patches server status once at the provider boundary", () => {
+    const queryClient = new QueryClient();
+    const server: Server = {
+      id: "server-1",
+      name: "Test",
+      connectionType: "stdio",
+      status: "stopped",
+      autoStart: false,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    };
+    queryClient.setQueryData(serverKeys.list(), [server]);
+
+    applyMoorEventToQueryCache(queryClient, {
+      type: "server:status",
+      data: { serverId: server.id, status: "running", errorMessage: null },
+    });
+
+    expect(queryClient.getQueryData<Server[]>(serverKeys.list())?.[0]?.status).toBe("running");
   });
 });

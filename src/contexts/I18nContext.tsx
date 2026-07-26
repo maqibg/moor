@@ -1,4 +1,4 @@
-import { createContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import zhTranslations from "@/locales/zh.json";
 
 type Language = "en" | "zh" | "system";
@@ -49,23 +49,28 @@ export const I18nContext = createContext<I18nContextValue | null>(null);
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [language, setLanguageState] = useState<Language>(getCachedLanguage);
 
-  const setLanguage = (lang: Language) => {
+  const setLanguage = useCallback((lang: Language) => {
     setLanguageState(lang);
     setCachedLanguage(lang);
-  };
+  }, []);
 
-  const t = (key: string, vars?: Record<string, string>): string => {
-    const resolved = resolveLanguage(language);
-    let text = translations[resolved]?.[key] ?? key; // fallback to key (English)
+  const t = useCallback(
+    (key: string, vars?: Record<string, string>): string => {
+      const resolved = resolveLanguage(language);
+      let text = translations[resolved]?.[key] ?? key; // fallback to key (English)
 
-    if (vars) {
-      Object.entries(vars).forEach(([k, v]) => {
-        text = text.replace(new RegExp(`\\{\\{${k}\\}\\}`, "g"), v);
-      });
-    }
+      if (vars) {
+        Object.entries(vars).forEach(([k, v]) => {
+          text = text.split(`{{${k}}}`).join(v);
+        });
+      }
 
-    return text;
-  };
+      return text;
+    },
+    [language],
+  );
+
+  const value = useMemo(() => ({ language, setLanguage, t }), [language, setLanguage, t]);
 
   useEffect(() => {
     // Apply language attribute to html element for potential CSS hooks
@@ -73,7 +78,5 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     document.documentElement.setAttribute("lang", resolved);
   }, [language]);
 
-  return (
-    <I18nContext.Provider value={{ language, setLanguage, t }}>{children}</I18nContext.Provider>
-  );
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }

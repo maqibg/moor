@@ -2,7 +2,10 @@ use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 #[cfg(all(target_os = "macos", not(test)))]
 use std::process::{Command as StdCommand, Stdio as StdStdio};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{
+    atomic::{AtomicI64, AtomicU64, Ordering},
+    Arc, Mutex, OnceLock,
+};
 use std::time::Duration;
 #[cfg(all(target_os = "macos", not(test)))]
 use std::time::Instant;
@@ -24,14 +27,14 @@ const STDERR_REDACTED: &str = "[REDACTED]";
 const LOGIN_SHELL_PATH_TIMEOUT: Duration = Duration::from_millis(1500);
 
 pub struct StdioClientTransport {
-    child: Option<Child>,
+    child: AsyncMutex<Option<Child>>,
     stdin_handle: Arc<AsyncMutex<Option<tokio::process::ChildStdin>>>,
     pending: PendingMap,
     stderr_lines: StderrLines,
-    next_id: Arc<Mutex<i64>>,
-    reader_handle: Option<tokio::task::JoinHandle<()>>,
+    next_id: AtomicI64,
+    reader_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     alive_rx: watch::Receiver<bool>,
-    request_timeout: Duration,
+    request_timeout_ms: AtomicU64,
 }
 
 impl StdioClientTransport {
@@ -118,14 +121,14 @@ impl StdioClientTransport {
         });
 
         Ok(Self {
-            child: Some(child),
+            child: AsyncMutex::new(Some(child)),
             stdin_handle,
             pending,
             stderr_lines,
-            next_id: Arc::new(Mutex::new(1)),
-            reader_handle: Some(reader_handle),
+            next_id: AtomicI64::new(1),
+            reader_handle: Mutex::new(Some(reader_handle)),
             alive_rx,
-            request_timeout,
+            request_timeout_ms: AtomicU64::new(duration_millis(request_timeout)),
         })
     }
 
@@ -137,12 +140,7 @@ impl StdioClientTransport {
     }
 
     pub async fn send_request(&self, method: &str, params: Option<Value>) -> Result<Value, String> {
-        let id = {
-            let mut next = self.next_id.lock().unwrap();
-            let id = *next;
-            *next += 1;
-            id
-        };
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
 
         let request = serde_json::json!({
             "jsonrpc": "2.0",
@@ -171,7 +169,8 @@ impl StdioClientTransport {
                 .map_err(|e| format!("stdin flush failed: {e}"))?;
         }
 
-        match tokio::time::timeout(self.request_timeout, rx).await {
+        let request_timeout = self.request_timeout();
+        match tokio::time::timeout(request_timeout, rx).await {
             Ok(Ok(response)) => {
                 if let Some(error) = response.get("error") {
                     let msg = error
@@ -188,7 +187,7 @@ impl StdioClientTransport {
                 map.remove(&id);
                 Err(format!(
                     "request timed out after {}",
-                    format_timeout_duration(self.request_timeout)
+                    format_timeout_duration(request_timeout)
                 ))
             }
         }
@@ -220,16 +219,18 @@ impl StdioClientTransport {
             .map_err(|e| format!("stdin flush failed: {e}"))
     }
 
-    pub async fn close(&mut self) -> Result<(), String> {
+    pub async fn close(&self) -> Result<(), String> {
         {
             let mut stdin_opt = self.stdin_handle.lock().await;
             *stdin_opt = None;
         }
-        if let Some(child) = self.child.as_mut() {
+        let mut child = self.child.lock().await;
+        if let Some(child) = child.as_mut() {
             let _ = child.kill().await;
             let _ = child.wait().await;
         }
-        if let Some(handle) = self.reader_handle.take() {
+        *child = None;
+        if let Some(handle) = self.reader_handle.lock().unwrap().take() {
             handle.abort();
         }
         {
@@ -248,18 +249,29 @@ impl StdioClientTransport {
         self.alive_rx.clone()
     }
 
-    pub fn set_request_timeout(&mut self, request_timeout: Duration) {
-        self.request_timeout = request_timeout;
+    pub fn set_request_timeout(&self, request_timeout: Duration) {
+        self.request_timeout_ms
+            .store(duration_millis(request_timeout), Ordering::Relaxed);
+    }
+
+    fn request_timeout(&self) -> Duration {
+        Duration::from_millis(self.request_timeout_ms.load(Ordering::Relaxed))
     }
 }
 
 impl Drop for StdioClientTransport {
     fn drop(&mut self) {
         // 兜底停止 reader task，避免 close 未执行时后台读取继续挂住。
-        if let Some(handle) = self.reader_handle.take() {
-            handle.abort();
+        if let Ok(handle) = self.reader_handle.get_mut() {
+            if let Some(handle) = handle.take() {
+                handle.abort();
+            }
         }
     }
+}
+
+fn duration_millis(duration: Duration) -> u64 {
+    duration.as_millis().min(u64::MAX as u128) as u64
 }
 
 #[cfg(any(windows, test))]
@@ -324,11 +336,30 @@ fn authorization_stderr_regex() -> &'static regex_lite::Regex {
 }
 
 /// Build the environment for stdio MCP server processes.
+#[cfg(all(test, unix))]
 pub fn build_stdio_environment(
     parent_env: &HashMap<String, String>,
     server_env: Option<&HashMap<String, String>>,
 ) -> HashMap<String, String> {
     let login_shell_path = login_shell_path_for_platform();
+    build_stdio_environment_with_login_shell_path(
+        parent_env,
+        server_env,
+        login_shell_path.as_deref(),
+    )
+}
+
+pub async fn build_stdio_environment_async(
+    parent_env: &HashMap<String, String>,
+    server_env: Option<&HashMap<String, String>>,
+) -> HashMap<String, String> {
+    #[cfg(target_os = "macos")]
+    let login_shell_path = tokio::task::spawn_blocking(login_shell_path_for_platform)
+        .await
+        .unwrap_or(None);
+    #[cfg(not(target_os = "macos"))]
+    let login_shell_path: Option<String> = None;
+
     build_stdio_environment_with_login_shell_path(
         parent_env,
         server_env,
@@ -423,11 +454,12 @@ fn login_shell_path_for_platform() -> Option<String> {
         .clone()
 }
 
-#[cfg(any(not(target_os = "macos"), test))]
+#[cfg(all(test, unix))]
 fn login_shell_path_for_platform() -> Option<String> {
     None
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn parse_login_shell_path_stdout(stdout: &[u8]) -> Option<String> {
     let stdout = std::str::from_utf8(stdout).ok()?;
     stdout
@@ -693,6 +725,7 @@ mod tests {
 #[cfg(test)]
 mod stdio_env_tests {
     use super::*;
+    #[cfg(unix)]
     use std::collections::HashMap;
 
     #[cfg(unix)]

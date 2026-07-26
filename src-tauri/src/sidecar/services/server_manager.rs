@@ -6,23 +6,23 @@ use crate::sidecar::mcp::transport::mcp_client::{
     HttpConnectConfig, McpClient, StdioConnectConfig,
 };
 use crate::sidecar::mcp::transport::stdio_client::{
-    build_stdio_environment, find_executable_on_path,
+    build_stdio_environment_async, find_executable_on_path,
 };
 use crate::sidecar::services::event_bus::{EventBus, Evt};
-use crate::sidecar::services::settings;
-use crate::sidecar::services::tool_catalog::{ToolCatalogService, ToolDetail};
+use crate::sidecar::services::settings::{self, Settings, SettingsCache};
+use crate::sidecar::services::tool_catalog::{ToolCatalogEntry, ToolCatalogService, ToolDetail};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::Mutex;
+use tokio::sync::{watch, Mutex};
 
 /// 运行时 MCP 会话接口。连接建立后,ServerManager 通过它列工具、调工具、断开、
 /// 读存活信号。真实适配器是 McpClient;测试里用假适配器实现它。
 /// async 方法手写 BoxFuture,让 trait 可作 `dyn McpSession` 用。
-pub trait McpSession: Send {
+pub trait McpSession: Send + Sync {
     #[allow(dead_code)]
     fn list_tools(
         &self,
@@ -32,8 +32,8 @@ pub trait McpSession: Send {
         tool_name: &'a str,
         args: Value,
     ) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>>;
-    fn disconnect(&mut self) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>>;
-    fn set_request_timeout_ms(&mut self, request_timeout_ms: u32);
+    fn disconnect(&self) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>>;
+    fn set_request_timeout_ms(&self, request_timeout_ms: u32);
     fn alive_receiver(&self) -> Option<tokio::sync::watch::Receiver<bool>>;
 }
 
@@ -58,12 +58,35 @@ pub trait McpConnector: Send + Sync {
 #[derive(Clone)]
 struct ServerSlot {
     name: String,
-    status: ServerStatus,
+    status_tx: watch::Sender<ServerStatus>,
     auto_start: bool,
     start_token: u64,
     start_deadline: Option<Instant>,
     start_timeout_ms: Option<u32>,
-    session: Option<Arc<Mutex<Box<dyn McpSession>>>>,
+    session: Option<Arc<dyn McpSession>>,
+}
+
+impl ServerSlot {
+    fn new(name: String, auto_start: bool) -> Self {
+        let (status_tx, _) = watch::channel(ServerStatus::Stopped);
+        Self {
+            name,
+            status_tx,
+            auto_start,
+            start_token: 0,
+            start_deadline: None,
+            start_timeout_ms: None,
+            session: None,
+        }
+    }
+
+    fn status(&self) -> ServerStatus {
+        self.status_tx.borrow().clone()
+    }
+
+    fn set_status(&self, status: ServerStatus) {
+        self.status_tx.send_replace(status);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +118,22 @@ pub struct ServerManager {
     db: Arc<Database>,
     event_bus: Arc<EventBus>,
     connector: Arc<dyn McpConnector>,
+    settings_cache: Arc<SettingsCache>,
+    catalog_cache: Mutex<Option<CachedToolCatalog>>,
+}
+
+struct CachedToolCatalog {
+    generation: u64,
+    profile_id: Option<String>,
+    entries: Arc<Vec<ToolCatalogEntry>>,
+    routes: Arc<HashMap<String, ToolRoute>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolRoute {
+    pub server_id: String,
+    pub server_name: String,
+    pub tool_name: String,
 }
 
 #[derive(Clone, Copy)]
@@ -114,11 +153,20 @@ impl ServerManager {
         event_bus: Arc<EventBus>,
         connector: Arc<dyn McpConnector>,
     ) -> Self {
+        let initial_settings = match settings::get_settings(&db) {
+            Ok(settings) => settings,
+            Err(error) => {
+                tracing::warn!("Failed to initialize settings cache, using defaults: {error}");
+                settings::default_settings()
+            }
+        };
         Self {
             slots: Arc::new(Mutex::new(HashMap::new())),
             db,
             event_bus,
             connector,
+            settings_cache: Arc::new(SettingsCache::new(initial_settings)),
+            catalog_cache: Mutex::new(None),
         }
     }
 
@@ -132,15 +180,7 @@ impl ServerManager {
         for row in servers {
             map.insert(
                 row.id.clone(),
-                ServerSlot {
-                    name: row.name.clone(),
-                    status: ServerStatus::Stopped,
-                    auto_start: row.auto_start,
-                    start_token: 0,
-                    start_deadline: None,
-                    start_timeout_ms: None,
-                    session: None,
-                },
+                ServerSlot::new(row.name.clone(), row.auto_start),
             );
         }
     }
@@ -148,7 +188,7 @@ impl ServerManager {
     pub async fn get_server(&self, id: &str) -> Option<ManagedServer> {
         let slots = self.slots.lock().await;
         slots.get(id).map(|s| ManagedServer {
-            status: s.status.as_str().to_string(),
+            status: s.status().as_str().to_string(),
         })
     }
 
@@ -158,15 +198,7 @@ impl ServerManager {
         };
         self.slots.lock().await.insert(
             server.id.clone(),
-            ServerSlot {
-                name: server.name.clone(),
-                status: ServerStatus::Stopped,
-                auto_start: server.auto_start,
-                start_token: 0,
-                start_deadline: None,
-                start_timeout_ms: None,
-                session: None,
-            },
+            ServerSlot::new(server.name.clone(), server.auto_start),
         );
         managed
     }
@@ -176,7 +208,7 @@ impl ServerManager {
             let slots = self.slots.lock().await;
             slots
                 .get(id)
-                .map(|s| matches!(s.status, ServerStatus::Running | ServerStatus::Starting))
+                .map(|s| matches!(s.status(), ServerStatus::Running | ServerStatus::Starting))
                 .unwrap_or(false)
         };
         if should_stop {
@@ -186,7 +218,13 @@ impl ServerManager {
         let tool_repo = ToolDiscoveryRepository::new(&self.db);
         let _ = tool_repo.delete_by_server_id(id);
         let repo = ServerRepository::new(&self.db);
-        repo.remove(id).is_ok()
+        let removed = repo.remove(id).is_ok();
+        if removed {
+            self.event_bus.emit(Evt::ServerTools {
+                server_id: id.to_string(),
+            });
+        }
+        removed
     }
 
     pub async fn update_server_memory(
@@ -195,6 +233,7 @@ impl ServerManager {
         name: Option<&str>,
         auto_start: Option<bool>,
     ) {
+        let name_changed = name.is_some();
         let mut slots = self.slots.lock().await;
         if let Some(slot) = slots.get_mut(id) {
             if let Some(name) = name {
@@ -203,6 +242,12 @@ impl ServerManager {
             if let Some(auto_start) = auto_start {
                 slot.auto_start = auto_start;
             }
+        }
+        drop(slots);
+        if name_changed {
+            self.event_bus.emit(Evt::ServerTools {
+                server_id: id.to_string(),
+            });
         }
     }
 
@@ -213,7 +258,7 @@ impl ServerManager {
             let Some(slot) = slots.get_mut(id) else {
                 return Err(format!("Server {id} not found"));
             };
-            match &slot.status {
+            match slot.status() {
                 ServerStatus::Running => return Ok(()),
                 ServerStatus::Starting => (
                     true,
@@ -222,7 +267,7 @@ impl ServerManager {
                     slot.start_timeout_ms,
                 ),
                 _ => {
-                    slot.status = ServerStatus::Starting;
+                    slot.set_status(ServerStatus::Starting);
                     slot.start_token = slot.start_token.wrapping_add(1);
                     let wait_deadline = Instant::now()
                         + Duration::from_millis(timeouts.start_ms as u64)
@@ -270,16 +315,16 @@ impl ServerManager {
                 let accepted = {
                     let mut slots = self.slots.lock().await;
                     if let Some(slot) = slots.get_mut(id) {
-                        if matches!(slot.status, ServerStatus::Starting)
+                        if matches!(slot.status(), ServerStatus::Starting)
                             && slot.start_token == start_token
                         {
-                            slot.status = ServerStatus::Running;
+                            slot.set_status(ServerStatus::Running);
                             slot.start_deadline = None;
                             slot.start_timeout_ms = None;
                             let client = client
                                 .take()
                                 .expect("client should be available before session is accepted");
-                            slot.session = Some(Arc::new(tokio::sync::Mutex::new(client)));
+                            slot.session = Some(Arc::from(client));
                             true
                         } else {
                             false
@@ -289,7 +334,7 @@ impl ServerManager {
                     }
                 };
                 if !accepted {
-                    if let Some(mut client) = client {
+                    if let Some(client) = client {
                         let _ = client.disconnect().await;
                     }
                     return Ok(());
@@ -304,10 +349,10 @@ impl ServerManager {
                 let should_persist = {
                     let mut slots = self.slots.lock().await;
                     if let Some(slot) = slots.get_mut(id) {
-                        if matches!(slot.status, ServerStatus::Starting)
+                        if matches!(slot.status(), ServerStatus::Starting)
                             && slot.start_token == start_token
                         {
-                            slot.status = ServerStatus::Error(public_msg.clone());
+                            slot.set_status(ServerStatus::Error(public_msg.clone()));
                             slot.start_deadline = None;
                             slot.start_timeout_ms = None;
                             slot.session = None;
@@ -336,20 +381,29 @@ impl ServerManager {
         start_timeout_ms: Option<u32>,
     ) -> Result<(), String> {
         let deadline = start_deadline.unwrap_or_else(|| Instant::now() + Duration::from_secs(31));
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let mut status = {
             let slots = self.slots.lock().await;
-            match slots.get(id) {
-                Some(slot) => match &slot.status {
-                    ServerStatus::Running => return Ok(()),
-                    ServerStatus::Error(msg) => return Err(msg.clone()),
-                    ServerStatus::Starting => {}
-                    _ => return Ok(()),
-                },
-                None => return Err(format!("Server {id} not found")),
+            slots
+                .get(id)
+                .ok_or_else(|| format!("Server {id} not found"))?
+                .status_tx
+                .subscribe()
+        };
+        loop {
+            match status.borrow_and_update().clone() {
+                ServerStatus::Running => return Ok(()),
+                ServerStatus::Error(message) => return Err(message),
+                ServerStatus::Starting => {}
+                ServerStatus::Stopped => return Ok(()),
             }
-            if Instant::now() >= deadline {
+            let now = Instant::now();
+            if now >= deadline {
                 break;
+            }
+            match tokio::time::timeout(deadline - now, status.changed()).await {
+                Ok(Ok(())) => {}
+                Ok(Err(_)) => return Err(format!("Server {id} was removed while starting")),
+                Err(_) => break,
             }
         }
         let timeout_ms = start_timeout_ms
@@ -367,10 +421,13 @@ impl ServerManager {
             let Some(slot) = slots.get_mut(id) else {
                 return Ok(());
             };
-            if !matches!(slot.status, ServerStatus::Running | ServerStatus::Starting) {
+            if !matches!(
+                slot.status(),
+                ServerStatus::Running | ServerStatus::Starting
+            ) {
                 return Ok(());
             }
-            slot.status = ServerStatus::Stopped;
+            slot.set_status(ServerStatus::Stopped);
             slot.start_token = slot.start_token.wrapping_add(1);
             slot.start_deadline = None;
             slot.start_timeout_ms = None;
@@ -378,8 +435,7 @@ impl ServerManager {
         };
 
         if let Some(session) = old_session {
-            let mut client = session.lock().await;
-            let _ = client.disconnect().await;
+            let _ = session.disconnect().await;
         }
         self.persist_server_status(id, "stopped", None);
         Ok(())
@@ -414,13 +470,7 @@ impl ServerManager {
         }
     }
 
-    pub async fn call_tool(&self, exposed_name: &str, args: Value) -> Result<Value, String> {
-        let catalog = self.get_tool_catalog(None).await;
-        let owner = catalog
-            .iter()
-            .find(|t| t.exposed_name == exposed_name)
-            .ok_or_else(|| format!("Tool \"{exposed_name}\" not found or disabled"))?;
-
+    pub async fn call_tool(&self, owner: &ToolRoute, args: Value) -> Result<Value, String> {
         let session_arc = {
             let slots = self.slots.lock().await;
             let slot = slots
@@ -432,17 +482,95 @@ impl ServerManager {
         }?;
 
         let request_timeout_ms = self.get_timeout_settings().request_ms;
-        let mut client = session_arc.lock().await;
-        client.set_request_timeout_ms(request_timeout_ms);
-        client.call_tool(&owner.tool_name, args).await
+        session_arc.set_request_timeout_ms(request_timeout_ms);
+        session_arc.call_tool(&owner.tool_name, args).await
     }
 
     pub async fn get_tool_catalog(
         &self,
         profile_id: Option<&str>,
     ) -> Vec<crate::sidecar::services::tool_catalog::ToolCatalogEntry> {
-        let callable_ids = self.get_callable_server_ids().await;
-        ToolCatalogService::get_tool_catalog(&self.db, profile_id, Some(&callable_ids))
+        if let Some(profile_id) = profile_id {
+            let callable_ids = self.get_callable_server_ids().await;
+            let db = self.db.clone();
+            let profile_id = profile_id.to_string();
+            return match tokio::task::spawn_blocking(move || {
+                ToolCatalogService::get_tool_catalog(&db, Some(&profile_id), Some(&callable_ids))
+            })
+            .await
+            {
+                Ok(catalog) => catalog,
+                Err(error) => {
+                    tracing::warn!("Tool catalog query task failed: {error}");
+                    Vec::new()
+                }
+            };
+        }
+        self.active_catalog().await.entries.as_ref().clone()
+    }
+
+    pub async fn resolve_tool(&self, exposed_name: &str) -> (Option<String>, Option<ToolRoute>) {
+        let catalog = self.active_catalog().await;
+        (
+            catalog.profile_id.clone(),
+            catalog.routes.get(exposed_name).cloned(),
+        )
+    }
+
+    async fn active_catalog(&self) -> CachedToolCatalogView {
+        let mut cache = self.catalog_cache.lock().await;
+        loop {
+            let generation = self.event_bus.catalog_generation();
+            if let Some(cached) = cache
+                .as_ref()
+                .filter(|cached| cached.generation == generation)
+            {
+                return CachedToolCatalogView::from(cached);
+            }
+
+            let callable_ids = self.get_callable_server_ids().await;
+            let db = self.db.clone();
+            let catalog = tokio::task::spawn_blocking(move || {
+                ToolCatalogService::get_tool_catalog_snapshot(&db, None, Some(&callable_ids))
+            })
+            .await;
+            let (profile_id, entries) = match catalog {
+                Ok(catalog) => catalog,
+                Err(error) => {
+                    tracing::warn!("Active tool catalog query task failed: {error}");
+                    return CachedToolCatalogView {
+                        profile_id: None,
+                        entries: Arc::new(Vec::new()),
+                        routes: Arc::new(HashMap::new()),
+                    };
+                }
+            };
+            if generation != self.event_bus.catalog_generation() {
+                continue;
+            }
+            let entries = Arc::new(entries);
+            let routes = Arc::new(
+                entries
+                    .iter()
+                    .map(|entry| {
+                        (
+                            entry.exposed_name.clone(),
+                            ToolRoute {
+                                server_id: entry.server_id.clone(),
+                                server_name: entry.server_name.clone(),
+                                tool_name: entry.tool_name.clone(),
+                            },
+                        )
+                    })
+                    .collect(),
+            );
+            *cache = Some(CachedToolCatalog {
+                generation,
+                profile_id,
+                entries,
+                routes,
+            });
+        }
     }
 
     pub async fn get_tool_details(
@@ -451,14 +579,32 @@ impl ServerManager {
         profile_id: Option<&str>,
     ) -> Vec<ToolDetail> {
         let callable_ids = self.get_callable_server_ids().await;
-        ToolCatalogService::get_tool_details(&self.db, server_id, profile_id, Some(&callable_ids))
+        let db = self.db.clone();
+        let server_id = server_id.to_string();
+        let profile_id = profile_id.map(str::to_string);
+        match tokio::task::spawn_blocking(move || {
+            ToolCatalogService::get_tool_details(
+                &db,
+                &server_id,
+                profile_id.as_deref(),
+                Some(&callable_ids),
+            )
+        })
+        .await
+        {
+            Ok(details) => details,
+            Err(error) => {
+                tracing::warn!("Tool detail query task failed: {error}");
+                Vec::new()
+            }
+        }
     }
 
     async fn get_callable_server_ids(&self) -> HashSet<String> {
         let slots = self.slots.lock().await;
         slots
             .iter()
-            .filter(|(_, s)| matches!(s.status, ServerStatus::Running))
+            .filter(|(_, s)| matches!(s.status(), ServerStatus::Running))
             .map(|(id, _)| id.clone())
             .collect()
     }
@@ -481,10 +627,10 @@ impl ServerManager {
                     {
                         let mut slots = slots.lock().await;
                         if let Some(slot) = slots.get_mut(&server_id) {
-                            if matches!(slot.status, ServerStatus::Running)
+                            if matches!(slot.status(), ServerStatus::Running)
                                 && slot.start_token == start_token
                             {
-                                slot.status = ServerStatus::Error(msg.clone());
+                                slot.set_status(ServerStatus::Error(msg.clone()));
                                 slot.session = None;
                             } else {
                                 return;
@@ -542,15 +688,35 @@ impl ServerManager {
     }
 
     fn get_timeout_settings(&self) -> ServerTimeouts {
-        settings::get_settings(&self.db)
-            .map(|settings| ServerTimeouts {
-                request_ms: settings.advanced.mcp_request_timeout_ms,
-                start_ms: settings.advanced.mcp_server_start_timeout_ms,
-            })
-            .unwrap_or(ServerTimeouts {
-                request_ms: settings::MCP_TIMEOUT_MS_DEFAULT,
-                start_ms: settings::MCP_TIMEOUT_MS_DEFAULT,
-            })
+        let settings = self.settings_cache.snapshot();
+        ServerTimeouts {
+            request_ms: settings.advanced.mcp_request_timeout_ms,
+            start_ms: settings.advanced.mcp_server_start_timeout_ms,
+        }
+    }
+
+    pub fn settings_cache(&self) -> Arc<SettingsCache> {
+        self.settings_cache.clone()
+    }
+
+    pub fn apply_settings(&self, settings: Settings) {
+        self.settings_cache.replace(settings);
+    }
+}
+
+struct CachedToolCatalogView {
+    profile_id: Option<String>,
+    entries: Arc<Vec<ToolCatalogEntry>>,
+    routes: Arc<HashMap<String, ToolRoute>>,
+}
+
+impl From<&CachedToolCatalog> for CachedToolCatalogView {
+    fn from(cached: &CachedToolCatalog) -> Self {
+        Self {
+            profile_id: cached.profile_id.clone(),
+            entries: cached.entries.clone(),
+            routes: cached.routes.clone(),
+        }
     }
 }
 
@@ -661,7 +827,7 @@ impl StdioHttpConnector {
             .env
             .as_ref()
             .and_then(|v| serde_json::from_value(v.clone()).ok());
-        let env = build_stdio_environment(&parent_env, server_env.as_ref());
+        let env = build_stdio_environment_async(&parent_env, server_env.as_ref()).await;
 
         verify_command_available(command, &env)?;
 
@@ -676,7 +842,7 @@ impl StdioHttpConnector {
             })
             .unwrap_or_default();
 
-        let mut client = McpClient::connect_stdio(StdioConnectConfig {
+        let client = McpClient::connect_stdio(StdioConnectConfig {
             server_name: config.name.clone(),
             command: command.to_string(),
             args,
@@ -713,7 +879,7 @@ impl StdioHttpConnector {
             Some(&env),
         );
 
-        let mut client = McpClient::connect_http(HttpConnectConfig {
+        let client = McpClient::connect_http(HttpConnectConfig {
             server_name: config.name.clone(),
             url: url.to_string(),
             headers,
@@ -1088,7 +1254,7 @@ process.stdin.on("data", (chunk) => {{
         .expect("startup should return before the outer timeout")
         .expect("startup should succeed with the configured startup timeout");
 
-        settings::update_settings(
+        let updated_settings = settings::update_settings(
             &db,
             serde_json::json!({
                 "advanced": {
@@ -1097,10 +1263,14 @@ process.stdin.on("data", (chunk) => {{
             }),
         )
         .expect("settings update should succeed");
+        manager.apply_settings(updated_settings);
+
+        let (_, owner) = manager.resolve_tool("phase__echo").await;
+        let owner = owner.expect("phase tool should resolve");
 
         let err = tokio::time::timeout(
             std::time::Duration::from_millis(6_500),
-            manager.call_tool("phase__echo", serde_json::json!({})),
+            manager.call_tool(&owner, serde_json::json!({})),
         )
         .await
         .expect("tool call should return before the outer timeout")
@@ -1472,9 +1642,8 @@ process.stdin.on("data", (chunk) => {{
             tokio::spawn(async move { manager.start_auto_start_servers().await })
         };
 
-        let fast_started_before_slow_completed = tokio::time::timeout(
-            std::time::Duration::from_millis(1_000),
-            async {
+        let fast_started_before_slow_completed =
+            tokio::time::timeout(std::time::Duration::from_millis(1_000), async {
                 loop {
                     let starts = std::fs::read_to_string(&marker).unwrap_or_default();
                     if starts.lines().any(|line| line == "fast") {
@@ -1482,9 +1651,8 @@ process.stdin.on("data", (chunk) => {{
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                 }
-            },
-        )
-        .await;
+            })
+            .await;
 
         auto_start.await.expect("auto-start task failed");
         manager
@@ -1525,17 +1693,59 @@ process.stdin.on("data", (chunk) => {{
         ) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>> {
             Box::pin(async move { Ok(serde_json::json!({})) })
         }
-        fn disconnect(&mut self) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+        fn disconnect(&self) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
             let d = self.disconnected.clone();
             Box::pin(async move {
                 d.store(true, std::sync::atomic::Ordering::SeqCst);
                 Ok(())
             })
         }
-        fn set_request_timeout_ms(&mut self, _ms: u32) {
+        fn set_request_timeout_ms(&self, _ms: u32) {
             self.timeout_calls
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
+        fn alive_receiver(&self) -> Option<tokio::sync::watch::Receiver<bool>> {
+            None
+        }
+    }
+
+    struct ConcurrentSession {
+        active_calls: Arc<std::sync::atomic::AtomicUsize>,
+        max_active_calls: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl McpSession for ConcurrentSession {
+        fn list_tools(
+            &self,
+        ) -> Pin<Box<dyn Future<Output = Result<Vec<ToolInsert>, String>> + Send + '_>> {
+            Box::pin(async { Ok(vec![]) })
+        }
+
+        fn call_tool<'a>(
+            &'a self,
+            _tool_name: &'a str,
+            _args: Value,
+        ) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>> {
+            Box::pin(async move {
+                let active = self
+                    .active_calls
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                    + 1;
+                self.max_active_calls
+                    .fetch_max(active, std::sync::atomic::Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                self.active_calls
+                    .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(serde_json::json!({ "ok": true }))
+            })
+        }
+
+        fn disconnect(&self) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn set_request_timeout_ms(&self, _request_timeout_ms: u32) {}
+
         fn alive_receiver(&self) -> Option<tokio::sync::watch::Receiver<bool>> {
             None
         }
@@ -1598,6 +1808,44 @@ process.stdin.on("data", (chunk) => {{
             connector,
         ));
         (db, manager)
+    }
+
+    #[tokio::test]
+    async fn tool_calls_to_one_server_are_not_serialized_by_the_manager() {
+        let data_dir = temp_data_dir("concurrent-tool-calls");
+        std::fs::create_dir_all(&data_dir).expect("create temp dir");
+        let (connector, _) = FakeConnector::new();
+        let (db, manager) = build_manager_with_fake_connector(&data_dir, Arc::new(connector));
+        let active_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let max_active_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let server_id = "concurrent-server".to_string();
+        let mut slot = ServerSlot::new("Concurrent".to_string(), false);
+        slot.set_status(ServerStatus::Running);
+        slot.session = Some(Arc::new(ConcurrentSession {
+            active_calls,
+            max_active_calls: max_active_calls.clone(),
+        }));
+        manager.slots.lock().await.insert(server_id.clone(), slot);
+        let route = ToolRoute {
+            server_id,
+            server_name: "Concurrent".to_string(),
+            tool_name: "echo".to_string(),
+        };
+
+        let (first, second) = tokio::join!(
+            manager.call_tool(&route, serde_json::json!({ "call": 1 })),
+            manager.call_tool(&route, serde_json::json!({ "call": 2 })),
+        );
+
+        assert!(first.is_ok());
+        assert!(second.is_ok());
+        assert_eq!(
+            max_active_calls.load(std::sync::atomic::Ordering::SeqCst),
+            2
+        );
+        drop(manager);
+        drop(db);
+        let _ = std::fs::remove_dir_all(data_dir);
     }
 
     #[tokio::test]

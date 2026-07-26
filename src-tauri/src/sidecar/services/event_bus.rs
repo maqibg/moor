@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::broadcast;
 
 /// 类型化领域事件。每个变体对应一种 SSE 事件类型,携带自己的载荷。
@@ -56,19 +57,33 @@ impl Evt {
 
 pub struct EventBus {
     sender: broadcast::Sender<Evt>,
+    catalog_generation: AtomicU64,
 }
 
 impl EventBus {
     pub fn new(capacity: usize) -> Self {
         let (sender, _) = broadcast::channel(capacity);
-        Self { sender }
+        Self {
+            sender,
+            catalog_generation: AtomicU64::new(0),
+        }
     }
 
     pub fn emit(&self, event: Evt) {
+        match &event {
+            Evt::ServerStatus { .. } | Evt::ServerTools { .. } | Evt::ProfileActivated { .. } => {
+                self.catalog_generation.fetch_add(1, Ordering::AcqRel);
+            }
+            Evt::SettingsChanged { .. } => {}
+        }
         let _ = self.sender.send(event);
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Evt> {
         self.sender.subscribe()
+    }
+
+    pub fn catalog_generation(&self) -> u64 {
+        self.catalog_generation.load(Ordering::Acquire)
     }
 }

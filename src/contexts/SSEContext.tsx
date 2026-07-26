@@ -1,6 +1,24 @@
-import { createContext, useContext, useEffect, useRef, useCallback, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from "react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { getApiRuntime, buildApiUrl, buildApiHeaders, resetRuntime } from "@/lib/api/runtime";
-import type { MoorEvent, MoorEventData, MoorEventType, ServerStatus } from "@moor/types";
+import { logKeys, profileKeys, serverKeys, settingKeys } from "@/lib/query-keys";
+import { mergeServerStatusEvent } from "@/hooks/server-patch-utils";
+import type {
+  MoorEvent,
+  MoorEventData,
+  MoorEventType,
+  Server,
+  ServerDetail,
+  ServerStatus,
+} from "@moor/types";
 
 interface SSEContextValue {
   subscribe: <T extends MoorEventType>(
@@ -74,7 +92,40 @@ export function parseMoorSSEEvent(
   }
 }
 
+export function applyMoorEventToQueryCache(queryClient: QueryClient, event: MoorEvent) {
+  switch (event.type) {
+    case "server:status":
+      queryClient.setQueryData<Server[]>(serverKeys.list(), (servers) =>
+        servers ? mergeServerStatusEvent(servers, event.data) : servers,
+      );
+      queryClient.setQueryData<ServerDetail>(serverKeys.detail(event.data.serverId), (server) =>
+        server
+          ? {
+              ...server,
+              status: event.data.status,
+              errorMessage: event.data.errorMessage ?? null,
+            }
+          : server,
+      );
+      break;
+    case "server:tools":
+      void queryClient.invalidateQueries({
+        queryKey: serverKeys.toolsRoot(event.data.serverId),
+      });
+      break;
+    case "profile:activated":
+      void queryClient.invalidateQueries({ queryKey: profileKeys.list() });
+      void queryClient.invalidateQueries({ queryKey: serverKeys.list() });
+      void queryClient.invalidateQueries({ queryKey: logKeys.all() });
+      break;
+    case "settings:changed":
+      queryClient.setQueryData(settingKeys.all(), event.data);
+      break;
+  }
+}
+
 export function SSEProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const handlersRef = useRef(new Map<MoorEventType, Set<(data: unknown) => void>>());
 
   useEffect(() => {
@@ -127,6 +178,7 @@ export function SSEProvider({ children }: { children: ReactNode }) {
 
             const typedEvent = parseMoorSSEEvent(event, data);
             if (!typedEvent) continue;
+            applyMoorEventToQueryCache(queryClient, typedEvent);
 
             const handlers = handlersRef.current.get(typedEvent.type);
             if (handlers) {
@@ -146,7 +198,7 @@ export function SSEProvider({ children }: { children: ReactNode }) {
 
     void connect();
     return () => controller.abort();
-  }, []);
+  }, [queryClient]);
 
   const subscribe = useCallback(
     <T extends MoorEventType>(eventType: T, handler: (data: MoorEventData<T>) => void) => {
@@ -162,7 +214,9 @@ export function SSEProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  return <SSEContext.Provider value={{ subscribe }}>{children}</SSEContext.Provider>;
+  const value = useMemo(() => ({ subscribe }), [subscribe]);
+
+  return <SSEContext.Provider value={value}>{children}</SSEContext.Provider>;
 }
 
 export function useSSEEvent<T extends MoorEventType>(

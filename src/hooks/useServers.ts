@@ -52,33 +52,26 @@ export function useServerList() {
     [queryClient],
   );
 
-  const mergeStatusEvent = useCallback(
+  const handleStatusEvent = useCallback(
     (eventData: ServerStatusEventPayload) => {
-      setData((prev) => mergeServerStatusEvent(prev, eventData));
       if (eventData.status !== "starting") {
         clearServerAction(eventData.serverId);
       }
     },
-    [clearServerAction, setData],
+    [clearServerAction],
   );
-
-  const refreshSilently = useCallback(async () => {
-    await queryClient.refetchQueries({ queryKey: serverKeys.list() });
-  }, [queryClient]);
 
   const refresh = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: serverKeys.list() });
   }, [queryClient]);
 
-  useSSEEvent("server:status", (data) => mergeStatusEvent(data));
-  useSSEEvent("server:tools", () => void refreshSilently());
+  useSSEEvent("server:status", handleStatusEvent);
 
   return {
     servers,
     loading,
     error: error?.message ?? null,
     refresh,
-    refreshSilently,
     serverActions,
     setServerAction,
     clearServerAction,
@@ -261,15 +254,12 @@ export function useServers() {
     loading: list.loading,
     error: list.error,
     refresh: list.refresh,
-    refreshSilently: list.refreshSilently,
     serverActions: list.serverActions,
     ...actions,
   };
 }
 
 export function useServer(id: string | undefined) {
-  const queryClient = useQueryClient();
-
   const {
     data: server,
     isLoading,
@@ -278,12 +268,6 @@ export function useServer(id: string | undefined) {
     queryKey: serverKeys.detail(id!),
     queryFn: ({ signal }) => api<ServerDetail>(routes.servers.detail(id!), { signal }),
     enabled: !!id,
-  });
-
-  useSSEEvent("server:status", (eventData) => {
-    if (eventData.serverId === id) {
-      void queryClient.invalidateQueries({ queryKey: serverKeys.detail(id!) });
-    }
   });
 
   return { server, isLoading, error };

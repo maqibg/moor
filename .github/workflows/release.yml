@@ -95,6 +95,15 @@ jobs:
       - name: Validate version consistency
         run: node scripts/sync-version.mjs --check
 
+      - name: Type-check frontend
+        run: pnpm run typecheck
+
+      - name: Lint frontend
+        run: pnpm run lint
+
+      - name: Test frontend
+        run: pnpm run test
+
       - name: Extract changelog for release
         id: changelog
         shell: bash
@@ -116,6 +125,9 @@ jobs:
           cache-bin: false
           cache-save-if: false
           rustflags: ""
+
+      - name: Test Rust backend
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --target ${{ matrix.target }}
 
       - name: Build Tauri App
         uses: tauri-apps/tauri-action@v0
