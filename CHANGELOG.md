@@ -1,5 +1,11 @@
 # moor
 
+## 0.6.6
+
+### Patch Changes
+
+- bea8243: 完善 Release 测试闸门：在 Rust 测试前生成真实前端产物，并让启动超时测试兼容请求级与启动级计时器的等价超时结果。
+
 ## 0.6.5
 
 ### Patch Changes
