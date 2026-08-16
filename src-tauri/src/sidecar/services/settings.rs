@@ -45,6 +45,7 @@ pub struct AdvancedSettings {
     pub log_retention_days: u16,
     pub enable_audit_logging: bool,
     pub sidecar_port: u16,
+    pub allow_lan_mcp_access: bool,
     pub mcp_request_timeout_ms: u32,
     pub mcp_server_start_timeout_ms: u32,
 }
@@ -80,6 +81,7 @@ struct PartialAdvancedSettings {
     log_retention_days: Option<u16>,
     enable_audit_logging: Option<bool>,
     sidecar_port: Option<u16>,
+    allow_lan_mcp_access: Option<bool>,
     mcp_request_timeout_ms: Option<u32>,
     mcp_server_start_timeout_ms: Option<u32>,
 }
@@ -110,6 +112,7 @@ pub fn default_settings() -> Settings {
             log_retention_days: 30,
             enable_audit_logging: true,
             sidecar_port: 9223,
+            allow_lan_mcp_access: false,
             mcp_request_timeout_ms: MCP_TIMEOUT_MS_DEFAULT,
             mcp_server_start_timeout_ms: MCP_TIMEOUT_MS_DEFAULT,
         },
@@ -176,6 +179,11 @@ fn settings_to_db_entries(settings: &Settings) -> Result<Vec<(&'static str, Stri
         (
             "advanced.sidecarPort",
             serde_json::to_string(&settings.advanced.sidecar_port).map_err(|e| e.to_string())?,
+        ),
+        (
+            "advanced.allowLanMcpAccess",
+            serde_json::to_string(&settings.advanced.allow_lan_mcp_access)
+                .map_err(|e| e.to_string())?,
         ),
         (
             "advanced.mcpRequestTimeoutMs",
@@ -300,6 +308,9 @@ pub fn merge_settings_value(mut base: Settings, value: Value) -> Result<Settings
         if let Some(value) = advanced.sidecar_port {
             base.advanced.sidecar_port = value;
         }
+        if let Some(value) = advanced.allow_lan_mcp_access {
+            base.advanced.allow_lan_mcp_access = value;
+        }
         if let Some(value) = advanced.mcp_request_timeout_ms {
             base.advanced.mcp_request_timeout_ms = value;
         }
@@ -369,6 +380,21 @@ mod tests {
         let db = Database::open(&data_dir.join("moor.db")).expect("failed to open settings db");
         db.run_migrations().expect("failed to migrate settings db");
         db
+    }
+
+    #[test]
+    fn updates_allow_lan_mcp_access() {
+        let data_dir = temp_data_dir("lan-access");
+        let db = test_db(&data_dir);
+
+        let updated = update_settings(
+            &db,
+            serde_json::json!({ "advanced": { "allowLanMcpAccess": true } }),
+        )
+        .expect("settings update should succeed");
+
+        assert!(updated.advanced.allow_lan_mcp_access);
+        let _ = fs::remove_dir_all(data_dir);
     }
 
     #[test]

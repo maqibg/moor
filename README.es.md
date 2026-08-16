@@ -124,6 +124,8 @@ http://127.0.0.1:9223/mcp
 
 El endpoint `/mcp` es solo para loopback y no requiere `X-Moor-Token`. Moor usa `X-Moor-Token` solo para APIs de gestión local entre el WebView y el sidecar, por lo que no necesitas pegarlo en las configuraciones del agente.
 
+Para conectarte desde WSL2 (modo NAT) u otro dispositivo de la LAN, activa **Settings → Advanced → Allow LAN MCP Access** y reinicia Moor. El gateway entonces escucha en todas las interfaces y `/mcp` acepta además hosts de redes privadas (`10.x.x.x`, `172.16.x.x`–`172.31.x.x`, `192.168.x.x`); `/api/*` sigue siendo solo loopback. Windows puede pedir permiso de firewall la primera vez.
+
 Moor se encarga del resto — agregando `tools/list`, enrutando `tools/call`, y filtrando basado en tu Perfil activo.
 
 <a id="features"></a>

@@ -261,7 +261,12 @@ pub fn run() {
             // Find available port
             let api_token = generate_api_token()?;
             let max_port = configured_port.saturating_add(10);
-            let port = find_available_port("127.0.0.1", configured_port, max_port)
+            let host = if settings.advanced.allow_lan_mcp_access {
+                "0.0.0.0"
+            } else {
+                "127.0.0.1"
+            };
+            let port = find_available_port(host, configured_port, max_port)
                 .map_err(|e| format!("Failed to find available port: {e}"))?;
 
             // Write port file for external tool discovery
@@ -298,7 +303,7 @@ pub fn run() {
             app.manage(state);
 
             // Spawn axum server
-            let host = "127.0.0.1".to_string();
+            let host = host.to_string();
             let sm = server_manager.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = sidecar::http::start_server(app_state, &host, port).await {

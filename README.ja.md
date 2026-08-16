@@ -124,6 +124,8 @@ http://127.0.0.1:9223/mcp
 
 `/mcp` エンドポイントはループバックのみであり、`X-Moor-Token` は不要です。Moor は WebView と Sidecar 間のローカル管理 API にのみ `X-Moor-Token` を使用するため、Agent の設定に貼り付ける必要はありません。
 
+WSL2（NAT モード）や LAN 内の他のデバイスから接続するには、**Settings → Advanced → Allow LAN MCP Access** を有効にして Moor を再起動します。ゲートウェイはすべてのインターフェースでリッスンし、`/mcp` はプライベートネットワークのホスト（`10.x.x.x`、`172.16.x.x`–`172.31.x.x`、`192.168.x.x`）も受け付けます。`/api/*` は引き続きループバックのみです。Windows では初回にファイアウォールの許可が求められる場合があります。
+
 Moor は残りのすべてを処理します — `tools/list` の集約、`tools/call` のルーティング、アクティブな Profile に基づくフィルタリング。
 
 <a id="features"></a>

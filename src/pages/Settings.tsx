@@ -47,17 +47,13 @@ function SettingRow({ label, description, children }: SettingRowProps) {
 
 // --- Restart Banner ---
 
-function RestartBanner() {
+function RestartBanner({ title, message }: { title: string; message: string }) {
   return (
     <div className="flex items-start gap-3 bg-cursor-orange/10 border border-cursor-orange/20 rounded-xl px-4 py-3">
       <AlertTriangle className="h-4 w-4 text-cursor-orange shrink-0 mt-0.5" />
       <div className="min-w-0 space-y-0.5">
-        <p className="font-headline text-sm text-cursor-dark">
-          Port changes require reopening Moor
-        </p>
-        <p className="font-body text-xs text-[var(--fg-55)]">
-          Quit and reopen Moor to apply the configured port.
-        </p>
+        <p className="font-headline text-sm text-cursor-dark">{title}</p>
+        <p className="font-body text-xs text-[var(--fg-55)]">{message}</p>
       </div>
     </div>
   );
@@ -233,10 +229,12 @@ function AdvancedSection({
   runtimeInfo,
   onError,
   onPortApplied,
+  onLanAccessApplied,
 }: {
   runtimeInfo: SidecarInfo | null;
   onError: (message: string | null) => void;
   onPortApplied: (port: number) => void;
+  onLanAccessApplied: () => void;
 }) {
   const { settings, updateSettings } = useSettings();
   const [localRetention, setLocalRetention] = useState(String(settings.advanced.logRetentionDays));
@@ -289,6 +287,16 @@ function AdvancedSection({
     }
   };
 
+  const toggleLanAccess = async (value: boolean) => {
+    try {
+      onError(null);
+      await updateSettings({ advanced: { allowLanMcpAccess: value } });
+      onLanAccessApplied();
+    } catch (err) {
+      onError(getErrorMessage(err, "Failed to update LAN MCP access"));
+    }
+  };
+
   type TimeoutKey = "mcpRequestTimeoutMs" | "mcpServerStartTimeoutMs";
 
   const applyTimeout = async (
@@ -334,6 +342,15 @@ function AdvancedSection({
             <Switch
               checked={settings.advanced.enableAuditLogging}
               onCheckedChange={(v) => void updateSettings({ advanced: { enableAuditLogging: v } })}
+            />
+          </SettingRow>
+          <SettingRow
+            label="Allow LAN MCP Access"
+            description="Expose /mcp on all interfaces for WSL2/LAN clients; /api stays loopback-only (requires restart)"
+          >
+            <Switch
+              checked={settings.advanced.allowLanMcpAccess}
+              onCheckedChange={(v) => void toggleLanAccess(v)}
             />
           </SettingRow>
           <SettingRow
@@ -503,6 +520,7 @@ export function SettingsPage() {
   const [runtimeInfo, setRuntimeInfo] = useState<SidecarInfo | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [portChangeApplied, setPortChangeApplied] = useState(false);
+  const [lanAccessChangeApplied, setLanAccessChangeApplied] = useState(false);
   const { settings, isLoading, isError, error, resetSettings } = useSettings();
   const loadState = getSettingsPageLoadState({ isLoading, isError, error });
   const portBannerState = loadState.canRenderControls
@@ -537,6 +555,7 @@ export function SettingsPage() {
       resetRuntime();
       await refreshRuntimeInfo();
       setPortChangeApplied(false);
+      setLanAccessChangeApplied(false);
     } catch (err) {
       setErrorMessage(getErrorMessage(err, "Failed to reset settings"));
     }
@@ -565,7 +584,18 @@ export function SettingsPage() {
       />
 
       {loadState.kind === "error" && <ErrorBanner message={loadState.message} />}
-      {portBannerState?.kind === "restart" && <RestartBanner />}
+      {portBannerState?.kind === "restart" && (
+        <RestartBanner
+          title="Port changes require reopening Moor"
+          message="Quit and reopen Moor to apply the configured port."
+        />
+      )}
+      {lanAccessChangeApplied && (
+        <RestartBanner
+          title="LAN access changes require reopening Moor"
+          message="Quit and reopen Moor to apply the new network binding."
+        />
+      )}
       {errorMessage && <ErrorBanner message={errorMessage} />}
 
       {loadState.canRenderControls && (
@@ -589,6 +619,7 @@ export function SettingsPage() {
               <AdvancedSection
                 runtimeInfo={runtimeInfo}
                 onError={setErrorMessage}
+                onLanAccessApplied={() => setLanAccessChangeApplied(true)}
                 onPortApplied={(nextPort) =>
                   setPortChangeApplied(runtimeInfo !== null && runtimeInfo.port !== nextPort)
                 }

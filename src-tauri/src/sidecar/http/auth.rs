@@ -23,6 +23,15 @@ fn is_loopback_host(host: &str) -> bool {
     matches!(hostname.as_str(), "127.0.0.1" | "localhost" | "::1")
 }
 
+// RFC1918 only — accepted for /mcp when allowLanMcpAccess is on; /api/* stays loopback-only (#60)
+fn is_private_host(host: &str) -> bool {
+    host.split(':')
+        .next()
+        .unwrap_or("")
+        .parse::<std::net::Ipv4Addr>()
+        .is_ok_and(|ip| ip.is_private())
+}
+
 fn is_allowed_origin(origin: &str) -> bool {
     ALLOWED_DEV_ORIGINS.contains(&origin)
 }
@@ -34,9 +43,14 @@ pub async fn auth_middleware(
 ) -> Response {
     let headers = req.headers();
 
-    // Host check
+    // Host check — /mcp additionally accepts RFC1918 hosts (WSL2/LAN, #60);
+    // unreachable unless the gateway is bound to 0.0.0.0 via allowLanMcpAccess.
+    let path = req.uri().path();
+    let mcp_path = path == "/mcp";
     if let Some(host) = headers.get(header::HOST) {
-        if !is_loopback_host(host.to_str().unwrap_or("")) {
+        let host = host.to_str().unwrap_or("");
+        let host_ok = is_loopback_host(host) || (mcp_path && is_private_host(host));
+        if !host_ok {
             return super::json_error_response(
                 StatusCode::FORBIDDEN,
                 "FORBIDDEN",
@@ -84,7 +98,6 @@ pub async fn auth_middleware(
     }
 
     // Token check for /api/* paths — before running handler
-    let path = req.uri().path().to_string();
     if path.starts_with("/api/") {
         let token = headers.get("x-moor-token").and_then(|v| v.to_str().ok());
         match token {
@@ -135,5 +148,15 @@ mod tests {
         assert!(is_loopback_host("127.0.0.1:9223"));
         assert!(is_loopback_host("[::1]:9223"));
         assert!(!is_loopback_host("192.168.1.10:9223"));
+    }
+
+    #[test]
+    fn recognizes_rfc1918_hosts_only() {
+        assert!(is_private_host("10.0.0.5:9223"));
+        assert!(is_private_host("172.26.32.1:9223"));
+        assert!(is_private_host("192.168.1.10:9223"));
+        assert!(!is_private_host("8.8.8.8:9223"));
+        assert!(!is_private_host("localhost:9223"));
+        assert!(!is_private_host("172.32.0.1:9223"));
     }
 }

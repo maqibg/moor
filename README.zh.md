@@ -120,6 +120,8 @@ http://127.0.0.1:9223/mcp
 
 `/mcp` 端点仅限本地回环访问，不需要 `X-Moor-Token`。Moor 仅在 WebView 与 Sidecar 之间的本地管理 API 中使用 `X-Moor-Token`，因此你无需将它粘贴到 Agent 配置中。
 
+如需从 WSL2（NAT 模式）或局域网内其他设备连接，在 **Settings → Advanced** 开启 **Allow LAN MCP Access** 并重启 Moor。网关将监听所有网络接口，`/mcp` 额外接受私有网段主机（`10.x.x.x`、`172.16.x.x`–`172.31.x.x`、`192.168.x.x`）；`/api/*` 仍仅限回环并要求 Token。Windows 首次监听时可能弹出防火墙授权，需要允许。
+
 Moor 会处理剩下的一切——聚合 `tools/list`、路由 `tools/call`、并根据激活的 Profile 进行过滤。
 
 ### 调整 MCP 超时

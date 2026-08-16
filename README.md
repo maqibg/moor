@@ -125,6 +125,8 @@ http://127.0.0.1:9223/mcp
 
 The `/mcp` endpoint is loopback-only and does not require `X-Moor-Token`. Moor uses `X-Moor-Token` only for local management APIs between the WebView and gateway, so you do not need to paste it into agent configs.
 
+To connect from WSL2 (NAT mode) or another LAN device, enable **Settings → Advanced → Allow LAN MCP Access** and restart Moor. The gateway then binds to all interfaces and `/mcp` additionally accepts private-network hosts (`10.x.x.x`, `172.16.x.x`–`172.31.x.x`, `192.168.x.x`); `/api/*` stays loopback-only and token-protected. Windows may prompt to allow Moor through the firewall.
+
 Moor handles the rest — aggregating `tools/list`, routing `tools/call`, and filtering based on your active Profile.
 
 ## Features
