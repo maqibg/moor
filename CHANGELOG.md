@@ -1,5 +1,15 @@
 # moor
 
+## 0.7.0
+
+### Minor Changes
+
+- Gateway: add opt-in "Allow LAN MCP Access" advanced setting — binds 0.0.0.0 and accepts RFC1918 hosts on /mcp for WSL2 (NAT) and LAN clients; /api/\* stays loopback-only
+
+### Patch Changes
+
+- Gateway: fix Windows port fallback after quick restarts — bind with SO_REUSEADDR so the configured port survives TIME_WAIT, keeping MCP client configs stable
+
 ## 0.6.2
 
 ### Patch Changes
