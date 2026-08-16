@@ -100,9 +100,13 @@ pub fn json_error_response(
 
 pub async fn start_server(state: Arc<AppState>, host: &str, port: u16) -> Result<(), String> {
     let addr = format!("{host}:{port}");
-    let listener = TcpListener::bind(&addr)
-        .await
+    let std_listener =
+        crate::bind_listener(host, port).map_err(|e| format!("Failed to bind {addr}: {e}"))?;
+    std_listener
+        .set_nonblocking(true)
         .map_err(|e| format!("Failed to bind {addr}: {e}"))?;
+    let listener =
+        TcpListener::from_std(std_listener).map_err(|e| format!("Failed to bind {addr}: {e}"))?;
     let app = create_app(state);
     axum::serve(listener, app)
         .await

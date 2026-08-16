@@ -140,9 +140,26 @@ fn apply_login_autostart_setting(app: tauri::AppHandle, enabled: bool) -> Result
     apply_autostart_setting(&app, enabled)
 }
 
+// SO_REUSEADDR lets the gateway rebind its configured port after a quick restart;
+// without it Windows rejects the bind while old connections sit in TIME_WAIT (#59).
+fn bind_listener(host: &str, port: u16) -> Result<std::net::TcpListener, std::io::Error> {
+    let addr: std::net::SocketAddr = format!("{host}:{port}")
+        .parse()
+        .map_err(std::io::Error::other)?;
+    let socket = socket2::Socket::new(
+        socket2::Domain::for_address(addr),
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )?;
+    socket.set_reuse_address(true)?;
+    socket.bind(&addr.into())?;
+    socket.listen(128)?;
+    Ok(socket.into())
+}
+
 fn find_available_port(host: &str, start: u16, max: u16) -> Result<u16, String> {
     for port in start..=max {
-        if std::net::TcpListener::bind((host, port)).is_ok() {
+        if bind_listener(host, port).is_ok() {
             return Ok(port);
         }
     }
