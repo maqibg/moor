@@ -13,6 +13,7 @@ pub struct ProfileService;
 
 /// profile 操作可能产生的领域错误。与 ServerServiceError 对齐,
 /// 让路由层能把 NotFound 等映射到正确的 HTTP 状态码。
+#[derive(Debug)]
 pub enum ProfileServiceError {
     NotFound(String),
     Validation(String),
@@ -137,7 +138,11 @@ impl ProfileService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sidecar::db::server_repo::{ServerInsertInput, ServerRepository};
+    use crate::sidecar::db::tool_discovery_repo::{ToolDiscoveryRepository, ToolInsert};
+    use crate::sidecar::services::tool_catalog::ToolCatalogService;
     use axum::http::StatusCode;
+    use std::time::SystemTime;
 
     #[test]
     fn validation_error_maps_to_bad_request() {
@@ -146,5 +151,86 @@ mod tests {
 
         assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
         assert_eq!(err.code(), "VALIDATION_ERROR");
+    }
+
+    // Hot-Swap 契约：激活另一个 profile 后，下一次目录解析立即反映其可见 Tools，并发出事件
+    #[test]
+    fn activate_hot_swaps_visible_tool_catalog_and_emits_event() {
+        let ts = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("moor-profile-hot-swap-{ts}.db"));
+        let db = Database::open(&path).expect("open db");
+        db.run_migrations().expect("migrate");
+        let profile_repo = ProfileRepository::new(&db);
+        profile_repo.seed_default().expect("seed default profile");
+
+        ServerRepository::new(&db)
+            .insert_one_with_id(
+                "server-a",
+                0,
+                &ServerInsertInput {
+                    name: "Alpha".into(),
+                    connection_type: "stdio".into(),
+                    command: Some("node".into()),
+                    args: None,
+                    url: None,
+                    env: None,
+                    headers: None,
+                    working_dir: None,
+                    auto_start: false,
+                },
+            )
+            .expect("insert server");
+        ToolDiscoveryRepository::new(&db)
+            .replace_tools_for_server(
+                "server-a",
+                &[ToolInsert {
+                    name: "search".to_string(),
+                    description: None,
+                    input_schema: None,
+                }],
+            )
+            .expect("insert tool");
+        profile_repo
+            .assign_to_active_profile(&["server-a".to_string()])
+            .expect("assign to default profile");
+
+        let focused = ProfileService::create(&db, "Focused").expect("create profile");
+        ProfileRepository::new(&db)
+            .upsert_profile_server(
+                &focused.id,
+                "server-a",
+                Some(true),
+                Some(&vec!["search".to_string()]),
+            )
+            .expect("deny tool in focused profile");
+
+        let exposed: Vec<String> = ToolCatalogService::get_tool_catalog(&db, None, None)
+            .into_iter()
+            .map(|entry| entry.exposed_name)
+            .collect();
+        assert_eq!(exposed, vec!["alpha__search".to_string()]);
+
+        let event_bus = Arc::new(EventBus::new(8));
+        let mut events = event_bus.subscribe();
+        ProfileService::activate(&db, &event_bus, &focused.id).expect("activate focused");
+
+        let exposed: Vec<String> = ToolCatalogService::get_tool_catalog(&db, None, None)
+            .into_iter()
+            .map(|entry| entry.exposed_name)
+            .collect();
+        assert!(
+            exposed.is_empty(),
+            "Hot-Swap: catalog should reflect the new active profile, got {exposed:?}"
+        );
+
+        match events.try_recv() {
+            Ok(Evt::ProfileActivated { profile_id }) => assert_eq!(profile_id, focused.id),
+            other => panic!("expected ProfileActivated event, got {other:?}"),
+        }
+
+        let _ = std::fs::remove_file(path);
     }
 }

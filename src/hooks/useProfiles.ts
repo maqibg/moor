@@ -75,6 +75,10 @@ export function useProfiles() {
     }) => {
       await apiPut(routes.profiles.updateServer(profileId, serverId), updates);
     },
+    onSuccess: (_data, { serverId }) => {
+      // disabled_tools 变化影响各 profile 变体的 tools 查询，失效归 hook 负责
+      void queryClient.invalidateQueries({ queryKey: serverKeys.toolsRoot(serverId) });
+    },
   });
 
   return {

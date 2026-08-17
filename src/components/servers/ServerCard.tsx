@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import type { Server } from "@moor/types";
-import type { ServerAction } from "@/hooks/server-patch-utils";
+import { resolveDisplayStatus, type ServerAction } from "@/lib/server-status";
 import { cn, getErrorMessage } from "@/lib/utils";
 
 type RemoveFeedback =
@@ -284,10 +284,9 @@ export function ServerCard({
   const [removeError, setRemoveError] = useState<string | null>(null);
   const isRunning = server.status === "running";
   const isError = server.status === "error";
-  const isStarting = server.status === "starting" || action === "starting";
-  const isStopping = action === "stopping";
+  // 合成规则唯一权威在 server-status 模块；isRunning/isError 直读持久态（按钮形态依赖真实 status）
+  const { isStarting, isStopping, status: displayStatus } = resolveDisplayStatus(server, action);
   const commandPreview = getCommandPreview(server);
-  const displayStatus = isStopping ? "stopping" : server.status;
   const removeFeedback = getRemoveFeedback({
     serverName: server.name,
     confirmingRemove,

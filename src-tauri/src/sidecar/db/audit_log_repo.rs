@@ -184,3 +184,117 @@ impl<'a> AuditLogRepository<'a> {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::SystemTime;
+
+    fn temp_db() -> (Database, std::path::PathBuf) {
+        let ts = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("moor-audit-repo-{ts}.db"));
+        let db = Database::open(&path).expect("open db");
+        db.run_migrations().expect("migrate");
+        (db, path)
+    }
+
+    fn insert_log(
+        repo: &AuditLogRepository,
+        id: &str,
+        tool: &str,
+        server: Option<&str>,
+        error: Option<&str>,
+        duration_ms: i64,
+    ) {
+        repo.insert(
+            id,
+            "2026-01-01T00:00:00Z",
+            None,
+            server,
+            tool,
+            None,
+            None,
+            error,
+            duration_ms,
+            None,
+        )
+        .expect("insert log");
+    }
+
+    fn insert_server(db: &Database, id: &str) {
+        use super::super::server_repo::{ServerInsertInput, ServerRepository};
+        ServerRepository::new(db)
+            .insert_one_with_id(
+                id,
+                0,
+                &ServerInsertInput {
+                    name: id.into(),
+                    connection_type: "stdio".into(),
+                    command: Some("node".into()),
+                    args: None,
+                    url: None,
+                    env: None,
+                    headers: None,
+                    working_dir: None,
+                    auto_start: false,
+                },
+            )
+            .expect("insert server");
+    }
+
+    #[test]
+    fn stats_counts_errors_and_computes_error_rate() {
+        let (db, path) = temp_db();
+        let repo = AuditLogRepository::new(&db);
+        insert_server(&db, "s1");
+        insert_log(&repo, "a", "search", Some("s1"), None, 10);
+        insert_log(&repo, "b", "search", Some("s1"), None, 20);
+        insert_log(&repo, "c", "fetch", None, Some("boom"), 30);
+
+        let stats = repo.get_stats().expect("stats");
+
+        assert_eq!(stats.total_calls, 3);
+        assert_eq!(stats.error_calls, 1);
+        assert!((stats.error_rate - 1.0 / 3.0).abs() < 1e-9);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn stats_average_duration_over_logged_calls() {
+        let (db, path) = temp_db();
+        let repo = AuditLogRepository::new(&db);
+        insert_log(&repo, "a", "search", None, None, 10);
+        insert_log(&repo, "b", "search", None, None, 20);
+
+        let stats = repo.get_stats().expect("stats");
+
+        assert_eq!(stats.avg_duration_ms, Some(15.0));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn stats_ranks_top_tools_and_skips_null_servers() {
+        let (db, path) = temp_db();
+        let repo = AuditLogRepository::new(&db);
+        insert_server(&db, "s1");
+        insert_log(&repo, "a", "search", Some("s1"), None, 10);
+        insert_log(&repo, "b", "search", Some("s1"), None, 20);
+        insert_log(&repo, "c", "fetch", None, None, 30);
+
+        let stats = repo.get_stats().expect("stats");
+
+        assert_eq!(stats.top_tools.len(), 2);
+        assert_eq!(stats.top_tools[0].tool_name, "search");
+        assert_eq!(stats.top_tools[0].count, 2);
+        assert_eq!(stats.top_servers.len(), 1);
+        assert_eq!(stats.top_servers[0].server_id, "s1");
+        assert_eq!(stats.top_servers[0].count, 2);
+
+        let _ = std::fs::remove_file(path);
+    }
+}

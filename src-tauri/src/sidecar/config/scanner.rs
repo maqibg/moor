@@ -1,5 +1,5 @@
 use super::clients::{self, ClientMeta};
-use super::import_parser::{self, ParsedImport};
+use super::import_parser::{self, ImportDiagnostic, ParsedImport};
 use std::fs;
 
 use super::import_parser::ScannedServer;
@@ -18,8 +18,22 @@ fn parse_config_file(config_path: &std::path::Path, source: &str, format: &str) 
     };
     let parsed = match format {
         "toml" => import_parser::parse_codex_toml_config(&content, source),
-        // dsh patches carry `!!js` dynamic expressions that cannot be statically evaluated.
-        "yaml" => return ParsedImport::default(),
+        // dsh patches carry `!!js` dynamic expressions that cannot be statically
+        // evaluated; surface a diagnostic instead of returning silently empty.
+        "yaml" => {
+            return ParsedImport {
+                diagnostics: vec![ImportDiagnostic {
+                    source: source.to_string(),
+                    message: "YAML config uses dynamic `!!js` expressions and cannot be statically scanned.".to_string(),
+                    code: None,
+                    line: None,
+                    column: None,
+                    offset: None,
+                    length: None,
+                }],
+                ..ParsedImport::default()
+            };
+        }
         _ => import_parser::parse_json_mcp_config(&content, source),
     };
     ignore_missing_mcp_sections(parsed, source)

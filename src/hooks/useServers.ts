@@ -7,12 +7,14 @@ import { useSSEEvent } from "@/contexts/SSEContext";
 import type { Server, ServerDetail, ServerUpdateInput, ToolDetail } from "@moor/types";
 import { getErrorMessage } from "@/lib/utils";
 import {
-  applyServerAction,
+  failedTransition,
   mergeServerStatusEvent,
+  optimisticTransition,
   syncUpdatedServerCaches,
   type ServerAction,
+  type ServerPatches,
   type ServerStatusEventPayload,
-} from "./server-patch-utils";
+} from "@/lib/server-status";
 
 type ServerMutationResult = "success" | "failed";
 
@@ -93,20 +95,14 @@ export function useServerActions(callbacks?: {
   const queryClient = useQueryClient();
   const { setServerAction, clearServerAction } = callbacks ?? {};
 
-  const setServersData = useCallback(
-    (updater: SetStateAction<Server[]>) => {
-      queryClient.setQueryData<Server[]>(serverKeys.list(), (old) => {
-        const prev = old ?? [];
-        return typeof updater === "function" ? updater(prev) : updater;
-      });
-    },
-    [queryClient],
-  );
-
-  const setServerDetailPatch = useCallback(
-    (id: string, patch: Partial<ServerDetail>) => {
+  // 乐观/失败态由 server-status 模块推导，list 与 detail 双通道在此一次应用
+  const applyServerPatches = useCallback(
+    (id: string, patches: ServerPatches) => {
+      queryClient.setQueryData<Server[]>(serverKeys.list(), (prev) =>
+        prev?.map((server) => (server.id === id ? { ...server, ...patches.list } : server)),
+      );
       queryClient.setQueryData<ServerDetail>(serverKeys.detail(id), (prev) =>
-        prev ? { ...prev, ...patch } : prev,
+        prev ? { ...prev, ...patches.detail } : prev,
       );
     },
     [queryClient],
@@ -141,21 +137,12 @@ export function useServerActions(callbacks?: {
   const startServer = useMutation<ServerMutationResult, Error, string>({
     mutationFn: async (id: string) => {
       setServerAction?.(id, "starting");
-      setServersData((prev) => applyServerAction(prev, id, "starting"));
-      setServerDetailPatch(id, { status: "starting", errorMessage: null });
+      applyServerPatches(id, optimisticTransition("starting"));
       try {
         await apiPost(routes.servers.start(id), {});
         return "success";
       } catch (err) {
-        const errorMessage = getErrorMessage(err);
-        setServersData((prev) =>
-          mergeServerStatusEvent(prev, {
-            serverId: id,
-            status: "error",
-            errorMessage,
-          }),
-        );
-        setServerDetailPatch(id, { status: "error", errorMessage });
+        applyServerPatches(id, failedTransition(getErrorMessage(err)));
         return "failed";
       }
     },
@@ -168,21 +155,12 @@ export function useServerActions(callbacks?: {
   const stopServer = useMutation<ServerMutationResult, Error, string>({
     mutationFn: async (id: string) => {
       setServerAction?.(id, "stopping");
-      setServersData((prev) => applyServerAction(prev, id, "stopping"));
-      setServerDetailPatch(id, { errorMessage: null });
+      applyServerPatches(id, optimisticTransition("stopping"));
       try {
         await apiPost(routes.servers.stop(id), {});
         return "success";
       } catch (err) {
-        const errorMessage = getErrorMessage(err);
-        setServersData((prev) =>
-          mergeServerStatusEvent(prev, {
-            serverId: id,
-            status: "error",
-            errorMessage,
-          }),
-        );
-        setServerDetailPatch(id, { status: "error", errorMessage });
+        applyServerPatches(id, failedTransition(getErrorMessage(err)));
         return "failed";
       }
     },

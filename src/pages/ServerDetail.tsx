@@ -19,6 +19,7 @@ import { useProfiles } from "@/hooks/useProfiles";
 import { useServerActions, useServer, useServerTools } from "@/hooks/useServers";
 import { useEditSession } from "@/hooks/useEditSession";
 import { findDuplicateHeaderKeys, type EditForm } from "@/lib/server-form";
+import { resolveDisplayStatus } from "@/lib/server-status";
 import { cn } from "@/lib/utils";
 import type { ConnectionType } from "@moor/types";
 
@@ -120,7 +121,7 @@ export function ServerDetail() {
   const activeProfile = profiles.find((profile) => profile.isActive);
 
   const { server, isLoading: loading } = useServer(id);
-  const { tools, refresh: refreshTools } = useServerTools(id, activeProfile?.id);
+  const { tools } = useServerTools(id, activeProfile?.id);
 
   const {
     isEditing,
@@ -144,6 +145,8 @@ export function ServerDetail() {
   if (loading || !server?.id) {
     return <PageLoading message="Loading server details..." />;
   }
+
+  const displayStatus = resolveDisplayStatus(server);
 
   const handleDiscoverTools = async () => {
     if (server.status === "running") {
@@ -169,7 +172,6 @@ export function ServerDetail() {
       serverId: id,
       updates: { disabledTools: Array.from(disabledTools) },
     });
-    refreshTools();
   };
 
   const toggleAutoStart = async (value: boolean) => {
@@ -215,9 +217,9 @@ export function ServerDetail() {
             <div
               className={cn(
                 "h-10 w-10 rounded-xl flex items-center justify-center border shrink-0",
-                server.status === "running"
+                displayStatus.status === "running"
                   ? "bg-success-muted/10 text-success-muted border-success-muted/20"
-                  : server.status === "error"
+                  : displayStatus.status === "error"
                     ? "bg-error-warm/10 text-error-warm border-error-warm/20"
                     : "bg-surface-300 text-[var(--fg-35)] border-[var(--fg-08)]",
               )}
@@ -229,7 +231,7 @@ export function ServerDetail() {
                 <h1 className="font-headline text-[22px] tracking-tight text-cursor-dark">
                   {server.name}
                 </h1>
-                <StatusBadge status={server.status} />
+                <StatusBadge status={displayStatus.status} />
               </div>
               <p className="font-mono text-[11px] text-[var(--fg-40)] mt-0.5 truncate">
                 {commandText || "No command configured"}
@@ -252,7 +254,7 @@ export function ServerDetail() {
               <Button variant="outline" onClick={enterEdit}>
                 <Pencil className="h-4 w-4 mr-2" /> Edit
               </Button>
-              {server.status === "running" ? (
+              {displayStatus.status === "running" ? (
                 <Button variant="outline" onClick={() => stopServer(id!)}>
                   <Square className="h-4 w-4 mr-2" /> Stop
                 </Button>

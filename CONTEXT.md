@@ -15,7 +15,7 @@ The single Profile in effect for all Agents at a time; its server/tool toggles d
 _Avoid_: current profile, selected profile.
 
 **Hot-Swap**:
-Changing the Active Profile without disconnecting Agents; the next `tools/list` reflects the change. Affects exposed Tools only, never a Server's run status.
+Changing the Active Profile without disconnecting Agents; the next `tools/list` reflects the change. Affects exposed Tools only, never a Server's run status. Activation emits `profile:activated`; the frontend invalidates its caches on it (contract test: `profile_service` tests).
 _Avoid_: reload, switch.
 
 **exposed name**:
@@ -67,5 +67,5 @@ The deep module covering scan / preview / execute / convert. Still fragmented ac
 _Avoid_: import pipeline, the loose parts.
 
 **Server Status**:
-The pure reducer (frontend) that resolves a Server's displayed status from base query data, optimistic action, SSE `server:status` event, and mutation settle. The interface is its test surface.
+The pure reducer (frontend) that resolves a Server's displayed status from base query data, optimistic action, SSE `server:status` event, and mutation settle, and derives the optimistic/failed cache patches (list + detail channels) for start/stop. Canonical implementation: `src/lib/server-status.ts`. The interface is its test surface.
 _Avoid_: server patch utils, status merge.

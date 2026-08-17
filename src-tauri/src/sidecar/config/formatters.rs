@@ -81,7 +81,6 @@ fn env_ref_for_client(name: &str, client: &ClientMeta) -> String {
     match client.id {
         "claude-code" => format!("${{{name}}}"),
         "cursor" => format!("${{env:{name}}}"),
-        "dsh" => format!("!!js process.env.{name}"),
         _ => format!("{{env:{name}}}"),
     }
 }
@@ -95,7 +94,13 @@ fn yaml_quote(value: &str) -> String {
 fn dsh_server_name(name: &str) -> String {
     let sanitized: String = name
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     let trimmed = sanitized.trim_matches('-');
     if trimmed.is_empty() {
@@ -105,17 +110,10 @@ fn dsh_server_name(name: &str) -> String {
     }
 }
 
-// `!!js` expressions must stay unquoted to remain dynamic; everything else is static.
-fn yaml_scalar(value: &str) -> String {
-    if value.starts_with("!!js ") {
-        value.to_string()
-    } else {
-        yaml_quote(value)
-    }
-}
-
 // Header env refs become one whole `!!js` expression (a partial rewrite would
-// leak as a literal string), matching dsh's official examples.
+// leak as a literal string), matching dsh's official examples. `!!js` is only
+// emitted here — user-supplied values stay quoted so imported `!!js` text
+// can never execute.
 fn dsh_header_value(value: &str) -> String {
     if let Some(var) = value
         .strip_prefix("Bearer {env:")
@@ -124,10 +122,13 @@ fn dsh_header_value(value: &str) -> String {
         // The quoted-scalar form is dsh's documented syntax; a bare backtick
         // template is not a valid YAML node and fails dsh's loud parse.
         format!("!!js '`Bearer ${{process.env.{var}}}`'")
-    } else if let Some(var) = value.strip_prefix("{env:").and_then(|s| s.strip_suffix('}')) {
+    } else if let Some(var) = value
+        .strip_prefix("{env:")
+        .and_then(|s| s.strip_suffix('}'))
+    {
         format!("!!js process.env.{var}")
     } else {
-        yaml_scalar(value)
+        yaml_quote(value)
     }
 }
 
@@ -353,8 +354,14 @@ pub fn format_for_kimi_code(servers: &[ScannedServer], client: &ClientMeta) -> F
 
 // One `dsh-mcp-client` plugin row per server, as a single top-level insert list.
 pub fn format_for_dsh(servers: &[ScannedServer], client: &ClientMeta) -> FormatResult {
-    let mut lines = vec!["- insert:".to_string()];
+    // dsh has no SSE transport; those servers are skipped with a warning below.
+    let mut lines: Vec<String> = vec![];
+    let mut skipped_sse = 0usize;
     for s in servers {
+        if s.connection_type == "sse" {
+            skipped_sse += 1;
+            continue;
+        }
         let server_name = dsh_server_name(&s.name);
         lines.push(format!("    - id: {}", yaml_quote(&server_name)));
         lines.push("      name: '@deepseek-ai/dsh-mcp-client'".to_string());
@@ -379,7 +386,11 @@ pub fn format_for_dsh(servers: &[ScannedServer], client: &ClientMeta) -> FormatR
             if non_empty(&s.env) {
                 lines.push("        env:".to_string());
                 for (k, v) in s.env.as_ref().unwrap() {
-                    lines.push(format!("          {k}: {}", yaml_quote(v)));
+                    lines.push(format!(
+                        "          {}: {}",
+                        yaml_quote(k),
+                        dsh_header_value(v)
+                    ));
                 }
             }
             if let Some(wd) = &s.working_dir {
@@ -394,14 +405,27 @@ pub fn format_for_dsh(servers: &[ScannedServer], client: &ClientMeta) -> FormatR
             if non_empty(&s.headers) {
                 lines.push("        headers:".to_string());
                 for (k, v) in s.headers.as_ref().unwrap() {
-                    lines.push(format!("          {k}: {}", dsh_header_value(v)));
+                    lines.push(format!(
+                        "          {}: {}",
+                        yaml_quote(k),
+                        dsh_header_value(v)
+                    ));
                 }
             }
         }
     }
+    if !lines.is_empty() {
+        lines.insert(0, "- insert:".to_string());
+    }
+    let mut warnings = build_warnings(servers, client);
+    if skipped_sse > 0 {
+        warnings.push(format!(
+            "dsh does not support the SSE transport. Skipped {skipped_sse} SSE server(s)."
+        ));
+    }
     FormatResult {
         content: lines.join("\n"),
-        warnings: build_warnings(servers, client),
+        warnings,
     }
 }
 
@@ -480,7 +504,7 @@ mod tests {
              \x20       transport: streamable-http\n\
              \x20       url: 'http://127.0.0.1:9223/mcp'\n\
              \x20       headers:\n\
-             \x20         Authorization: !!js '`Bearer ${process.env.MOOR_TOKEN}`'"
+             \x20         'Authorization': !!js '`Bearer ${process.env.MOOR_TOKEN}`'"
         );
         assert!(result.warnings.is_empty());
     }
@@ -492,8 +516,31 @@ mod tests {
         assert!(result.content.contains("command: 'npx'"));
         assert!(result.content.contains("args: ['-y', 'server-fs']"));
         // Single quotes inside values double-escape per YAML rules.
-        assert!(result.content.contains("FS_TOKEN: 'abc''x'"));
+        assert!(result.content.contains("'FS_TOKEN': 'abc''x'"));
         assert!(result.content.contains("cwd: '/tmp'"));
+    }
+
+    #[test]
+    fn dsh_rewrites_env_refs_to_js_expressions() {
+        let mut server = stdio_server();
+        server.env = Some(
+            [("MOOR_TOKEN".to_string(), "{env:MOOR_TOKEN}".to_string())]
+                .into_iter()
+                .collect(),
+        );
+        let result = format_for_dsh(std::slice::from_ref(&server), client("dsh"));
+        assert!(result
+            .content
+            .contains("'MOOR_TOKEN': !!js process.env.MOOR_TOKEN"));
+    }
+
+    #[test]
+    fn dsh_skips_sse_servers_with_warning() {
+        let mut sse = http_server();
+        sse.connection_type = "sse".to_string();
+        let result = format_for_dsh(&[http_server(), sse], client("dsh"));
+        assert_eq!(result.content.matches("- id:").count(), 1);
+        assert!(result.warnings.iter().any(|w| w.contains("SSE transport")));
     }
 
     #[test]
@@ -505,10 +552,7 @@ mod tests {
 
     #[test]
     fn formats_kimi_code_mcp_servers() {
-        let result = format_for_kimi_code(
-            &[http_server(), stdio_server()],
-            client("kimi-code"),
-        );
+        let result = format_for_kimi_code(&[http_server(), stdio_server()], client("kimi-code"));
         let parsed: Value = serde_json::from_str(&result.content).unwrap();
         let servers = parsed.get("mcpServers").unwrap().as_object().unwrap();
         assert_eq!(servers.len(), 2);

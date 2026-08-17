@@ -54,17 +54,17 @@ Entries with a `command` field are stdio servers; entries with a `url` field and
 
 Optional fields:
 
-| Field                | Type                    | Applies to  | Description                                                                   |
-| -------------------- | ----------------------- | ----------- | ----------------------------------------------------------------------------- |
-| `env`                | `Record<string,string>` | stdio       | Environment variables injected into the child process                         |
-| `cwd`                | `string`                | stdio       | Working directory for the child process                                       |
-| `headers`            | `Record<string,string>` | HTTP, SSE   | Static request headers appended to every request                              |
-| `bearerTokenEnvVar`  | `string`                | HTTP, SSE   | Name of an environment variable that contains a bearer token                  |
-| `enabled`            | `boolean`               | All         | Set to `false` to disable this server                                         |
-| `startupTimeoutMs`   | `number`                | All         | Connection timeout from `1` to `2147483647` milliseconds; default `30000`     |
-| `toolTimeoutMs`      | `number`                | All         | Timeout from `1` to `2147483647` milliseconds for a single tool call          |
-| `enabledTools`       | `string[]`              | All         | Tool allowlist                                                                |
-| `disabledTools`      | `string[]`              | All         | Tool blocklist                                                                |
+| Field               | Type                    | Applies to | Description                                                               |
+| ------------------- | ----------------------- | ---------- | ------------------------------------------------------------------------- |
+| `env`               | `Record<string,string>` | stdio      | Environment variables injected into the child process                     |
+| `cwd`               | `string`                | stdio      | Working directory for the child process                                   |
+| `headers`           | `Record<string,string>` | HTTP, SSE  | Static request headers appended to every request                          |
+| `bearerTokenEnvVar` | `string`                | HTTP, SSE  | Name of an environment variable that contains a bearer token              |
+| `enabled`           | `boolean`               | All        | Set to `false` to disable this server                                     |
+| `startupTimeoutMs`  | `number`                | All        | Connection timeout from `1` to `2147483647` milliseconds; default `30000` |
+| `toolTimeoutMs`     | `number`                | All        | Timeout from `1` to `2147483647` milliseconds for a single tool call      |
+| `enabledTools`      | `string[]`              | All        | Tool allowlist                                                            |
+| `disabledTools`     | `string[]`              | All        | Tool blocklist                                                            |
 
 You do not have to set the connection timeout or the single tool-call timeout per server: `[mcp] startup_timeout_ms` / `[mcp] tool_timeout_ms` in `config.toml` or the `KIMI_MCP_STARTUP_TIMEOUT_MS` / `KIMI_MCP_TOOL_TIMEOUT_MS` environment variables change the global defaults. Precedence is: per-server field > environment variable > `config.toml` > built-in default.
 
