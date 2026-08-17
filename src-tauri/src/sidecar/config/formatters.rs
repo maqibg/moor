@@ -81,7 +81,53 @@ fn env_ref_for_client(name: &str, client: &ClientMeta) -> String {
     match client.id {
         "claude-code" => format!("${{{name}}}"),
         "cursor" => format!("${{env:{name}}}"),
+        "dsh" => format!("!!js process.env.{name}"),
         _ => format!("{{env:{name}}}"),
+    }
+}
+
+// YAML single-quoted scalar: only ' needs escaping (doubled).
+fn yaml_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+// dsh serverName is constrained to [A-Za-z0-9_-]{1,32}.
+fn dsh_server_name(name: &str) -> String {
+    let sanitized: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '-' })
+        .collect();
+    let trimmed = sanitized.trim_matches('-');
+    if trimmed.is_empty() {
+        "mcp-server".to_string()
+    } else {
+        trimmed.chars().take(32).collect()
+    }
+}
+
+// `!!js` expressions must stay unquoted to remain dynamic; everything else is static.
+fn yaml_scalar(value: &str) -> String {
+    if value.starts_with("!!js ") {
+        value.to_string()
+    } else {
+        yaml_quote(value)
+    }
+}
+
+// Header env refs become one whole `!!js` expression (a partial rewrite would
+// leak as a literal string), matching dsh's official examples.
+fn dsh_header_value(value: &str) -> String {
+    if let Some(var) = value
+        .strip_prefix("Bearer {env:")
+        .and_then(|s| s.strip_suffix('}'))
+    {
+        // The quoted-scalar form is dsh's documented syntax; a bare backtick
+        // template is not a valid YAML node and fails dsh's loud parse.
+        format!("!!js '`Bearer ${{process.env.{var}}}`'")
+    } else if let Some(var) = value.strip_prefix("{env:").and_then(|s| s.strip_suffix('}')) {
+        format!("!!js process.env.{var}")
+    } else {
+        yaml_scalar(value)
     }
 }
 
@@ -301,6 +347,64 @@ pub fn format_for_cursor(servers: &[ScannedServer], client: &ClientMeta) -> Form
     format_json_mcp_servers(servers, client, "mcpServers", extra)
 }
 
+pub fn format_for_kimi_code(servers: &[ScannedServer], client: &ClientMeta) -> FormatResult {
+    format_json_mcp_servers(servers, client, "mcpServers", vec![])
+}
+
+// One `dsh-mcp-client` plugin row per server, as a single top-level insert list.
+pub fn format_for_dsh(servers: &[ScannedServer], client: &ClientMeta) -> FormatResult {
+    let mut lines = vec!["- insert:".to_string()];
+    for s in servers {
+        let server_name = dsh_server_name(&s.name);
+        lines.push(format!("    - id: {}", yaml_quote(&server_name)));
+        lines.push("      name: '@deepseek-ai/dsh-mcp-client'".to_string());
+        lines.push("      config:".to_string());
+        lines.push(format!("        serverName: {}", yaml_quote(&server_name)));
+        if s.connection_type == "stdio" {
+            lines.push("        transport: stdio".to_string());
+            lines.push(format!(
+                "        command: {}",
+                yaml_quote(s.command.as_deref().unwrap_or(""))
+            ));
+            if let Some(args) = &s.args {
+                if !args.is_empty() {
+                    let rendered = args
+                        .iter()
+                        .map(|a| yaml_quote(a))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    lines.push(format!("        args: [{rendered}]"));
+                }
+            }
+            if non_empty(&s.env) {
+                lines.push("        env:".to_string());
+                for (k, v) in s.env.as_ref().unwrap() {
+                    lines.push(format!("          {k}: {}", yaml_quote(v)));
+                }
+            }
+            if let Some(wd) = &s.working_dir {
+                lines.push(format!("        cwd: {}", yaml_quote(wd)));
+            }
+        } else {
+            lines.push("        transport: streamable-http".to_string());
+            lines.push(format!(
+                "        url: {}",
+                yaml_quote(s.url.as_deref().unwrap_or(""))
+            ));
+            if non_empty(&s.headers) {
+                lines.push("        headers:".to_string());
+                for (k, v) in s.headers.as_ref().unwrap() {
+                    lines.push(format!("          {k}: {}", dsh_header_value(v)));
+                }
+            }
+        }
+    }
+    FormatResult {
+        content: lines.join("\n"),
+        warnings: build_warnings(servers, client),
+    }
+}
+
 pub fn format_for_client(
     client_id: &str,
 ) -> Option<fn(&[ScannedServer], &ClientMeta) -> FormatResult> {
@@ -309,6 +413,108 @@ pub fn format_for_client(
         "codex" => Some(format_for_codex),
         "opencode" => Some(format_for_opencode),
         "cursor" => Some(format_for_cursor),
+        "kimi-code" => Some(format_for_kimi_code),
+        "dsh" => Some(format_for_dsh),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sidecar::config::clients;
+
+    fn client(id: &str) -> &'static ClientMeta {
+        clients::get_client_by_id(id).unwrap()
+    }
+
+    fn stdio_server() -> ScannedServer {
+        ScannedServer {
+            name: "filesystem".to_string(),
+            connection_type: "stdio".to_string(),
+            url: None,
+            source: "test".to_string(),
+            command: Some("npx".to_string()),
+            args: Some(vec!["-y".to_string(), "server-fs".to_string()]),
+            env: Some(
+                [("FS_TOKEN".to_string(), "abc'x".to_string())]
+                    .into_iter()
+                    .collect(),
+            ),
+            headers: None,
+            working_dir: Some("/tmp".to_string()),
+        }
+    }
+
+    fn http_server() -> ScannedServer {
+        ScannedServer {
+            name: "moor-mcp".to_string(),
+            connection_type: "http".to_string(),
+            url: Some("http://127.0.0.1:9223/mcp".to_string()),
+            source: "test".to_string(),
+            command: None,
+            args: None,
+            env: None,
+            headers: Some(
+                [(
+                    "Authorization".to_string(),
+                    "Bearer {env:MOOR_TOKEN}".to_string(),
+                )]
+                .into_iter()
+                .collect(),
+            ),
+            working_dir: None,
+        }
+    }
+
+    #[test]
+    fn formats_dsh_http_insert_row() {
+        let result = format_for_dsh(std::slice::from_ref(&http_server()), client("dsh"));
+        assert_eq!(
+            result.content,
+            "- insert:\n\
+             \x20   - id: 'moor-mcp'\n\
+             \x20     name: '@deepseek-ai/dsh-mcp-client'\n\
+             \x20     config:\n\
+             \x20       serverName: 'moor-mcp'\n\
+             \x20       transport: streamable-http\n\
+             \x20       url: 'http://127.0.0.1:9223/mcp'\n\
+             \x20       headers:\n\
+             \x20         Authorization: !!js '`Bearer ${process.env.MOOR_TOKEN}`'"
+        );
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn formats_dsh_stdio_insert_row() {
+        let result = format_for_dsh(std::slice::from_ref(&stdio_server()), client("dsh"));
+        assert!(result.content.contains("transport: stdio"));
+        assert!(result.content.contains("command: 'npx'"));
+        assert!(result.content.contains("args: ['-y', 'server-fs']"));
+        // Single quotes inside values double-escape per YAML rules.
+        assert!(result.content.contains("FS_TOKEN: 'abc''x'"));
+        assert!(result.content.contains("cwd: '/tmp'"));
+    }
+
+    #[test]
+    fn dsh_server_name_sanitizes_to_contract() {
+        assert_eq!(dsh_server_name("my.tool: v2"), "my-tool--v2");
+        assert_eq!(dsh_server_name("a".repeat(40).as_str()).len(), 32);
+        assert_eq!(dsh_server_name("---"), "mcp-server");
+    }
+
+    #[test]
+    fn formats_kimi_code_mcp_servers() {
+        let result = format_for_kimi_code(
+            &[http_server(), stdio_server()],
+            client("kimi-code"),
+        );
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        let servers = parsed.get("mcpServers").unwrap().as_object().unwrap();
+        assert_eq!(servers.len(), 2);
+        // HTTP entries stay transport-free (bare url = HTTP in Kimi Code).
+        assert!(servers.get("moor-mcp").unwrap().get("transport").is_none());
+        let local = servers.get("filesystem").unwrap();
+        assert_eq!(local.get("command").unwrap().as_str().unwrap(), "npx");
     }
 }

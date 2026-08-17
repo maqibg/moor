@@ -765,4 +765,47 @@ enabled = false
         assert_eq!(remote.connection_type, "http");
         assert_eq!(remote.url.as_deref(), Some("https://mcp.example.com/mcp"));
     }
+
+    #[test]
+    fn parses_kimi_code_mcp_servers() {
+        // Kimi Code: entries with `command` are stdio; bare `url` means HTTP (no transport field).
+        let parsed = parse_json_mcp_config(
+            r#"{
+              "mcpServers": {
+                "filesystem": {
+                  "command": "npx",
+                  "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+                  "env": { "FS_TOKEN": "abc" },
+                  "cwd": "/tmp"
+                },
+                "linear": { "url": "https://mcp.linear.app/mcp" },
+                "legacy-events": { "transport": "sse", "url": "https://mcp.example.com/sse" }
+              }
+            }"#,
+            "kimi-code",
+        );
+
+        assert!(parsed.errors.is_empty());
+        assert_eq!(parsed.servers.len(), 3);
+
+        let local = find(&parsed, "filesystem");
+        assert_eq!(local.connection_type, "stdio");
+        assert_eq!(local.command.as_deref(), Some("npx"));
+        assert_eq!(
+            local.args,
+            Some(vec![
+                "-y".to_string(),
+                "@modelcontextprotocol/server-filesystem".to_string(),
+                "/tmp".to_string()
+            ])
+        );
+
+        let remote = find(&parsed, "linear");
+        assert_eq!(remote.connection_type, "http");
+        assert_eq!(remote.url.as_deref(), Some("https://mcp.linear.app/mcp"));
+
+        let sse = find(&parsed, "legacy-events");
+        assert_eq!(sse.connection_type, "http");
+        assert_eq!(sse.url.as_deref(), Some("https://mcp.example.com/sse"));
+    }
 }

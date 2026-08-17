@@ -41,6 +41,21 @@ const FALLBACK_SNIPPETS: ClientSnippet[] = [
       '{\n  "mcpServers": {\n    "moor": {\n      "url": "http://127.0.0.1:9223/mcp"\n    }\n  }\n}',
     cliCommand: "# Edit ~/.cursor/mcp.json and add the mcpServers.moor entry above.",
   },
+  {
+    client: "Kimi Code",
+    description: "Configure Kimi Code to connect to Moor",
+    snippet:
+      '{\n  "mcpServers": {\n    "moor-mcp": {\n      "url": "http://127.0.0.1:9223/mcp"\n    }\n  }\n}',
+    cliCommand: "# Edit ~/.kimi-code/mcp.json and add the mcpServers.moor-mcp entry above.",
+  },
+  {
+    client: "DeepSeek Harness (dsh)",
+    description: "Configure DeepSeek Harness to connect to Moor",
+    snippet:
+      "# ===== Moor MCP Gateway (managed) =====\n- insert:\n    - id: 'moor-mcp'\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: 'moor-mcp'\n        transport: streamable-http\n        url: 'http://127.0.0.1:9223/mcp'\n# ===== end Moor MCP Gateway =====",
+    cliCommand:
+      "# Append the marked section above to the end of ~/.dsh/cordis.patch.yml (kept HMR-hot by dsh).",
+  },
 ];
 
 export function ClientConfig() {

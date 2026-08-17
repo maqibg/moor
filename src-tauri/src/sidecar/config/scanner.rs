@@ -18,6 +18,8 @@ fn parse_config_file(config_path: &std::path::Path, source: &str, format: &str) 
     };
     let parsed = match format {
         "toml" => import_parser::parse_codex_toml_config(&content, source),
+        // dsh patches carry `!!js` dynamic expressions that cannot be statically evaluated.
+        "yaml" => return ParsedImport::default(),
         _ => import_parser::parse_json_mcp_config(&content, source),
     };
     ignore_missing_mcp_sections(parsed, source)

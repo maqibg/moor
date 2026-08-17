@@ -5,7 +5,7 @@ pub struct ClientMeta {
     pub id: &'static str,
     pub name: &'static str,
     pub config_path_segments: &'static [&'static [&'static str]],
-    pub format: &'static str, // "json" | "toml"
+    pub format: &'static str, // "json" | "toml" | "yaml"
     pub top_level_key: &'static str,
     pub description: &'static str,
 }
@@ -58,6 +58,24 @@ pub const ALL_CLIENTS: &[ClientMeta] = &[
         format: "json",
         top_level_key: "mcpServers",
         description: "Add to ~/.cursor/mcp.json or project .cursor/mcp.json",
+    },
+    ClientMeta {
+        id: "kimi-code",
+        name: "Kimi Code",
+        config_path_segments: &[&[".kimi-code", "mcp.json"]],
+        format: "json",
+        top_level_key: "mcpServers",
+        description: "Add to ~/.kimi-code/mcp.json or project .kimi-code/mcp.json",
+    },
+    // MCP servers are Cordis plugin rows in the home-level patch layer; an
+    // invalid patch file makes dsh fail to boot, so snippets are append-only.
+    ClientMeta {
+        id: "dsh",
+        name: "DeepSeek Harness (dsh)",
+        config_path_segments: &[&[".dsh", "cordis.patch.yml"]],
+        format: "yaml",
+        top_level_key: "insert",
+        description: "Append to ~/.dsh/cordis.patch.yml (dsh-mcp-client plugin rows)",
     },
 ];
 

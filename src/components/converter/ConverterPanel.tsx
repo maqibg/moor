@@ -25,6 +25,8 @@ const CLIENTS = [
   { id: "codex", name: "Codex" },
   { id: "opencode", name: "OpenCode" },
   { id: "cursor", name: "Cursor" },
+  { id: "kimi-code", name: "Kimi Code" },
+  { id: "dsh", name: "DeepSeek Harness (dsh)" },
 ] as const;
 
 type ClientId = (typeof CLIENTS)[number]["id"];
@@ -34,6 +36,8 @@ const CLIENT_PATHS: Record<ClientId, string> = {
   codex: "~/.codex/config.toml",
   opencode: "~/.config/opencode/opencode.json",
   cursor: "~/.cursor/mcp.json",
+  "kimi-code": "~/.kimi-code/mcp.json",
+  dsh: "~/.dsh/cordis.patch.yml",
 };
 
 const SOURCE_LABELS = { moor: "Moor", scan: "Scan", paste: "Paste" } as const;
