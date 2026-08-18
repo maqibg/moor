@@ -40,6 +40,9 @@ export type {
 export type { SidecarInfo } from "./sidecar.js";
 export type { ApiErrorCode, ApiError } from "./error.js";
 export {
+  MCP_SESSION_IDLE_TTL_MS_DEFAULT,
+  MCP_SESSION_IDLE_TTL_MS_MAX,
+  MCP_SESSION_IDLE_TTL_MS_MIN,
   MCP_TIMEOUT_MS_DEFAULT,
   MCP_TIMEOUT_MS_MAX,
   MCP_TIMEOUT_MS_MIN,
