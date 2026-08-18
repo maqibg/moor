@@ -90,10 +90,10 @@ pnpm install
 
 ### 扫描现有配置
 
-Moor 可以自动检测你已为 Claude Code、Codex、OpenCode 和 Cursor 配置的 MCP Server：
+Moor 可以自动检测你已为 Claude Code、Codex、OpenCode、Cursor、Kimi Code 和 dsh 配置的 MCP Server：
 
 1. 进入 **Servers** → **Import**
-2. 点击 **Scan** — Moor 会读取 `~/.claude/settings.json`、`~/.codex/config.toml`、`~/.config/opencode/opencode.json` / `.jsonc` 以及 `~/.cursor/mcp.json`
+2. 点击 **Scan** — Moor 会读取 `~/.claude/settings.json`、`~/.codex/config.toml`、`~/.config/opencode/opencode.json` / `.jsonc`、`~/.cursor/mcp.json`、`~/.kimi-code/mcp.json` 以及 `~/.dsh/cordis.patch.yml`
 3. 选择要导入的 Server
 
 你也可以通过 **Import JSON** 粘贴 JSON MCP 配置。Moor 支持导入 stdio 和 HTTP/SSE Server，对于不支持的条目（例如 OpenAPI 配置）会报告但不会保存。
@@ -118,7 +118,7 @@ http://127.0.0.1:9223/mcp
 
 `9223` 是默认的 Sidecar 端口。如果该端口已被占用，Moor 会自动选择下一个可用端口，并在 Dashboard 和 Client Config 页面显示实际端点。
 
-`/mcp` 端点仅限本地回环访问，不需要 `X-Moor-Token`。Moor 仅在 WebView 与 Sidecar 之间的本地管理 API 中使用 `X-Moor-Token`，因此你无需将它粘贴到 Agent 配置中。
+默认情况下 `/mcp` 端点仅限本地回环访问，不需要 `X-Moor-Token`（局域网访问见下文）。Moor 仅在 WebView 与 Sidecar 之间的本地管理 API 中使用 `X-Moor-Token`，因此你无需将它粘贴到 Agent 配置中。
 
 如需从 WSL2（NAT 模式）或局域网内其他设备连接，在 **Settings → Advanced** 开启 **Allow LAN MCP Access** 并重启 Moor。网关将监听所有网络接口，`/mcp` 额外接受私有网段主机（`10.x.x.x`、`172.16.x.x`–`172.31.x.x`、`192.168.x.x`）；`/api/*` 仍仅限回环并要求 Token。Windows 首次监听时可能弹出防火墙授权，需要允许。
 
@@ -162,12 +162,14 @@ Moor 会处理剩下的一切——聚合 `tools/list`、路由 `tools/call`、�
 - **Codex**: `~/.codex/config.toml`
 - **OpenCode**: `~/.config/opencode/opencode.json` / `.jsonc`
 - **Cursor**: `~/.cursor/mcp.json`
+- **Kimi Code**: `~/.kimi-code/mcp.json`
+- **dsh**: `~/.dsh/cordis.patch.yml`
 
 也支持手动输入和粘贴 JSON 批量导入 stdio 与 HTTP/SSE Server。
 
 ### 客户端配置
 
-为 Claude Code、Codex、OpenCode 和 Cursor 生成即拷即用的配置片段。片段仅包含 `/mcp` 端点；Moor 的 `X-Moor-Token` 保留给内部管理 API 使用。
+为 Claude Code、Codex、OpenCode、Cursor、Kimi Code 和 dsh 生成即拷即用的配置片段。片段仅包含 `/mcp` 端点；Moor 的 `X-Moor-Token` 保留给内部管理 API 使用。
 
 ### 审计日志
 
@@ -264,6 +266,7 @@ pnpm tauri build
 - macOS: `src-tauri/target/release/bundle/macos/Moor.app`
 - macOS DMG: `src-tauri/target/release/bundle/dmg/Moor_<version>_aarch64.dmg`
 - Windows: `src-tauri/target/release/bundle/nsis/Moor_<version>_x64-setup.exe`
+- Linux: `.deb` / `.rpm` / `.AppImage`，位于 `src-tauri/target/release/bundle/`（x86_64 + aarch64，由 CI 构建）
 
 ### 代码质量
 

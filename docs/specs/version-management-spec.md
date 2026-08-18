@@ -106,7 +106,7 @@ The GitHub Actions Release workflow executes `node scripts/sync-version.mjs --ch
 ### CI Release Workflow
 
 - Trigger: push `v*` tag or manual trigger.
-- Build targets: macOS Apple Silicon + Intel.
+- Build targets: macOS (aarch64 + x86_64), Windows (x86_64), Linux (x86_64 + aarch64).
 - Release method: Draft Release (requires manual review before publishing).
 - Pre-release detection: automatically marked as prerelease when tag contains `-beta.` / `-rc.` / `-alpha.`.
 

@@ -94,10 +94,10 @@ pnpm install
 
 ### 既存設定をスキャンする
 
-Moor は、Claude Code、Codex、OpenCode、Cursor 用に既に設定済みの MCP Server を自動検出できます：
+Moor は、Claude Code、Codex、OpenCode、Cursor、Kimi Code、dsh 用に既に設定済みの MCP Server を自動検出できます：
 
 1. **Servers** → **Import** に移動
-2. **Scan** をクリック — Moor は `~/.claude/settings.json`、`~/.codex/config.toml`、`~/.config/opencode/opencode.json` / `.jsonc`、`~/.cursor/mcp.json` を読み取ります
+2. **Scan** をクリック — Moor は `~/.claude/settings.json`、`~/.codex/config.toml`、`~/.config/opencode/opencode.json` / `.jsonc`、`~/.cursor/mcp.json`、`~/.kimi-code/mcp.json`、`~/.dsh/cordis.patch.yml` を読み取ります
 3. インポートしたい Server を選択
 
 **Import JSON** を使用して JSON MCP 設定を貼り付けることもできます。Moor は stdio および HTTP/SSE Server をインポートし、OpenAPI 設定などのサポートされていないエントリは保存せずに報告します。
@@ -122,7 +122,7 @@ http://127.0.0.1:9223/mcp
 
 `9223` はデフォルトの Sidecar ポートです。既に使用されている場合、Moor は次に利用可能なポートを選択し、Dashboard と Client Config ページに実際のエンドポイントを表示します。
 
-`/mcp` エンドポイントはループバックのみであり、`X-Moor-Token` は不要です。Moor は WebView と Sidecar 間のローカル管理 API にのみ `X-Moor-Token` を使用するため、Agent の設定に貼り付ける必要はありません。
+デフォルトでは `/mcp` エンドポイントはループバックのみで、`X-Moor-Token` は不要です（LAN アクセスは下記を参照）。Moor は WebView と Sidecar 間のローカル管理 API にのみ `X-Moor-Token` を使用するため、Agent の設定に貼り付ける必要はありません。
 
 WSL2（NAT モード）や LAN 内の他のデバイスから接続するには、**Settings → Advanced → Allow LAN MCP Access** を有効にして Moor を再起動します。ゲートウェイはすべてのインターフェースでリッスンし、`/mcp` はプライベートネットワークのホスト（`10.x.x.x`、`172.16.x.x`–`172.31.x.x`、`192.168.x.x`）も受け付けます。`/api/*` は引き続きループバックのみです。Windows では初回にファイアウォールの許可が求められる場合があります。
 
@@ -162,12 +162,14 @@ Server レベルのオン/オフに加えて、任意の Server を展開して�
 - **Codex**: `~/.codex/config.toml`
 - **OpenCode**: `~/.config/opencode/opencode.json` / `.jsonc`
 - **Cursor**: `~/.cursor/mcp.json`
+- **Kimi Code**: `~/.kimi-code/mcp.json`
+- **dsh**: `~/.dsh/cordis.patch.yml`
 
 stdio および HTTP/SSE Server の手動入力と JSON 貼り付けによるバッチインポートもサポートされています。
 
 ### クライアント設定
 
-Claude Code、Codex、OpenCode、Cursor 向けにコピーするだけで使える設定スニペットを生成します。スニペットには `/mcp` エンドポイントのみが含まれます。Moor の `X-Moor-Token` は内部管理 API 用に予約されています。
+Claude Code、Codex、OpenCode、Cursor、Kimi Code、dsh 向けにコピーするだけで使える設定スニペットを生成します。スニペットには `/mcp` エンドポイントのみが含まれます。Moor の `X-Moor-Token` は内部管理 API 用に予約されています。
 
 ### 監査ログ
 
@@ -268,6 +270,7 @@ pnpm tauri build
 - macOS: `src-tauri/target/release/bundle/macos/Moor.app`
 - macOS DMG: `src-tauri/target/release/bundle/dmg/Moor_<version>_aarch64.dmg`
 - Windows: `src-tauri/target/release/bundle/nsis/Moor_<version>_x64-setup.exe`
+- Linux: `.deb` / `.rpm` / `.AppImage`（`src-tauri/target/release/bundle/` 配下、x86_64 + aarch64、CI でビルド）
 
 ### コード品質
 

@@ -33,7 +33,7 @@ Build a local MCP console + gateway application running on macOS. Moor acts as a
 - **Decision**: Moor is a Smart Aggregator, not a transparent proxy.
 - **Why**: Needs to filter tools by Profile, with built-in logging and security audit capabilities.
 - **Consequences**: Moor needs to fully implement both MCP server and MCP client sides.
-  - Server side: Exposes `tools/list`, `tools/call`, `resources/list`, etc. to the Agent.
+  - Server side: Exposes `initialize`, `ping`, `tools/list`, `tools/call` to the Agent. (`resources/*` not implemented.)
   - Client side: Connects to backend MCP servers, aggregates and filters responses.
 
 ### AD-2: Protocol Support — stdio + HTTP/SSE Complete
@@ -81,15 +81,17 @@ Build a local MCP console + gateway application running on macOS. Moor acts as a
 
 ### AD-7: Config Import — Progressive Scan
 
-- **Decision**: Automatically scan Claude Code, Codex, OpenCode, and Cursor configurations; manually add others.
-- **Why**: These four are the most common and have fixed configuration paths; other clients are covered via manual addition.
+- **Decision** _(evolved)_: Automatically scan Claude Code, Codex, OpenCode, Cursor, Kimi Code, and dsh configurations; manually add others.
+- **Why**: These clients are the most common and have fixed configuration paths; other clients are covered via manual addition.
 - **Scan Paths**:
   - Claude Code: `~/.claude/settings.json` → `mcpServers` field
   - Codex: `~/.codex/config.toml` → `mcp_servers` field
   - OpenCode: `~/.config/opencode/opencode.json` / `.jsonc` → `mcp` field
   - Cursor: `~/.cursor/mcp.json` → `mcpServers` field
+  - Kimi Code: `~/.kimi-code/mcp.json` → `mcpServers` field
+  - dsh: `~/.dsh/cordis.patch.yml` → `insert` (Cordis plugin rows)
   - Manual: User inputs command + args + env
-- **Consequences**: Need to parse JSON and TOML formats.
+- **Consequences**: Need to parse JSON, TOML, and YAML formats.
 
 ### AD-8: Profile Routing — Global Active Profile
 
@@ -128,6 +130,7 @@ Build a local MCP console + gateway application running on macOS. Moor acts as a
 ### AD-13: MCP Timeout Settings
 
 - **字段**: `advanced.mcpRequestTimeoutMs` 控制运行期 MCP JSON-RPC 请求超时，`advanced.mcpServerStartTimeoutMs` 控制 MCP server 启动总等待时间。
+- **会话 TTL**: `advanced.mcpSessionIdleTtlMs` 控制网关侧 MCP 会话空闲过期（范围 `300_000..86_400_000`，默认 `3_600_000`，过期会话由后台 sweeper 清理）。
 - **范围与默认值**: 两个字段都使用毫秒，范围为 `5_000..300_000`，默认值为 `30_000`。
 - **启动语义**: 启动期 `initialize` / `tools/list` 使用 `mcpServerStartTimeoutMs`，并受同一个启动总等待时间约束。
 - **运行期语义**: `tools/call` 每次调用前读取最新 `mcpRequestTimeoutMs`；修改 request timeout 后无需重启运行中的 server。
@@ -140,7 +143,7 @@ Moor.app
 ├─ UI Layer: React + Vite + TypeScript + Tailwind CSS + shadcn/ui
 ├─ Desktop Layer: Tauri 2 / Rust
 │   ├─ Window management + tray icon
-│   ├─ macOS Keychain access
+│   ├─ API token generation (random per launch)
 │   ├─ In-process gateway startup and runtime settings
 │   └─ File permissions
 ├─ Gateway Daemon
@@ -270,7 +273,7 @@ Based on Stitch project screens + interview decisions:
 
 ### 3. Client Configuration
 
-- Per-client cards: Claude Code, Cursor, Codex, OpenCode
+- Per-client cards: Claude Code, Cursor, Codex, OpenCode, Kimi Code, dsh
 - Each card shows: config snippet, CLI command, one-click copy button
 - Status indicator: connected/disconnected (based on recent activity)
 
@@ -291,7 +294,7 @@ Based on Stitch project screens + interview decisions:
 
 - General: auto-start on login, auto-start servers on launch, minimize to tray, hide dock icon on close, show window on launch
 - Appearance: theme (System/Light/Dark)
-- Advanced: MCP request timeout, server start timeout, log retention, audit logging toggle, sidecar port, API token display
+- Advanced: MCP request timeout, server start timeout, session idle TTL, log retention, audit logging toggle, sidecar port, allow LAN MCP access, API token display
 - Reset to defaults with confirmation
 
 ## Non-Goals (Explicitly Excluded from MVP)

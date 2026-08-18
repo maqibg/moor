@@ -94,10 +94,10 @@ Abre **Moor.app**. El Dashboard muestra tu Perfil activo, el estado de los servi
 
 ### Escanear configuraciones existentes
 
-Moor puede detectar automáticamente los servidores MCP que ya hayas configurado para Claude Code, Codex, OpenCode y Cursor:
+Moor puede detectar automáticamente los servidores MCP que ya hayas configurado para Claude Code, Codex, OpenCode, Cursor, Kimi Code y dsh:
 
 1. Ve a **Servers** → **Import**
-2. Haz clic en **Scan** — Moor lee `~/.claude/settings.json`, `~/.codex/config.toml`, `~/.config/opencode/opencode.json` / `.jsonc`, y `~/.cursor/mcp.json`
+2. Haz clic en **Scan** — Moor lee `~/.claude/settings.json`, `~/.codex/config.toml`, `~/.config/opencode/opencode.json` / `.jsonc`, `~/.cursor/mcp.json`, `~/.kimi-code/mcp.json` y `~/.dsh/cordis.patch.yml`
 3. Selecciona los servidores que deseas importar
 
 También puedes pegar una configuración MCP en JSON con **Import JSON**. Moor importa servidores stdio y HTTP/SSE, e informa sobre entradas no soportadas como configuraciones OpenAPI sin guardarlas.
@@ -122,7 +122,7 @@ http://127.0.0.1:9223/mcp
 
 `9223` es el puerto sidecar por defecto. Si ya está en uso, Moor elige el siguiente puerto disponible y muestra el endpoint real en el Dashboard y las páginas de Client Config.
 
-El endpoint `/mcp` es solo para loopback y no requiere `X-Moor-Token`. Moor usa `X-Moor-Token` solo para APIs de gestión local entre el WebView y el sidecar, por lo que no necesitas pegarlo en las configuraciones del agente.
+Por defecto, el endpoint `/mcp` es solo para loopback y no requiere `X-Moor-Token` (consulta el acceso LAN más abajo). Moor usa `X-Moor-Token` solo para APIs de gestión local entre el WebView y el sidecar, por lo que no necesitas pegarlo en las configuraciones del agente.
 
 Para conectarte desde WSL2 (modo NAT) u otro dispositivo de la LAN, activa **Settings → Advanced → Allow LAN MCP Access** y reinicia Moor. El gateway entonces escucha en todas las interfaces y `/mcp` acepta además hosts de redes privadas (`10.x.x.x`, `172.16.x.x`–`172.31.x.x`, `192.168.x.x`); `/api/*` sigue siendo solo loopback. Windows puede pedir permiso de firewall la primera vez.
 
@@ -162,12 +162,14 @@ Importación con un solo clic desde:
 - **Codex**: `~/.codex/config.toml`
 - **OpenCode**: `~/.config/opencode/opencode.json` / `.jsonc`
 - **Cursor**: `~/.cursor/mcp.json`
+- **Kimi Code**: `~/.kimi-code/mcp.json`
+- **dsh**: `~/.dsh/cordis.patch.yml`
 
 También se admiten la entrada manual y la importación por lotes mediante JSON pegado para servidores stdio y HTTP/SSE.
 
 ### Configuración de cliente
 
-Genera fragmentos de configuración listos para copiar para Claude Code, Codex, OpenCode y Cursor. Los fragmentos contienen solo el endpoint `/mcp`; el `X-Moor-Token` de Moor está reservado para llamadas a la API de gestión interna.
+Genera fragmentos de configuración listos para copiar para Claude Code, Codex, OpenCode, Cursor, Kimi Code y dsh. Los fragmentos contienen solo el endpoint `/mcp`; el `X-Moor-Token` de Moor está reservado para llamadas a la API de gestión interna.
 
 ### Registros de auditoría
 
@@ -268,6 +270,7 @@ Salidas:
 - macOS: `src-tauri/target/release/bundle/macos/Moor.app`
 - macOS DMG: `src-tauri/target/release/bundle/dmg/Moor_<version>_aarch64.dmg`
 - Windows: `src-tauri/target/release/bundle/nsis/Moor_<version>_x64-setup.exe`
+- Linux: `.deb` / `.rpm` / `.AppImage` en `src-tauri/target/release/bundle/` (x86_64 + aarch64, generados por CI)
 
 ### Calidad de código
 
