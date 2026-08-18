@@ -1,0 +1,29 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo-test:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          # crate 在子目录,须显式指定否则 rust-cache 键指向仓库根
+          cache-workspace: src-tauri
+
+      # frontendDist ../dist 被 gitignore;无 dist 时 tauri generate_context! 编译失败
+      - name: Placeholder frontend dist
+        run: mkdir -p dist && echo '<!doctype html><title>ci-placeholder</title>' > dist/index.html
+
+      - name: Run cargo test
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
