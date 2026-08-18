@@ -1,5 +1,5 @@
 ---
-"moor": minor
+"moor": patch
 ---
 
 feat(gateway): MCP session idle TTL, capacity cap & SSE stream lifetime
