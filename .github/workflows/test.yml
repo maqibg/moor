@@ -19,7 +19,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           # crate 在子目录,须显式指定否则 rust-cache 键指向仓库根
-          cache-workspace: src-tauri
+          cache-workspaces: src-tauri
 
       # frontendDist ../dist 被 gitignore;无 dist 时 tauri generate_context! 编译失败
       - name: Placeholder frontend dist

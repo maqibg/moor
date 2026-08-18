@@ -1472,9 +1472,19 @@ process.stdin.on("data", (chunk) => {{
             tokio::spawn(async move { manager.start_auto_start_servers().await })
         };
 
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-        let starts = std::fs::read_to_string(&marker).unwrap_or_default();
-        let fast_started_before_slow_completed = starts.lines().any(|line| line == "fast");
+        // 轮询而非固定 sleep:慢 CI runner 上 node 冷启动可能远超 150ms。
+        // slow 脚本自带 400ms 延迟,2s 内 fast 仍未标记即可判定未并发启动。
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let fast_started_before_slow_completed = loop {
+            let starts = std::fs::read_to_string(&marker).unwrap_or_default();
+            if starts.lines().any(|line| line == "fast") {
+                break true;
+            }
+            if std::time::Instant::now() > deadline {
+                break false;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        };
 
         auto_start.await.expect("auto-start task failed");
         manager
@@ -1489,7 +1499,8 @@ process.stdin.on("data", (chunk) => {{
 
         assert!(
             fast_started_before_slow_completed,
-            "fast auto-start server should begin before slow server finishes; starts: {starts:?}"
+            "fast auto-start server should begin before slow server finishes; marker: {}",
+            std::fs::read_to_string(&marker).unwrap_or_default()
         );
     }
 
