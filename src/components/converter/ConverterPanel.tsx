@@ -18,54 +18,34 @@ import { CodeBlock } from "@/components/shared/CodeBlock";
 import { ArrowRight, AlertTriangle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { routes } from "@/lib/api-routes";
-import type { ConvertResult, Server } from "@moor/types";
-
-const CLIENTS = [
-  { id: "claude-code", name: "Claude Code" },
-  { id: "codex", name: "Codex" },
-  { id: "opencode", name: "OpenCode" },
-  { id: "cursor", name: "Cursor" },
-  { id: "kimi-code", name: "Kimi Code" },
-  { id: "dsh", name: "DeepSeek Harness (dsh)" },
-] as const;
-
-type ClientId = (typeof CLIENTS)[number]["id"];
-
-const CLIENT_PATHS: Record<ClientId, string> = {
-  "claude-code": "~/.claude/settings.json",
-  codex: "~/.codex/config.toml",
-  opencode: "~/.config/opencode/opencode.json",
-  cursor: "~/.cursor/mcp.json",
-  "kimi-code": "~/.kimi-code/mcp.json",
-  dsh: "~/.dsh/cordis.patch.yml",
-};
+import type { ClientSnippet, ConvertResult, Server } from "@moor/types";
+import { importKeys, serverKeys } from "@/lib/query-keys";
 
 const SOURCE_LABELS = { moor: "Moor", scan: "Scan", paste: "Paste" } as const;
 type InputSource = keyof typeof SOURCE_LABELS;
 
-function isClientId(value: string): value is ClientId {
-  return CLIENTS.some((client) => client.id === value);
-}
-
-function clientPath(clientId: string, fallback: string): string {
-  return isClientId(clientId) ? CLIENT_PATHS[clientId] : fallback;
-}
-
 export function ConverterPanel() {
   const [inputSource, setInputSource] = useState<InputSource>("moor");
-  const [targetClient, setTargetClient] = useState<ClientId>("claude-code");
+  const [targetClient, setTargetClient] = useState("claude-code");
   const [result, setResult] = useState<ConvertResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const { data: servers = [] } = useQuery<Server[]>({
-    queryKey: ["servers"],
+    queryKey: serverKeys.list(),
     queryFn: () => api<Server[]>(routes.servers.list()),
   });
 
-  const [scanClient, setScanClient] = useState<ClientId>("claude-code");
-  const [pasteClient, setPasteClient] = useState<ClientId>("claude-code");
+  // 客户端清单由网关注册表派生（存在的客户端的唯一事实源）；加载期清空并禁用下拉
+  const { data: snippets = [], isPending: clientsPending } = useQuery<ClientSnippet[]>({
+    queryKey: importKeys.snippets(),
+    queryFn: () => api<ClientSnippet[]>(routes.import.snippets()),
+  });
+  const clients = snippets.map((s) => ({ id: s.clientId, name: s.client }));
+  const clientsDisabled = clientsPending || clients.length === 0;
+  const [scanClient, setScanClient] = useState("claude-code");
+  const [pasteClient, setPasteClient] = useState("claude-code");
   const [pasteContent, setPasteContent] = useState("");
 
   useEffect(() => {
@@ -124,18 +104,6 @@ export function ConverterPanel() {
     }
   })();
 
-  const handleTargetClientChange = (value: string) => {
-    if (isClientId(value)) setTargetClient(value);
-  };
-
-  const handleScanClientChange = (value: string) => {
-    if (isClientId(value)) setScanClient(value);
-  };
-
-  const handlePasteClientChange = (value: string) => {
-    if (isClientId(value)) setPasteClient(value);
-  };
-
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in-up">
       {/* Left: Input Panel */}
@@ -183,12 +151,12 @@ export function ConverterPanel() {
               <p className="text-xs text-[var(--fg-45)]">
                 Automatically scan local config file for the selected client
               </p>
-              <Select value={scanClient} onValueChange={handleScanClientChange}>
+              <Select value={scanClient} onValueChange={setScanClient} disabled={clientsDisabled}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select client" />
                 </SelectTrigger>
                 <SelectContent>
-                  {CLIENTS.map((c) => (
+                  {clients.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
                       {c.name}
                     </SelectItem>
@@ -202,12 +170,16 @@ export function ConverterPanel() {
             <div className="space-y-3">
               <div className="flex items-center gap-3">
                 <Label className="mb-0">Format:</Label>
-                <Select value={pasteClient} onValueChange={handlePasteClientChange}>
+                <Select
+                  value={pasteClient}
+                  onValueChange={setPasteClient}
+                  disabled={clientsDisabled}
+                >
                   <SelectTrigger className="w-auto min-w-[160px]">
                     <SelectValue placeholder="Select client" />
                   </SelectTrigger>
                   <SelectContent>
-                    {CLIENTS.map((c) => (
+                    {clients.map((c) => (
                       <SelectItem key={c.id} value={c.id}>
                         {c.name}
                       </SelectItem>
@@ -231,12 +203,12 @@ export function ConverterPanel() {
         <CardContent className="p-5 space-y-4">
           <h3 className="font-headline text-sm font-medium text-cursor-dark">Target</h3>
 
-          <Select value={targetClient} onValueChange={handleTargetClientChange}>
+          <Select value={targetClient} onValueChange={setTargetClient} disabled={clientsDisabled}>
             <SelectTrigger>
               <SelectValue placeholder="Select target client" />
             </SelectTrigger>
             <SelectContent>
-              {CLIENTS.map((c) => (
+              {clients.map((c) => (
                 <SelectItem key={c.id} value={c.id}>
                   {c.name}
                 </SelectItem>
@@ -270,7 +242,7 @@ export function ConverterPanel() {
               <div className="flex items-start gap-2 text-xs text-[var(--fg-45)]">
                 <span>Target file:</span>
                 <code className="font-mono text-[11px] bg-surface-300 px-1.5 py-0.5 rounded text-[var(--fg-70)]">
-                  {clientPath(result.targetClient, result.targetPath)}
+                  {result.targetPath}
                 </code>
               </div>
 

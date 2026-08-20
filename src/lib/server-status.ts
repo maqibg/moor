@@ -58,19 +58,38 @@ export function failedTransition(errorMessage: string): ServerPatches {
   return { list: error, detail: error };
 }
 
+function patchServerStatus<TItem extends ServerStateItem>(
+  item: TItem,
+  payload: ServerStatusEventPayload,
+): TItem {
+  if (item.id !== payload.serverId) return item;
+  return {
+    ...item,
+    status: payload.status,
+    errorMessage: payload.status === "error" ? payload.errorMessage : null,
+  };
+}
+
 export function mergeServerStatusEvent<TServer extends ServerStateItem>(
   servers: TServer[],
   payload: ServerStatusEventPayload,
 ): TServer[] {
-  return servers.map((server) => {
-    if (server.id !== payload.serverId) return server;
+  return servers.map((server) => patchServerStatus(server, payload));
+}
 
-    return {
-      ...server,
-      status: payload.status,
-      errorMessage: payload.status === "error" ? payload.errorMessage : null,
-    };
-  });
+export function mergeServerStatusDetail<TDetail extends ServerStateItem>(
+  detail: TDetail,
+  payload: ServerStatusEventPayload,
+): TDetail {
+  return patchServerStatus(detail, payload);
+}
+
+export function appendServerList(prev: Server[] | undefined, server: Server): Server[] {
+  return [...(prev ?? []), server];
+}
+
+export function removeServerList(prev: Server[] | undefined, id: string): Server[] {
+  return (prev ?? []).filter((server) => server.id !== id);
 }
 
 export async function syncUpdatedServerCaches(

@@ -1,8 +1,9 @@
 import { useCallback, useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { apiPost } from "@/lib/api/client";
 import { routes } from "@/lib/api-routes";
 import { serverKeys } from "@/lib/query-keys";
+import { useLockedMutation } from "@/hooks/useLockedMutation";
 import { formatJsonImport, getJsonImportDiagnostics } from "@/lib/json-import-editor";
 import type { ScannedServer, ImportPreview as ImportPreviewType } from "@moor/types";
 
@@ -87,8 +88,8 @@ export function useConfigImport() {
     }
   }, [jsonImport, jsonImportDiagnostics, applyImportPreview]);
 
-  const executeImportMutation = useMutation({
-    mutationFn: async () => {
+  const executeImportMutation = useLockedMutation(
+    async () => {
       const serversToImport = scanCandidates.filter((server) => selectedImports.has(server.name));
       const result = await apiPost<{ imported: string[]; skipped: string[] }>(
         routes.import.execute(),
@@ -96,16 +97,18 @@ export function useConfigImport() {
       );
       return result;
     },
-    onSuccess: (result) => {
-      setScanStatus(
-        `Imported ${result.imported.length} servers. Skipped ${result.skipped.length}.`,
-      );
-      setScanCandidates([]);
-      setSelectedImports(new Set());
-      setImportPreview(null);
-      void queryClient.invalidateQueries({ queryKey: serverKeys.list() });
+    {
+      onSuccess: (result) => {
+        setScanStatus(
+          `Imported ${result.imported.length} servers. Skipped ${result.skipped.length}.`,
+        );
+        setScanCandidates([]);
+        setSelectedImports(new Set());
+        setImportPreview(null);
+        void queryClient.invalidateQueries({ queryKey: serverKeys.list() });
+      },
     },
-  });
+  );
 
   const toggleImport = useCallback((name: string, checked: boolean) => {
     setSelectedImports((prev) => {
@@ -150,7 +153,8 @@ export function useConfigImport() {
     updateJsonImport,
     formatJson,
     parseJson,
-    executeImport: executeImportMutation.mutateAsync,
+    executeImport: executeImportMutation.mutate,
+    importPending: executeImportMutation.pending,
     toggleImport,
     clearScan,
     clearJsonImport,

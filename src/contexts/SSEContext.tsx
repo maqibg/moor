@@ -43,14 +43,10 @@ function isProfileActivatedEvent(data: unknown): data is MoorEventData<"profile:
   return isRecord(data) && typeof data.profileId === "string";
 }
 
+// 只钉顶层 envelope：新增 settings 组无需改这里；组成员的形状由消费侧
+// 走 GET 的类型化响应保证（见 useSettings 的 invalidate 策略）。
 function isSettingsChangedEvent(data: unknown): data is MoorEventData<"settings:changed"> {
-  return (
-    isRecord(data) &&
-    typeof data.version === "number" &&
-    isRecord(data.general) &&
-    isRecord(data.appearance) &&
-    isRecord(data.advanced)
-  );
+  return isRecord(data) && typeof data.version === "number";
 }
 
 export function parseMoorSSEEvent(

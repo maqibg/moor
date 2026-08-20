@@ -49,6 +49,7 @@ export function ConfigImportPanel({
     formatJson,
     parseJson,
     executeImport,
+    importPending,
     toggleImport,
     clearScan,
   } = state;
@@ -228,7 +229,10 @@ export function ConfigImportPanel({
             ))}
             {scanCandidates.length > 0 && (
               <div className="flex justify-end pt-1">
-                <Button onClick={() => void executeImport()} disabled={selectedImports.size === 0}>
+                <Button
+                  onClick={() => void executeImport()}
+                  disabled={selectedImports.size === 0 || importPending}
+                >
                   Import Selected ({selectedImports.size})
                 </Button>
               </div>

@@ -21,3 +21,7 @@ export const logKeys = {
     ["logs", filters] as const,
   stats: () => ["logs", "stats"] as const,
 };
+
+export const importKeys = {
+  snippets: () => ["import", "snippets"] as const,
+};

@@ -91,7 +91,7 @@ async fn execute(
 
 async fn snippets_handler(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
     let base_url = format!("http://127.0.0.1:{}/mcp", state.port);
-    let result = snippets::generate_snippets(&base_url);
+    let result = snippets::generate_snippets(&base_url).map_err(AppError::internal)?;
     Ok(Json(
         serde_json::to_value(result).map_err(|e| AppError::internal(e.to_string()))?,
     ))

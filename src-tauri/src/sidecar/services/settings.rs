@@ -63,43 +63,6 @@ pub struct Settings {
     pub advanced: AdvancedSettings,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct PartialGeneralSettings {
-    auto_start_on_login: Option<bool>,
-    auto_start_servers_on_launch: Option<bool>,
-    minimize_to_tray_on_close: Option<bool>,
-    hide_dock_icon_on_close: Option<bool>,
-    show_window_on_launch: Option<bool>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct PartialAppearanceSettings {
-    theme: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct PartialAdvancedSettings {
-    log_retention_days: Option<u16>,
-    enable_audit_logging: Option<bool>,
-    sidecar_port: Option<u16>,
-    allow_lan_mcp_access: Option<bool>,
-    mcp_request_timeout_ms: Option<u32>,
-    mcp_server_start_timeout_ms: Option<u32>,
-    mcp_session_idle_ttl_ms: Option<u32>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct PartialSettings {
-    version: Option<u32>,
-    general: Option<PartialGeneralSettings>,
-    appearance: Option<PartialAppearanceSettings>,
-    advanced: Option<PartialAdvancedSettings>,
-}
-
 pub fn default_settings() -> Settings {
     Settings {
         version: 1,
@@ -141,72 +104,28 @@ pub fn read_settings_file(data_dir: &Path) -> Settings {
     .unwrap_or_else(|_| default_settings())
 }
 
-fn settings_to_db_entries(settings: &Settings) -> Result<Vec<(&'static str, String)>, String> {
-    Ok(vec![
-        (
-            "general.autoStartOnLogin",
-            serde_json::to_string(&settings.general.auto_start_on_login)
-                .map_err(|e| e.to_string())?,
-        ),
-        (
-            "general.autoStartServersOnLaunch",
-            serde_json::to_string(&settings.general.auto_start_servers_on_launch)
-                .map_err(|e| e.to_string())?,
-        ),
-        (
-            "general.minimizeToTrayOnClose",
-            serde_json::to_string(&settings.general.minimize_to_tray_on_close)
-                .map_err(|e| e.to_string())?,
-        ),
-        (
-            "general.hideDockIconOnClose",
-            serde_json::to_string(&settings.general.hide_dock_icon_on_close)
-                .map_err(|e| e.to_string())?,
-        ),
-        (
-            "general.showWindowOnLaunch",
-            serde_json::to_string(&settings.general.show_window_on_launch)
-                .map_err(|e| e.to_string())?,
-        ),
-        (
-            "appearance.theme",
-            serde_json::to_string(&settings.appearance.theme).map_err(|e| e.to_string())?,
-        ),
-        (
-            "advanced.logRetentionDays",
-            serde_json::to_string(&settings.advanced.log_retention_days)
-                .map_err(|e| e.to_string())?,
-        ),
-        (
-            "advanced.enableAuditLogging",
-            serde_json::to_string(&settings.advanced.enable_audit_logging)
-                .map_err(|e| e.to_string())?,
-        ),
-        (
-            "advanced.sidecarPort",
-            serde_json::to_string(&settings.advanced.sidecar_port).map_err(|e| e.to_string())?,
-        ),
-        (
-            "advanced.allowLanMcpAccess",
-            serde_json::to_string(&settings.advanced.allow_lan_mcp_access)
-                .map_err(|e| e.to_string())?,
-        ),
-        (
-            "advanced.mcpRequestTimeoutMs",
-            serde_json::to_string(&settings.advanced.mcp_request_timeout_ms)
-                .map_err(|e| e.to_string())?,
-        ),
-        (
-            "advanced.mcpServerStartTimeoutMs",
-            serde_json::to_string(&settings.advanced.mcp_server_start_timeout_ms)
-                .map_err(|e| e.to_string())?,
-        ),
-        (
-            "advanced.mcpSessionIdleTtlMs",
-            serde_json::to_string(&settings.advanced.mcp_session_idle_ttl_ms)
-                .map_err(|e| e.to_string())?,
-        ),
-    ])
+// 键清单由序列化结构派生——不再手写枚举 `("group.camelKey", value)` 行。
+fn settings_to_db_entries(settings: &Settings) -> Result<Vec<(String, String)>, String> {
+    let value = serde_json::to_value(settings).map_err(|e| e.to_string())?;
+    let mut entries = Vec::new();
+    flatten_to_entries(&value, String::new(), &mut entries);
+    Ok(entries)
+}
+
+fn flatten_to_entries(value: &Value, prefix: String, out: &mut Vec<(String, String)>) {
+    match value {
+        Value::Object(map) => {
+            for (key, inner) in map {
+                let dotted = if prefix.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{prefix}.{key}")
+                };
+                flatten_to_entries(inner, dotted, out);
+            }
+        }
+        leaf => out.push((prefix, leaf.to_string())),
+    }
 }
 
 fn insert_nested_setting(root: &mut Map<String, Value>, key: &str, value: Value) {
@@ -278,100 +197,85 @@ pub fn reset_settings(db: &Database) -> Result<Settings, String> {
     Ok(settings)
 }
 
-pub fn merge_settings_value(mut base: Settings, value: Value) -> Result<Settings, String> {
-    if value.is_null() {
+pub fn merge_settings_value(base: Settings, patch: Value) -> Result<Settings, String> {
+    if patch.is_null() {
         return Ok(base);
     }
-    let partial: PartialSettings =
-        serde_json::from_value(value).map_err(|e| format!("Invalid settings payload: {e}"))?;
-    if let Some(version) = partial.version {
-        base.version = version;
-    }
-    if let Some(general) = partial.general {
-        if let Some(value) = general.auto_start_on_login {
-            base.general.auto_start_on_login = value;
-        }
-        if let Some(value) = general.auto_start_servers_on_launch {
-            base.general.auto_start_servers_on_launch = value;
-        }
-        if let Some(value) = general.minimize_to_tray_on_close {
-            base.general.minimize_to_tray_on_close = value;
-        }
-        if let Some(value) = general.hide_dock_icon_on_close {
-            base.general.hide_dock_icon_on_close = value;
-        }
-        if let Some(value) = general.show_window_on_launch {
-            base.general.show_window_on_launch = value;
-        }
-    }
-    if let Some(appearance) = partial.appearance {
-        if let Some(theme) = appearance.theme {
-            base.appearance.theme = theme;
-        }
-    }
-    if let Some(advanced) = partial.advanced {
-        if let Some(value) = advanced.log_retention_days {
-            base.advanced.log_retention_days = value;
-        }
-        if let Some(value) = advanced.enable_audit_logging {
-            base.advanced.enable_audit_logging = value;
-        }
-        if let Some(value) = advanced.sidecar_port {
-            base.advanced.sidecar_port = value;
-        }
-        if let Some(value) = advanced.allow_lan_mcp_access {
-            base.advanced.allow_lan_mcp_access = value;
-        }
-        if let Some(value) = advanced.mcp_request_timeout_ms {
-            base.advanced.mcp_request_timeout_ms = value;
-        }
-        if let Some(value) = advanced.mcp_server_start_timeout_ms {
-            base.advanced.mcp_server_start_timeout_ms = value;
-        }
-        if let Some(value) = advanced.mcp_session_idle_ttl_ms {
-            base.advanced.mcp_session_idle_ttl_ms = value;
-        }
-    }
-    validate_settings(&base)?;
-    Ok(base)
+    let mut merged = serde_json::to_value(&base).map_err(|e| e.to_string())?;
+    let patch = patch
+        .as_object()
+        .ok_or_else(|| "Invalid settings payload: expected an object".to_string())?;
+    merge_objects(
+        merged
+            .as_object_mut()
+            .expect("settings serializes to an object"),
+        patch,
+    );
+    validate_settings_value(&merged)?;
+    serde_json::from_value(merged).map_err(|e| format!("Invalid settings payload: {e}"))
 }
 
-fn validate_settings(settings: &Settings) -> Result<(), String> {
-    if settings.version == 0 {
+// Option<T> 语义的深合并：patch 中的 null 视为缺省，对象递归，其余直接覆盖。
+fn merge_objects(base: &mut Map<String, Value>, patch: &Map<String, Value>) {
+    for (key, value) in patch {
+        if value.is_null() {
+            continue;
+        }
+        match (base.get_mut(key), value) {
+            (Some(Value::Object(base_inner)), Value::Object(patch_inner)) => {
+                merge_objects(base_inner, patch_inner);
+            }
+            _ => {
+                base.insert(key.clone(), value.clone());
+            }
+        }
+    }
+}
+
+// 数值范围收拢在一张表；新增一个有界设置只需加一行。
+const NUMERIC_BOUNDS: &[(&str, u64, u64)] = &[
+    ("advanced.logRetentionDays", 0, 365),
+    ("advanced.sidecarPort", 1024, 65535),
+    (
+        "advanced.mcpRequestTimeoutMs",
+        MCP_TIMEOUT_MS_MIN as u64,
+        MCP_TIMEOUT_MS_MAX as u64,
+    ),
+    (
+        "advanced.mcpServerStartTimeoutMs",
+        MCP_TIMEOUT_MS_MIN as u64,
+        MCP_TIMEOUT_MS_MAX as u64,
+    ),
+    (
+        "advanced.mcpSessionIdleTtlMs",
+        MCP_SESSION_IDLE_TTL_MS_MIN as u64,
+        MCP_SESSION_IDLE_TTL_MS_MAX as u64,
+    ),
+];
+
+fn setting_at<'a>(value: &'a Value, dotted: &str) -> Option<&'a Value> {
+    dotted
+        .split('.')
+        .try_fold(value, |current, part| current.get(part))
+}
+
+fn validate_settings_value(value: &Value) -> Result<(), String> {
+    if setting_at(value, "version").and_then(Value::as_u64) == Some(0) {
         return Err("version must be at least 1".to_string());
     }
     if !matches!(
-        settings.appearance.theme.as_str(),
-        "light" | "dark" | "system"
+        setting_at(value, "appearance.theme").and_then(Value::as_str),
+        Some("light" | "dark" | "system")
     ) {
         return Err("appearance.theme must be light, dark, or system".to_string());
     }
-    if settings.advanced.log_retention_days > 365 {
-        return Err("advanced.logRetentionDays must be between 0 and 365".to_string());
-    }
-    if settings.advanced.sidecar_port < 1024 {
-        return Err("advanced.sidecarPort must be between 1024 and 65535".to_string());
-    }
-    if settings.advanced.mcp_request_timeout_ms < MCP_TIMEOUT_MS_MIN
-        || settings.advanced.mcp_request_timeout_ms > MCP_TIMEOUT_MS_MAX
-    {
-        return Err(format!(
-            "advanced.mcpRequestTimeoutMs must be between {MCP_TIMEOUT_MS_MIN} and {MCP_TIMEOUT_MS_MAX}"
-        ));
-    }
-    if settings.advanced.mcp_server_start_timeout_ms < MCP_TIMEOUT_MS_MIN
-        || settings.advanced.mcp_server_start_timeout_ms > MCP_TIMEOUT_MS_MAX
-    {
-        return Err(format!(
-            "advanced.mcpServerStartTimeoutMs must be between {MCP_TIMEOUT_MS_MIN} and {MCP_TIMEOUT_MS_MAX}"
-        ));
-    }
-    if settings.advanced.mcp_session_idle_ttl_ms < MCP_SESSION_IDLE_TTL_MS_MIN
-        || settings.advanced.mcp_session_idle_ttl_ms > MCP_SESSION_IDLE_TTL_MS_MAX
-    {
-        return Err(format!(
-            "advanced.mcpSessionIdleTtlMs must be between {MCP_SESSION_IDLE_TTL_MS_MIN} and {MCP_SESSION_IDLE_TTL_MS_MAX}"
-        ));
+    for (path, min, max) in NUMERIC_BOUNDS {
+        // 非数值叶子会以反序列化错误的形式暴露。
+        if let Some(number) = setting_at(value, path).and_then(Value::as_u64) {
+            if number < *min || number > *max {
+                return Err(format!("{path} must be between {min} and {max}"));
+            }
+        }
     }
     Ok(())
 }
@@ -385,6 +289,10 @@ pub fn audit_logging_enabled(db: &Database) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn validate_settings(settings: &Settings) -> Result<(), String> {
+        validate_settings_value(&serde_json::to_value(settings).map_err(|e| e.to_string())?)
+    }
     use crate::sidecar::db::Database;
     use std::time::SystemTime;
 

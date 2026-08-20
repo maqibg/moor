@@ -1,59 +1,27 @@
+// Server Runtime 聚合根:registry + 启停状态机 + 会话监护 + 工具刷新。
+// 域内自包含块分域:status(状态类型)/ session(连接 seam)/ errors(脱敏)。
+mod errors;
+mod session;
+mod status;
+
+use errors::format_timeout_ms;
+pub use errors::public_server_start_error_message;
+use session::StdioHttpConnector;
+pub use session::{McpConnector, McpSession};
+use status::ServerStatus;
+
 use crate::sidecar::db::profile_repo::ProfileRepository;
 use crate::sidecar::db::server_repo::{Server, ServerRepository};
 use crate::sidecar::db::tool_discovery_repo::{ToolDiscoveryRepository, ToolInsert};
 use crate::sidecar::db::Database;
-use crate::sidecar::mcp::transport::mcp_client::{
-    HttpConnectConfig, McpClient, StdioConnectConfig,
-};
-use crate::sidecar::mcp::transport::stdio_client::{
-    build_stdio_environment, find_executable_on_path,
-};
 use crate::sidecar::services::event_bus::{EventBus, Evt};
 use crate::sidecar::services::settings;
 use crate::sidecar::services::tool_catalog::{ToolCatalogService, ToolDetail};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
-
-/// 运行时 MCP 会话接口。连接建立后,ServerManager 通过它列工具、调工具、断开、
-/// 读存活信号。真实适配器是 McpClient;测试里用假适配器实现它。
-/// async 方法手写 BoxFuture,让 trait 可作 `dyn McpSession` 用。
-pub trait McpSession: Send {
-    #[allow(dead_code)]
-    fn list_tools(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<ToolInsert>, String>> + Send + '_>>;
-    fn call_tool<'a>(
-        &'a self,
-        tool_name: &'a str,
-        args: Value,
-    ) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>>;
-    fn disconnect(&mut self) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>>;
-    fn set_request_timeout_ms(&mut self, request_timeout_ms: u32);
-    fn alive_receiver(&self) -> Option<tokio::sync::watch::Receiver<bool>>;
-}
-
-/// 连接工厂返回的会话盒。类型别名消除 clippy::type_complexity 警告,
-/// 也让 connect 签名更可读。
-pub type BoxedConnectFuture<'a> = Pin<
-    Box<dyn Future<Output = Result<(Vec<ToolInsert>, Box<dyn McpSession>), String>> + Send + 'a>,
->;
-
-/// 连接工厂接口。把"怎么从存储配置建立会话"藏到接缝背后。
-/// 真实适配器按 connection_type 分派到 stdio/http 连接并构造 McpClient;
-/// 测试可注入假工厂,返回预设的 (tools, 假会话),让 start_server 的 token
-/// 竞争、接受/拒绝、death watcher 在没有真实子进程的情况下可测。
-pub trait McpConnector: Send + Sync {
-    fn connect<'a>(
-        &'a self,
-        config: &'a StoredServerConfig,
-        timeouts: ServerTimeouts,
-    ) -> BoxedConnectFuture<'a>;
-}
 
 #[derive(Clone)]
 struct ServerSlot {
@@ -64,25 +32,6 @@ struct ServerSlot {
     start_deadline: Option<Instant>,
     start_timeout_ms: Option<u32>,
     session: Option<Arc<Mutex<Box<dyn McpSession>>>>,
-}
-
-#[derive(Debug, Clone)]
-enum ServerStatus {
-    Stopped,
-    Starting,
-    Running,
-    Error(String),
-}
-
-impl ServerStatus {
-    fn as_str(&self) -> &str {
-        match self {
-            ServerStatus::Stopped => "stopped",
-            ServerStatus::Starting => "starting",
-            ServerStatus::Running => "running",
-            ServerStatus::Error(_) => "error",
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -565,171 +514,11 @@ pub(crate) struct StoredServerConfig {
     working_dir: Option<String>,
 }
 
-fn verify_command_available(command: &str, env: &HashMap<String, String>) -> Result<(), String> {
-    let path = std::path::Path::new(command);
-    if path.is_absolute() {
-        if !path.exists() {
-            return Err(format!(
-                "Command \"{command}\" is not executable while starting this stdio server."
-            ));
-        }
-        return Ok(());
-    }
-    if find_executable_on_path(command, env).is_none() {
-        return Err(format!(
-            "Command \"{command}\" was not found on PATH while starting this stdio server."
-        ));
-    }
-    Ok(())
-}
-
-pub fn public_server_start_error_message(err: &str) -> String {
-    if let Some(cmd) = extract_missing_command(err) {
-        return format!("Command \"{cmd}\" was not found. Configure an absolute command path or update this server environment.");
-    }
-    if err.contains("not executable") {
-        return "Server failed to start. Check that the command path exists and has execute permission.".to_string();
-    }
-    if let Some(message) = extract_remote_mcp_error_message(err) {
-        return format!("Server failed to start: {message}");
-    }
-    if let Some(summary) = extract_stdio_stderr_summary(err) {
-        return format!("Server failed to start: {summary}");
-    }
-    "Server failed to start. Check logs for details.".to_string()
-}
-
-fn format_timeout_ms(timeout_ms: u32) -> String {
-    if timeout_ms.is_multiple_of(1000) {
-        format!("{}s", timeout_ms / 1000)
-    } else {
-        format!("{timeout_ms}ms")
-    }
-}
-
-fn extract_missing_command(err: &str) -> Option<String> {
-    let re = regex_lite::Regex::new(r#"Command "([^"]+)" was not found"#).ok()?;
-    let caps = re.captures(err)?;
-    Some(caps[1].to_string())
-}
-
-fn extract_stdio_stderr_summary(err: &str) -> Option<&str> {
-    err.split_once(". stdio stderr: ")
-        .map(|(_, summary)| summary.trim())
-        .filter(|summary| !summary.is_empty())
-}
-
-fn extract_remote_mcp_error_message(err: &str) -> Option<&str> {
-    err.strip_prefix("Remote MCP server error: ")
-        .map(str::trim)
-        .filter(|message| !message.is_empty())
-}
-
-/// 真实连接工厂适配器。按 connection_type 分派到 stdio/http 连接,
-/// 在内部完成环境变量构建、命令可用性检查、header 解析、MCP 握手,
-/// 然后返回一个装在 Box<dyn McpSession> 里的 McpClient。
-struct StdioHttpConnector;
-
-impl McpConnector for StdioHttpConnector {
-    fn connect<'a>(
-        &'a self,
-        config: &'a StoredServerConfig,
-        timeouts: ServerTimeouts,
-    ) -> BoxedConnectFuture<'a> {
-        Box::pin(async move {
-            match config.connection_type.as_str() {
-                "stdio" => Self::connect_stdio(config, timeouts).await,
-                "http" => Self::connect_http(config, timeouts).await,
-                other => Err(format!("Unknown connection type: {other}")),
-            }
-        })
-    }
-}
-
-impl StdioHttpConnector {
-    async fn connect_stdio(
-        config: &StoredServerConfig,
-        timeouts: ServerTimeouts,
-    ) -> Result<(Vec<ToolInsert>, Box<dyn McpSession>), String> {
-        let command = config
-            .command
-            .as_deref()
-            .ok_or("stdio server requires command")?;
-
-        let parent_env: HashMap<String, String> = std::env::vars().collect();
-        let server_env = config
-            .env
-            .as_ref()
-            .and_then(|v| serde_json::from_value(v.clone()).ok());
-        let env = build_stdio_environment(&parent_env, server_env.as_ref());
-
-        verify_command_available(command, &env)?;
-
-        let args: Vec<String> = config
-            .args
-            .as_ref()
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
-        let mut client = McpClient::connect_stdio(StdioConnectConfig {
-            server_name: config.name.clone(),
-            command: command.to_string(),
-            args,
-            cwd: config.working_dir.clone(),
-            env,
-            request_timeout_ms: timeouts.start_ms,
-        })
-        .await?;
-
-        let tools = client.list_tools().await?;
-        client.set_request_timeout_ms(timeouts.request_ms);
-
-        Ok((tools, Box::new(client)))
-    }
-
-    async fn connect_http(
-        config: &StoredServerConfig,
-        timeouts: ServerTimeouts,
-    ) -> Result<(Vec<ToolInsert>, Box<dyn McpSession>), String> {
-        let url = config.url.as_deref().ok_or("http server requires url")?;
-
-        let headers = config
-            .headers
-            .as_ref()
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
-        let env = config
-            .env
-            .as_ref()
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
-        let headers = crate::sidecar::mcp::transport::http_client::resolve_http_headers(
-            Some(&headers),
-            Some(&env),
-        );
-
-        let mut client = McpClient::connect_http(HttpConnectConfig {
-            server_name: config.name.clone(),
-            url: url.to_string(),
-            headers,
-            request_timeout_ms: timeouts.start_ms,
-        })
-        .await?;
-
-        let tools = client.list_tools().await?;
-        client.set_request_timeout_ms(timeouts.request_ms);
-
-        Ok((tools, Box::new(client)))
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::session::BoxedConnectFuture;
+    use std::future::Future;
+    use std::pin::Pin;
     use super::*;
     use crate::sidecar::db::profile_repo::ProfileRepository;
     use std::time::SystemTime;

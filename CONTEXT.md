@@ -46,6 +46,10 @@ _Avoid_: membership, assignment.
 Reading MCP server configs from an external client (Scan), pasted text (preview), executing the import, and converting Moor's servers back out to a client format.
 _Avoid_: sync, migration.
 
+**Client Dialect**:
+The per-client body of Config Import knowledge — registry entry (id, paths, format, gateway entry name), JSON entry shapes, and env-ref syntax. Single authority: Rust `clients.rs` registry + `formatters.rs` dialect table; the frontend client list derives from `/api/import/snippets` (`clientId`).
+_Avoid_: client list, client config map (the scattered copies).
+
 **Scan**:
 Detecting servers from a known client's config file (Claude Code, Codex, OpenCode, Cursor).
 _Avoid_: discover (reserve for ToolDiscovery).
@@ -59,13 +63,13 @@ _Avoid_: history, trace.
 Names for deepened modules from the 2026-05-29 architecture review, updated for the single-Rust decision (ADR-0001).
 
 **Server Runtime**:
-The one deep module owning a Server's full lifecycle — registry, status state machine, sessions, and tool catalog. Canonical implementation: Rust `server_manager.rs` (already a single deep module). The Node `server-manager` / `server-service` / `server-lifecycle` / `session-manager` split is being removed, not collapsed.
+The one deep module owning a Server's full lifecycle — registry, status state machine, sessions, and tool catalog. Canonical implementation: Rust `server_manager.rs` (the aggregate root) with in-domain files `server_manager/{status,session,errors}.rs`; the 14-method public interface is unchanged. The Node `server-manager` / `server-service` / `server-lifecycle` / `session-manager` split is being removed, not collapsed.
 _Avoid_: ServerManager, ServerService (the split).
 
 **Config Import**:
-The deep module covering scan / preview / execute / convert. Still fragmented across six files (`scanner`, `import_parser`, `converter`, `formatters`, `clients`, `snippets`) on the surviving Rust side — the open deepening target.
+The deep module covering scan / preview / execute / convert. Deepened 2026-08-18: the Client Dialect seam — `clients.rs` registry (single client list, `gateway_entry_name`) + `formatters.rs` `json_dialect` table (entry shapes) + loud `no formatter` error (guard test `every_registered_client_has_a_formatter`). The frontend derives its client list from snippets, no hardcoded copies.
 _Avoid_: import pipeline, the loose parts.
 
 **Server Status**:
-The pure reducer (frontend) that resolves a Server's displayed status from base query data, optimistic action, SSE `server:status` event, and mutation settle, and derives the optimistic/failed cache patches (list + detail channels) for start/stop. Canonical implementation: `src/lib/server-status.ts`. The interface is its test surface.
-_Avoid_: server patch utils, status merge.
+The pure reducer (frontend) that resolves a Server's displayed status from base query data, optimistic action, SSE `server:status` event, and mutation settle, and derives every cache transition (list + detail channels): start/stop optimistic & failed patches, add/remove list transitions, and the shared SSE merge rule. Canonical implementation: `src/lib/server-status.ts`. The interface is its test surface.
+_Avoid_: server patch utils, status merge, inline cache writes in hooks.

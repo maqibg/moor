@@ -5,6 +5,7 @@ import { syncRuntimeSettings, applyLoginAutostartSetting } from "@/lib/tauri";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ErrorBanner } from "@/components/shared/ErrorBanner";
 import { useSettings } from "@/hooks/useSettings";
+import { useLockedMutation } from "@/hooks/useLockedMutation";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,7 @@ import {
   getSettingsPageLoadState,
   parseIdleTtlSecondsInput,
   parseTimeoutSecondsInput,
+  type TimeoutSecondsInputState,
 } from "./settings-state";
 
 declare const __APP_VERSION__: string;
@@ -43,6 +45,69 @@ function SettingRow({ label, description, children }: SettingRowProps) {
       </div>
       <div className="shrink-0">{children}</div>
     </div>
+  );
+}
+
+interface TimeoutSettingRowProps {
+  label: string;
+  description: string;
+  milliseconds: number;
+  bounds: { min: number; max: number };
+  parse: (value: string) => TimeoutSecondsInputState;
+  errorId: string;
+  applyPending: boolean;
+  onApply: (parsed: TimeoutSecondsInputState) => void;
+}
+
+// 所有秒制数值设置共用一份实现；新字段只加一行描述符，不再是又一份 JSX 拷贝。
+function TimeoutSettingRow({
+  label,
+  description,
+  milliseconds,
+  bounds,
+  parse,
+  errorId,
+  applyPending,
+  onApply,
+}: TimeoutSettingRowProps) {
+  const [local, setLocal] = useState(String(milliseconds / 1000));
+  const parsed = parse(local);
+
+  useEffect(() => {
+    setLocal(String(milliseconds / 1000));
+  }, [milliseconds]);
+
+  return (
+    <SettingRow label={label} description={description}>
+      <div className="flex flex-col items-end gap-1">
+        <div className="flex items-center gap-2">
+          <Input
+            type="number"
+            min={bounds.min}
+            max={bounds.max}
+            step={1}
+            value={local}
+            aria-invalid={!parsed.valid}
+            aria-describedby={parsed.valid ? undefined : errorId}
+            onChange={(e) => setLocal(e.target.value)}
+            className="w-20 h-8 text-center text-xs"
+          />
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={!parsed.valid || applyPending}
+            onClick={() => onApply(parsed)}
+          >
+            Apply
+          </Button>
+        </div>
+        {!parsed.valid && (
+          <p id={errorId} className="font-body text-[11px] text-error-warm">
+            {parsed.message}
+          </p>
+        )}
+      </div>
+    </SettingRow>
   );
 }
 
@@ -240,22 +305,7 @@ function AdvancedSection({
   const { settings, updateSettings } = useSettings();
   const [localRetention, setLocalRetention] = useState(String(settings.advanced.logRetentionDays));
   const [localPort, setLocalPort] = useState(String(settings.advanced.sidecarPort));
-  const [localRequestTimeout, setLocalRequestTimeout] = useState(
-    String(settings.advanced.mcpRequestTimeoutMs / 1000),
-  );
-  const [localStartTimeout, setLocalStartTimeout] = useState(
-    String(settings.advanced.mcpServerStartTimeoutMs / 1000),
-  );
-  const [localSessionIdleTtl, setLocalSessionIdleTtl] = useState(
-    String(settings.advanced.mcpSessionIdleTtlMs / 1000),
-  );
   const [tokenVisible, setTokenVisible] = useState(false);
-  const requestTimeoutState = parseTimeoutSecondsInput(localRequestTimeout);
-  const startTimeoutState = parseTimeoutSecondsInput(localStartTimeout);
-  const sessionIdleTtlState = parseIdleTtlSecondsInput(localSessionIdleTtl);
-  const requestTimeoutErrorId = "request-timeout-error";
-  const startTimeoutErrorId = "server-start-timeout-error";
-  const sessionIdleTtlErrorId = "session-idle-ttl-error";
   const portStatus = getAdvancedPortStatus({
     runtimeInfo,
     configuredPort: settings.advanced.sidecarPort,
@@ -264,36 +314,28 @@ function AdvancedSection({
   useEffect(() => {
     setLocalRetention(String(settings.advanced.logRetentionDays));
     setLocalPort(String(settings.advanced.sidecarPort));
-    setLocalRequestTimeout(String(settings.advanced.mcpRequestTimeoutMs / 1000));
-    setLocalStartTimeout(String(settings.advanced.mcpServerStartTimeoutMs / 1000));
-    setLocalSessionIdleTtl(String(settings.advanced.mcpSessionIdleTtlMs / 1000));
-  }, [
-    settings.advanced.logRetentionDays,
-    settings.advanced.sidecarPort,
-    settings.advanced.mcpRequestTimeoutMs,
-    settings.advanced.mcpServerStartTimeoutMs,
-    settings.advanced.mcpSessionIdleTtlMs,
-  ]);
+  }, [settings.advanced.logRetentionDays, settings.advanced.sidecarPort]);
 
-  const applyRetention = async () => {
-    try {
-      onError(null);
-      await updateSettings({ advanced: { logRetentionDays: Number(localRetention) } });
-    } catch (err) {
-      onError(getErrorMessage(err, "Failed to update log retention"));
-    }
-  };
+  const applyRetention = useLockedMutation(
+    async (days: number) => {
+      await updateSettings({ advanced: { logRetentionDays: days } });
+    },
+    {
+      onMutate: () => onError(null),
+      onError: (err) => onError(getErrorMessage(err, "Failed to update log retention")),
+    },
+  );
 
-  const applyPort = async () => {
-    try {
-      onError(null);
-      const nextPort = Number(localPort);
-      await updateSettings({ advanced: { sidecarPort: nextPort } });
-      onPortApplied(nextPort);
-    } catch (err) {
-      onError(getErrorMessage(err, "Failed to update sidecar port"));
-    }
-  };
+  const applyPort = useLockedMutation(
+    async (port: number) => {
+      await updateSettings({ advanced: { sidecarPort: port } });
+    },
+    {
+      onMutate: () => onError(null),
+      onError: (err) => onError(getErrorMessage(err, "Failed to update sidecar port")),
+      onSuccess: (port) => onPortApplied(port),
+    },
+  );
 
   const toggleLanAccess = async (value: boolean) => {
     try {
@@ -307,22 +349,52 @@ function AdvancedSection({
 
   type TimeoutKey = "mcpRequestTimeoutMs" | "mcpServerStartTimeoutMs" | "mcpSessionIdleTtlMs";
 
-  const applyTimeout = async (
-    key: TimeoutKey,
-    parsed: typeof requestTimeoutState,
-    label: string,
-  ) => {
-    try {
-      onError(null);
-      if (!parsed.valid) {
-        onError(parsed.message);
-        return;
-      }
-      await updateSettings({ advanced: { [key]: parsed.milliseconds } });
-    } catch (err) {
-      onError(getErrorMessage(err, `Failed to update ${label}`));
-    }
-  };
+  const timeoutFields = [
+    {
+      key: "mcpRequestTimeoutMs",
+      label: "Request Timeout",
+      description:
+        "Timeout for MCP JSON-RPC requests in seconds (5-300). Applies to the next MCP request.",
+      bounds: { min: 5, max: 300 },
+      parse: parseTimeoutSecondsInput,
+      errorId: "request-timeout-error",
+    },
+    {
+      key: "mcpServerStartTimeoutMs",
+      label: "Server Start Timeout",
+      description:
+        "Total startup wait for MCP servers in seconds (5-300). Applies to the next server start.",
+      bounds: { min: 5, max: 300 },
+      parse: parseTimeoutSecondsInput,
+      errorId: "server-start-timeout-error",
+    },
+    {
+      key: "mcpSessionIdleTtlMs",
+      label: "Session Idle TTL",
+      description:
+        "Idle expiry for MCP sessions in seconds (300-86400). Idle clients re-initialize on their next request.",
+      bounds: { min: 300, max: 86400 },
+      parse: parseIdleTtlSecondsInput,
+      errorId: "session-idle-ttl-error",
+    },
+  ] as const satisfies {
+    key: TimeoutKey;
+    label: string;
+    description: string;
+    bounds: { min: number; max: number };
+    parse: (value: string) => TimeoutSecondsInputState;
+    errorId: string;
+  }[];
+
+  const applyTimeout = useLockedMutation(
+    async (input: { key: TimeoutKey; milliseconds: number; label: string }) => {
+      await updateSettings({ advanced: { [input.key]: input.milliseconds } });
+    },
+    {
+      onMutate: () => onError(null),
+      onError: (err, input) => onError(getErrorMessage(err, `Failed to update ${input.label}`)),
+    },
+  );
 
   return (
     <div className="space-y-4">
@@ -341,7 +413,12 @@ function AdvancedSection({
                 onChange={(e) => setLocalRetention(e.target.value)}
                 className="w-20 h-8 text-center text-xs"
               />
-              <Button variant="secondary" size="sm" onClick={() => void applyRetention()}>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={applyRetention.pending}
+                onClick={() => void applyRetention.mutate(Number(localRetention))}
+              >
                 Apply
               </Button>
             </div>
@@ -361,119 +438,27 @@ function AdvancedSection({
               onCheckedChange={(v) => void toggleLanAccess(v)}
             />
           </SettingRow>
-          <SettingRow
-            label="Request Timeout"
-            description="Timeout for MCP JSON-RPC requests in seconds (5-300). Applies to the next MCP request."
-          >
-            <div className="flex flex-col items-end gap-1">
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  min={5}
-                  max={300}
-                  step={1}
-                  value={localRequestTimeout}
-                  aria-invalid={!requestTimeoutState.valid}
-                  aria-describedby={requestTimeoutState.valid ? undefined : requestTimeoutErrorId}
-                  onChange={(e) => setLocalRequestTimeout(e.target.value)}
-                  className="w-20 h-8 text-center text-xs"
-                />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={!requestTimeoutState.valid}
-                  onClick={() =>
-                    void applyTimeout("mcpRequestTimeoutMs", requestTimeoutState, "request timeout")
-                  }
-                >
-                  Apply
-                </Button>
-              </div>
-              {!requestTimeoutState.valid && (
-                <p id={requestTimeoutErrorId} className="font-body text-[11px] text-error-warm">
-                  {requestTimeoutState.message}
-                </p>
-              )}
-            </div>
-          </SettingRow>
-          <SettingRow
-            label="Server Start Timeout"
-            description="Total startup wait for MCP servers in seconds (5-300). Applies to the next server start."
-          >
-            <div className="flex flex-col items-end gap-1">
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  min={5}
-                  max={300}
-                  step={1}
-                  value={localStartTimeout}
-                  aria-invalid={!startTimeoutState.valid}
-                  aria-describedby={startTimeoutState.valid ? undefined : startTimeoutErrorId}
-                  onChange={(e) => setLocalStartTimeout(e.target.value)}
-                  className="w-20 h-8 text-center text-xs"
-                />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={!startTimeoutState.valid}
-                  onClick={() =>
-                    void applyTimeout(
-                      "mcpServerStartTimeoutMs",
-                      startTimeoutState,
-                      "server start timeout",
-                    )
-                  }
-                >
-                  Apply
-                </Button>
-              </div>
-              {!startTimeoutState.valid && (
-                <p id={startTimeoutErrorId} className="font-body text-[11px] text-error-warm">
-                  {startTimeoutState.message}
-                </p>
-              )}
-            </div>
-          </SettingRow>
-          <SettingRow
-            label="Session Idle TTL"
-            description="Idle expiry for MCP sessions in seconds (300-86400). Idle clients re-initialize on their next request."
-          >
-            <div className="flex flex-col items-end gap-1">
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  min={300}
-                  max={86400}
-                  step={1}
-                  value={localSessionIdleTtl}
-                  aria-invalid={!sessionIdleTtlState.valid}
-                  aria-describedby={sessionIdleTtlState.valid ? undefined : sessionIdleTtlErrorId}
-                  onChange={(e) => setLocalSessionIdleTtl(e.target.value)}
-                  className="w-20 h-8 text-center text-xs"
-                />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={!sessionIdleTtlState.valid}
-                  onClick={() =>
-                    void applyTimeout(
-                      "mcpSessionIdleTtlMs",
-                      sessionIdleTtlState,
-                      "session idle TTL",
-                    )
-                  }
-                >
-                  Apply
-                </Button>
-              </div>
-              {!sessionIdleTtlState.valid && (
-                <p id={sessionIdleTtlErrorId} className="font-body text-[11px] text-error-warm">
-                  {sessionIdleTtlState.message}
-                </p>
-              )}
-            </div>
-          </SettingRow>
+          {timeoutFields.map((field) => (
+            <TimeoutSettingRow
+              key={field.key}
+              label={field.label}
+              description={field.description}
+              milliseconds={settings.advanced[field.key]}
+              bounds={field.bounds}
+              parse={field.parse}
+              errorId={field.errorId}
+              applyPending={applyTimeout.pending}
+              onApply={(parsed) => {
+                if (parsed.valid) {
+                  void applyTimeout.mutate({
+                    key: field.key,
+                    milliseconds: parsed.milliseconds,
+                    label: field.label,
+                  });
+                }
+              }}
+            />
+          ))}
         </CardContent>
       </Card>
 
@@ -493,7 +478,12 @@ function AdvancedSection({
                   onChange={(e) => setLocalPort(e.target.value)}
                   className="w-24 h-8 text-center text-xs"
                 />
-                <Button variant="secondary" size="sm" onClick={() => void applyPort()}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={applyPort.pending}
+                  onClick={() => void applyPort.mutate(Number(localPort))}
+                >
                   Apply
                 </Button>
               </div>

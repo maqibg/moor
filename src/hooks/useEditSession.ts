@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useBlocker } from "react-router-dom";
 import { api } from "@/lib/api/client";
+import { useLockedMutation } from "@/hooks/useLockedMutation";
 import { routes } from "@/lib/api-routes";
 import {
   serverToForm,
@@ -23,7 +24,6 @@ export function useEditSession({ server, serverId, updateServer }: EditSessionOp
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [baselineForm, setBaselineForm] = useState<EditForm | null>(null);
   const [baselineServer, setBaselineServer] = useState<ServerDetail | null>(null);
-  const [saving, setSaving] = useState(false);
   const [discardSource, setDiscardSource] = useState<"manual" | null>(null);
   const [overwriteOpen, setOverwriteOpen] = useState(false);
 
@@ -60,8 +60,8 @@ export function useEditSession({ server, serverId, updateServer }: EditSessionOp
     exitEdit();
   }, [dirty, exitEdit]);
 
-  const saveEdit = useCallback(
-    async (overwrite = false) => {
+  const saveMutation = useLockedMutation(
+    async (overwrite: boolean) => {
       if (!serverId || !editForm || !server || !baselineForm) return;
       const connectionType = baselineServer?.connectionType ?? server.connectionType;
       const validationError = validateEditForm(editForm, connectionType);
@@ -70,43 +70,40 @@ export function useEditSession({ server, serverId, updateServer }: EditSessionOp
         return;
       }
 
-      setSaving(true);
-      try {
-        if (!overwrite) {
-          const latest = await api<ServerDetail>(routes.servers.detail(serverId));
-          if (latest.connectionType !== connectionType) {
-            toast.error("Save failed", {
-              description: "Connection type changed. Reopen this server before saving.",
-            });
-            return;
-          }
-          if (hasChanges(serverToForm(latest), baselineForm)) {
-            setOverwriteOpen(true);
-            return;
-          }
-        }
-
-        const updates = formToUpdates(editForm, connectionType);
-        await updateServer({ id: serverId, updates });
-        if (server?.status === "running") {
-          toast.success("Configuration saved", {
-            description: "Restart the server to apply changes.",
+      if (!overwrite) {
+        const latest = await api<ServerDetail>(routes.servers.detail(serverId));
+        if (latest.connectionType !== connectionType) {
+          toast.error("Save failed", {
+            description: "Connection type changed. Reopen this server before saving.",
           });
-        } else {
-          toast.success("Configuration saved");
+          return;
         }
-        exitEdit();
-      } catch (err) {
+        if (hasChanges(serverToForm(latest), baselineForm)) {
+          setOverwriteOpen(true);
+          return;
+        }
+      }
+
+      const updates = formToUpdates(editForm, connectionType);
+      await updateServer({ id: serverId, updates });
+      if (server?.status === "running") {
+        toast.success("Configuration saved", {
+          description: "Restart the server to apply changes.",
+        });
+      } else {
+        toast.success("Configuration saved");
+      }
+      exitEdit();
+    },
+    {
+      onError: (err) =>
         toast.error("Save failed", {
           description: err instanceof Error ? err.message : "Unknown error",
-        });
-      } finally {
-        setSaving(false);
-      }
+        }),
     },
-    [baselineForm, baselineServer, editForm, exitEdit, serverId, server, updateServer],
   );
-
+  const { mutate: runSave, pending: saving } = saveMutation;
+  const saveEdit = useCallback((overwrite = false) => void runSave(overwrite), [runSave]);
   const confirmDiscard = useCallback(() => {
     setDiscardSource(null);
     if (blocker.state === "blocked") {

@@ -16,6 +16,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import type { Server } from "@moor/types";
 import { resolveDisplayStatus, type ServerAction } from "@/lib/server-status";
+import { useLockedMutation } from "@/hooks/useLockedMutation";
 import { cn, getErrorMessage } from "@/lib/utils";
 
 type RemoveFeedback =
@@ -280,8 +281,16 @@ export function ServerCard({
   onRemove,
 }: ServerCardProps) {
   const [confirmingRemove, setConfirmingRemove] = useState(false);
-  const [isRemoving, setIsRemoving] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const removeMutation = useLockedMutation(async (serverId: string) => {
+    try {
+      await onRemove(serverId);
+      setConfirmingRemove(false);
+    } catch (err) {
+      setRemoveError(getErrorMessage(err, "Unable to remove server"));
+    }
+  });
+  const isRemoving = removeMutation.pending;
   const isRunning = server.status === "running";
   const isError = server.status === "error";
   // 合成规则唯一权威在 server-status 模块；isRunning/isError 直读持久态（按钮形态依赖真实 status）
@@ -294,19 +303,7 @@ export function ServerCard({
     removeError,
   });
 
-  const handleRemove = async () => {
-    setIsRemoving(true);
-    setRemoveError(null);
-    try {
-      await onRemove(server.id);
-      setConfirmingRemove(false);
-    } catch (err) {
-      setRemoveError(getErrorMessage(err, "Unable to remove server"));
-    } finally {
-      setIsRemoving(false);
-    }
-  };
-
+  const handleRemove = () => void removeMutation.mutate(server.id);
   const clearRemoveFeedback = () => {
     setConfirmingRemove(false);
     setRemoveError(null);

@@ -7,9 +7,12 @@ import { useSSEEvent } from "@/contexts/SSEContext";
 import type { Server, ServerDetail, ServerUpdateInput, ToolDetail } from "@moor/types";
 import { getErrorMessage } from "@/lib/utils";
 import {
+  appendServerList,
   failedTransition,
+  mergeServerStatusDetail,
   mergeServerStatusEvent,
   optimisticTransition,
+  removeServerList,
   syncUpdatedServerCaches,
   type ServerAction,
   type ServerPatches,
@@ -18,18 +21,8 @@ import {
 
 type ServerMutationResult = "success" | "failed";
 
-export function useServerList() {
-  const queryClient = useQueryClient();
-
-  const {
-    data: servers = [],
-    isLoading: loading,
-    error,
-  } = useQuery<Server[]>({
-    queryKey: serverKeys.list(),
-    queryFn: ({ signal }) => api<Server[]>(routes.servers.list(), { signal }),
-  });
-
+// 乐观 action 表(list 页与 detail 页共用同一接线)
+export function useServerActionsState() {
   const [serverActions, setServerActions] = useState<Record<string, ServerAction>>({});
 
   const setServerAction = useCallback((id: string, action: ServerAction) => {
@@ -43,6 +36,23 @@ export function useServerList() {
       return next;
     });
   }, []);
+
+  return { serverActions, setServerAction, clearServerAction };
+}
+
+export function useServerList() {
+  const queryClient = useQueryClient();
+
+  const {
+    data: servers = [],
+    isLoading: loading,
+    error,
+  } = useQuery<Server[]>({
+    queryKey: serverKeys.list(),
+    queryFn: ({ signal }) => api<Server[]>(routes.servers.list(), { signal }),
+  });
+
+  const { serverActions, setServerAction, clearServerAction } = useServerActionsState();
 
   const setData = useCallback(
     (updater: SetStateAction<Server[]>) => {
@@ -130,7 +140,9 @@ export function useServerActions(callbacks?: {
       return apiPost<Server>(routes.servers.create(), config);
     },
     onSuccess: (server) => {
-      queryClient.setQueryData<Server[]>(serverKeys.list(), (prev) => [...(prev ?? []), server]);
+      queryClient.setQueryData<Server[]>(serverKeys.list(), (prev) =>
+        appendServerList(prev, server),
+      );
     },
   });
 
@@ -184,9 +196,7 @@ export function useServerActions(callbacks?: {
       await apiDelete(routes.servers.delete(id));
     },
     onSuccess: (_data, id) => {
-      queryClient.setQueryData<Server[]>(serverKeys.list(), (prev) =>
-        prev?.filter((s) => s.id !== id),
-      );
+      queryClient.setQueryData<Server[]>(serverKeys.list(), (prev) => removeServerList(prev, id));
     },
   });
 
@@ -258,9 +268,12 @@ export function useServer(id: string | undefined) {
     enabled: !!id,
   });
 
+  // 与 list 通道共用同一条 SSE 合并规则(此前为 invalidate+refetch)
   useSSEEvent("server:status", (eventData) => {
     if (eventData.serverId === id) {
-      void queryClient.invalidateQueries({ queryKey: serverKeys.detail(id!) });
+      queryClient.setQueryData<ServerDetail>(serverKeys.detail(id!), (prev) =>
+        prev ? mergeServerStatusDetail(prev, eventData) : prev,
+      );
     }
   });
 

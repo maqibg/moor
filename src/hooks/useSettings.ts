@@ -39,8 +39,9 @@ export function useSettings() {
     },
   });
 
-  useSSEEvent("settings:changed", (data) => {
-    queryClient.setQueryData(QUERY_KEY, data);
+  // SSE 载荷仅作变更信号：不直写缓存（避免畸形载荷毒化），数据回归 GET 的类型化通道
+  useSSEEvent("settings:changed", () => {
+    void queryClient.invalidateQueries({ queryKey: QUERY_KEY });
   });
 
   return {

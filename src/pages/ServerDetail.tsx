@@ -16,7 +16,12 @@ import { ToolCategoryBadge } from "@/components/shared/ToolCategoryBadge";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Play, Square, RefreshCw, Terminal, Pencil, X, Check } from "lucide-react";
 import { useProfiles } from "@/hooks/useProfiles";
-import { useServerActions, useServer, useServerTools } from "@/hooks/useServers";
+import {
+  useServerActions,
+  useServerActionsState,
+  useServer,
+  useServerTools,
+} from "@/hooks/useServers";
 import { useEditSession } from "@/hooks/useEditSession";
 import { findDuplicateHeaderKeys, type EditForm } from "@/lib/server-form";
 import { resolveDisplayStatus } from "@/lib/server-status";
@@ -116,7 +121,11 @@ export function ServerEditFields({ form, connectionType, onChange }: ServerEditF
 export function ServerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { startServer, stopServer, updateServer } = useServerActions();
+  const { serverActions, setServerAction, clearServerAction } = useServerActionsState();
+  const { startServer, stopServer, updateServer } = useServerActions({
+    setServerAction,
+    clearServerAction,
+  });
   const { profiles, updateProfileServer } = useProfiles();
   const activeProfile = profiles.find((profile) => profile.isActive);
 
@@ -146,7 +155,7 @@ export function ServerDetail() {
     return <PageLoading message="Loading server details..." />;
   }
 
-  const displayStatus = resolveDisplayStatus(server);
+  const displayStatus = resolveDisplayStatus(server, serverActions[id ?? ""]);
 
   const handleDiscoverTools = async () => {
     if (server.status === "running") {

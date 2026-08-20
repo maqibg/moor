@@ -9,63 +9,16 @@ import { Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { routes } from "@/lib/api-routes";
 import { ConverterPanel } from "@/components/converter/ConverterPanel";
+import { importKeys } from "@/lib/query-keys";
 import type { ClientSnippet } from "@moor/types";
-
-const FALLBACK_SNIPPETS: ClientSnippet[] = [
-  {
-    client: "Claude Code",
-    description: "Configure Claude Code to connect to Moor",
-    snippet:
-      '{\n  "mcpServers": {\n    "moor": {\n      "url": "http://127.0.0.1:9223/mcp"\n    }\n  }\n}',
-    cliCommand:
-      '# Edit ~/.claude/settings.json and add to mcpServers:\n"moor": { "url": "http://127.0.0.1:9223/mcp" }',
-  },
-  {
-    client: "Codex",
-    description: "Configure Codex to connect to Moor",
-    snippet: '[mcp_servers.moor]\nurl = "http://127.0.0.1:9223/mcp"\nenabled = true',
-    cliCommand:
-      '# Edit ~/.codex/config.toml and add:\n[mcp_servers.moor]\nurl = "http://127.0.0.1:9223/mcp"\nenabled = true',
-  },
-  {
-    client: "OpenCode",
-    description: "Configure OpenCode to connect to Moor",
-    snippet:
-      '{\n  "$schema": "https://opencode.ai/config.json",\n  "mcp": {\n    "moor": {\n      "type": "remote",\n      "url": "http://127.0.0.1:9223/mcp",\n      "enabled": true\n    }\n  }\n}',
-    cliCommand: '# Edit ~/.config/opencode/opencode.json and add the "mcp.moor" entry above.',
-  },
-  {
-    client: "Cursor",
-    description: "Configure Cursor to connect to Moor",
-    snippet:
-      '{\n  "mcpServers": {\n    "moor": {\n      "url": "http://127.0.0.1:9223/mcp"\n    }\n  }\n}',
-    cliCommand: "# Edit ~/.cursor/mcp.json and add the mcpServers.moor entry above.",
-  },
-  {
-    client: "Kimi Code",
-    description: "Configure Kimi Code to connect to Moor",
-    snippet:
-      '{\n  "mcpServers": {\n    "moor-mcp": {\n      "url": "http://127.0.0.1:9223/mcp"\n    }\n  }\n}',
-    cliCommand: "# Edit ~/.kimi-code/mcp.json and add the mcpServers.moor-mcp entry above.",
-  },
-  {
-    client: "DeepSeek Harness (dsh)",
-    description: "Configure DeepSeek Harness to connect to Moor",
-    snippet:
-      "# ===== Moor MCP Gateway (managed) =====\n- insert:\n    - id: 'moor-mcp'\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: 'moor-mcp'\n        transport: streamable-http\n        url: 'http://127.0.0.1:9223/mcp'\n# ===== end Moor MCP Gateway =====",
-    cliCommand:
-      "# Append the marked section above to the end of ~/.dsh/cordis.patch.yml (kept HMR-hot by dsh).",
-  },
-];
-
 export function ClientConfig() {
   const [activeTab, setActiveTab] = useState("snippets");
   const { data: snippets } = useQuery<ClientSnippet[]>({
-    queryKey: ["snippets"],
+    queryKey: importKeys.snippets(),
     queryFn: () => api<ClientSnippet[]>(routes.import.snippets()),
   });
 
-  const displaySnippets = !snippets || snippets.length === 0 ? FALLBACK_SNIPPETS : snippets;
+  const displaySnippets = snippets ?? [];
 
   return (
     <div className="space-y-6 animate-fade-in-up">
@@ -88,7 +41,7 @@ export function ClientConfig() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             {displaySnippets.map((s, index) => (
               <Card
-                key={s.client}
+                key={s.clientId}
                 className={cn(
                   "animate-fade-in-up transition-shadow-smooth hover:shadow-[0_12px_40px_-12px_rgba(0,0,0,0.06)]",
                   `stagger-${index + 1}`,

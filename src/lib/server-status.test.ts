@@ -1,9 +1,12 @@
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
+  appendServerList,
   failedTransition,
+  mergeServerStatusDetail,
   mergeServerStatusEvent,
   optimisticTransition,
+  removeServerList,
   resolveDisplayStatus,
   syncUpdatedServerCaches,
   type ServerStateItem,
@@ -164,5 +167,49 @@ describe("syncUpdatedServerCaches", () => {
 
     expect(queryClient.getQueryData<Server[]>(["servers"])).toEqual([updated]);
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["servers", updated.id] });
+  });
+});
+
+describe("mergeServerStatusDetail", () => {
+  it("merges a matching event into the detail channel", () => {
+    expect(
+      mergeServerStatusDetail(server({ status: "running", errorMessage: "old" }), {
+        serverId: "server-1",
+        status: "error",
+        errorMessage: "spawn failed",
+      }),
+    ).toEqual(server({ status: "error", errorMessage: "spawn failed" }));
+  });
+
+  it("clears errors when the event is not an error", () => {
+    expect(
+      mergeServerStatusDetail(server({ status: "error", errorMessage: "spawn failed" }), {
+        serverId: "server-1",
+        status: "running",
+      }),
+    ).toEqual(server({ status: "running", errorMessage: null }));
+  });
+
+  it("returns the detail untouched for another server", () => {
+    const detail = server({ id: "other", status: "stopped" });
+    expect(mergeServerStatusDetail(detail, { serverId: "server-1", status: "running" })).toBe(
+      detail,
+    );
+  });
+});
+
+describe("appendServerList / removeServerList", () => {
+  it("appends to an existing list and seeds an empty cache", () => {
+    const first = storedServer();
+    expect(appendServerList(undefined, first)).toEqual([first]);
+    const second = storedServer({ id: "server-2", name: "Second" });
+    expect(appendServerList([first], second)).toEqual([first, second]);
+  });
+
+  it("removes by id and tolerates an empty cache", () => {
+    const first = storedServer();
+    const second = storedServer({ id: "server-2", name: "Second" });
+    expect(removeServerList([first, second], "server-2")).toEqual([first]);
+    expect(removeServerList(undefined, "server-2")).toEqual([]);
   });
 });

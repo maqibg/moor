@@ -70,19 +70,78 @@ fn rewrite_header_value(value: &str, client: &ClientMeta) -> String {
         if let Some(caps) = pattern.captures(value) {
             let name = &caps[1];
             let env_ref = env_ref_for_client(name, client);
-            let full = pattern.replace(value, &env_ref).to_string();
+            // `$$` 转义替换模板里 `$` 的组引用语法——
+            // 否则 ${...} 引用会被展开成空串。
+            let literal = env_ref.replace('$', "$$");
+            let full = pattern.replace(value, &literal).to_string();
             return full;
         }
     }
     value.to_string()
 }
 
-fn env_ref_for_client(name: &str, client: &ClientMeta) -> String {
-    match client.id {
-        "claude-code" => format!("${{{name}}}"),
-        "cursor" => format!("${{env:{name}}}"),
-        _ => format!("{{env:{name}}}"),
+// 每客户端的 JSON entry 形状——新客户端方言的唯一声明处；
+// dsh/codex 的 TOML 路径不走这些字段。
+#[derive(Debug, Clone, Copy)]
+struct JsonDialect {
+    stdio_type: Option<&'static str>,
+    command_array: bool,
+    env_key: &'static str,
+    http_type: Option<&'static str>,
+    headers_key: &'static str,
+    env_ref: EnvRefStyle,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum EnvRefStyle {
+    Dollar,
+    DollarEnv,
+    BraceEnv,
+}
+
+impl EnvRefStyle {
+    fn render(self, name: &str) -> String {
+        match self {
+            EnvRefStyle::Dollar => format!("${{{name}}}"),
+            EnvRefStyle::DollarEnv => format!("${{env:{name}}}"),
+            EnvRefStyle::BraceEnv => format!("{{env:{name}}}"),
+        }
     }
+}
+
+const DEFAULT_JSON_DIALECT: JsonDialect = JsonDialect {
+    stdio_type: None,
+    command_array: false,
+    env_key: "env",
+    http_type: None,
+    headers_key: "headers",
+    env_ref: EnvRefStyle::BraceEnv,
+};
+
+fn json_dialect(client_id: &str) -> JsonDialect {
+    match client_id {
+        "claude-code" => JsonDialect {
+            env_ref: EnvRefStyle::Dollar,
+            ..DEFAULT_JSON_DIALECT
+        },
+        "opencode" => JsonDialect {
+            stdio_type: Some("local"),
+            command_array: true,
+            env_key: "environment",
+            http_type: Some("remote"),
+            ..DEFAULT_JSON_DIALECT
+        },
+        "cursor" => JsonDialect {
+            stdio_type: Some("stdio"),
+            env_ref: EnvRefStyle::DollarEnv,
+            ..DEFAULT_JSON_DIALECT
+        },
+        _ => DEFAULT_JSON_DIALECT,
+    }
+}
+
+fn env_ref_for_client(name: &str, client: &ClientMeta) -> String {
+    json_dialect(client.id).env_ref.render(name)
 }
 
 // YAML single-quoted scalar: only ' needs escaping (doubled).
@@ -132,86 +191,60 @@ fn dsh_header_value(value: &str) -> String {
     }
 }
 
-fn stdio_entry(server: &ScannedServer, client: &ClientMeta) -> Value {
+fn stdio_entry(server: &ScannedServer, dialect: &JsonDialect) -> Value {
     let mut entry = serde_json::Map::new();
 
-    if client.id == "opencode" {
-        entry.insert("type".to_string(), Value::String("local".to_string()));
+    if let Some(t) = dialect.stdio_type {
+        entry.insert("type".to_string(), Value::String(t.to_string()));
+    }
+    if dialect.command_array {
         let cmd = server.command.as_deref().unwrap_or("");
         let mut cmd_arr = vec![Value::String(cmd.to_string())];
         if let Some(args) = &server.args {
             cmd_arr.extend(args.iter().map(|a| Value::String(a.clone())));
         }
         entry.insert("command".to_string(), Value::Array(cmd_arr));
-        if non_empty(&server.env) {
-            entry.insert(
-                "environment".to_string(),
-                serde_json::to_value(&server.env).unwrap_or(Value::Null),
-            );
-        }
-        return Value::Object(entry);
-    }
-
-    if client.id == "cursor" {
-        entry.insert("type".to_string(), Value::String("stdio".to_string()));
-    }
-    entry.insert(
-        "command".to_string(),
-        Value::String(server.command.clone().unwrap_or_default()),
-    );
-    if let Some(args) = &server.args {
-        if !args.is_empty() {
-            entry.insert(
-                "args".to_string(),
-                serde_json::to_value(args).unwrap_or(Value::Null),
-            );
+    } else {
+        entry.insert(
+            "command".to_string(),
+            Value::String(server.command.clone().unwrap_or_default()),
+        );
+        if let Some(args) = &server.args {
+            if !args.is_empty() {
+                entry.insert(
+                    "args".to_string(),
+                    serde_json::to_value(args).unwrap_or(Value::Null),
+                );
+            }
         }
     }
     if non_empty(&server.env) {
         entry.insert(
-            "env".to_string(),
+            dialect.env_key.to_string(),
             serde_json::to_value(&server.env).unwrap_or(Value::Null),
         );
     }
     Value::Object(entry)
 }
 
-fn http_entry(server: &ScannedServer, client: &ClientMeta) -> Value {
+fn http_entry(server: &ScannedServer, client: &ClientMeta, dialect: &JsonDialect) -> Value {
     let mut entry = serde_json::Map::new();
 
-    if client.id == "opencode" {
-        entry.insert("type".to_string(), Value::String("remote".to_string()));
-        entry.insert(
-            "url".to_string(),
-            Value::String(server.url.clone().unwrap_or_default()),
-        );
-        if let Some(headers) = rewrite_headers(&server.headers, client) {
-            entry.insert(
-                "headers".to_string(),
-                serde_json::to_value(&headers).unwrap_or(Value::Null),
-            );
-        }
-        return Value::Object(entry);
+    if let Some(t) = dialect.http_type {
+        entry.insert("type".to_string(), Value::String(t.to_string()));
     }
-
     entry.insert(
         "url".to_string(),
         Value::String(server.url.clone().unwrap_or_default()),
     );
     if let Some(headers) = rewrite_headers(&server.headers, client) {
-        let key = if client.id == "codex" {
-            "http_headers"
-        } else {
-            "headers"
-        };
         entry.insert(
-            key.to_string(),
+            dialect.headers_key.to_string(),
             serde_json::to_value(&headers).unwrap_or(Value::Null),
         );
     }
     Value::Object(entry)
 }
-
 fn format_json_mcp_servers(
     servers: &[ScannedServer],
     client: &ClientMeta,
@@ -219,11 +252,12 @@ fn format_json_mcp_servers(
     extra_warnings: Vec<String>,
 ) -> FormatResult {
     let mut mcp_servers = serde_json::Map::new();
+    let dialect = json_dialect(client.id);
     for s in servers {
         let entry = if s.connection_type == "stdio" {
-            stdio_entry(s, client)
+            stdio_entry(s, &dialect)
         } else {
-            http_entry(s, client)
+            http_entry(s, client, &dialect)
         };
         mcp_servers.insert(s.name.clone(), entry);
     }
@@ -560,5 +594,55 @@ mod tests {
         assert!(servers.get("moor-mcp").unwrap().get("transport").is_none());
         let local = servers.get("filesystem").unwrap();
         assert_eq!(local.get("command").unwrap().as_str().unwrap(), "npx");
+    }
+
+    #[test]
+    fn every_registered_client_has_a_formatter() {
+        for client in clients::ALL_CLIENTS {
+            assert!(
+                format_for_client(client.id).is_some(),
+                "registry client `{}` has no formatter",
+                client.id
+            );
+        }
+    }
+
+    #[test]
+    fn opencode_dialect_shapes_local_and_remote_entries() {
+        let result = format_for_opencode(&[stdio_server(), http_server()], client("opencode"));
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        let mcp = parsed.get("mcp").unwrap().as_object().unwrap();
+
+        let local = mcp.get("filesystem").unwrap();
+        assert_eq!(local.get("type").unwrap(), "local");
+        assert_eq!(local.get("command").unwrap().as_array().unwrap()[0], "npx");
+        // args 折叠进 command 数组；env 映射为 `environment`。
+        assert!(local.get("args").is_none());
+        assert!(local.get("environment").is_some());
+        assert!(local.get("env").is_none());
+
+        let remote = mcp.get("moor-mcp").unwrap();
+        assert_eq!(remote.get("type").unwrap(), "remote");
+        assert_eq!(
+            remote.get("headers").unwrap().get("Authorization").unwrap(),
+            "Bearer {env:MOOR_TOKEN}"
+        );
+    }
+
+    #[test]
+    fn cursor_dialect_marks_stdio_type_and_dollar_env_refs() {
+        let result = format_for_cursor(&[stdio_server(), http_server()], client("cursor"));
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        let servers = parsed.get("mcpServers").unwrap().as_object().unwrap();
+
+        assert_eq!(
+            servers.get("filesystem").unwrap().get("type").unwrap(),
+            "stdio"
+        );
+        let http = servers.get("moor-mcp").unwrap();
+        assert_eq!(
+            http.get("headers").unwrap().get("Authorization").unwrap(),
+            "Bearer ${env:MOOR_TOKEN}"
+        );
     }
 }

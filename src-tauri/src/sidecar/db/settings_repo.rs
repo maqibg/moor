@@ -8,7 +8,7 @@ pub fn load_entries(db: &Database) -> Result<HashMap<String, String>, String> {
     Ok(rows.into_iter().collect())
 }
 
-pub fn save_entries(db: &Database, entries: &[(&str, String)]) -> Result<(), String> {
+pub fn save_entries(db: &Database, entries: &[(String, String)]) -> Result<(), String> {
     let now = chrono::Utc::now().to_rfc3339();
     db.transaction(|conn| {
         for (key, value) in entries {
