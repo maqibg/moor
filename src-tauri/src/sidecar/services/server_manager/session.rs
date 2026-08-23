@@ -45,6 +45,7 @@ pub trait McpConnector: Send + Sync {
         &'a self,
         config: &'a StoredServerConfig,
         timeouts: ServerTimeouts,
+        log_path: Option<std::path::PathBuf>,
     ) -> BoxedConnectFuture<'a>;
 }
 
@@ -58,10 +59,11 @@ impl McpConnector for StdioHttpConnector {
         &'a self,
         config: &'a StoredServerConfig,
         timeouts: ServerTimeouts,
+        log_path: Option<std::path::PathBuf>,
     ) -> BoxedConnectFuture<'a> {
         Box::pin(async move {
             match config.connection_type.as_str() {
-                "stdio" => Self::connect_stdio(config, timeouts).await,
+                "stdio" => Self::connect_stdio(config, timeouts, log_path).await,
                 "http" => Self::connect_http(config, timeouts).await,
                 other => Err(format!("Unknown connection type: {other}")),
             }
@@ -73,6 +75,7 @@ impl StdioHttpConnector {
     async fn connect_stdio(
         config: &StoredServerConfig,
         timeouts: ServerTimeouts,
+        log_path: Option<std::path::PathBuf>,
     ) -> Result<(Vec<ToolInsert>, Box<dyn McpSession>), String> {
         let command = config
             .command
@@ -106,6 +109,7 @@ impl StdioHttpConnector {
             cwd: config.working_dir.clone(),
             env,
             request_timeout_ms: timeouts.start_ms,
+            log_path,
         })
         .await?;
 

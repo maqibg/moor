@@ -92,6 +92,24 @@ fn get_sidecar_info(state: State<'_, MoorState>) -> Result<SidecarInfo, String> 
     Ok(state.info())
 }
 
+#[tauri::command]
+fn get_server_log_path(app: tauri::AppHandle, server_id: String) -> Result<String, String> {
+    // 白名单校验防路径拼接逃逸;server id 为 UUID,合法字符仅 [A-Za-z0-9_-]。
+    let valid = !server_id.is_empty()
+        && server_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !valid {
+        return Err("Invalid server id".to_string());
+    }
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(
+        sidecar::services::server_log::log_path(&data_dir.join("logs"), &server_id)
+            .to_string_lossy()
+            .into_owned(),
+    )
+}
+
 fn apply_autostart_setting(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
     login_autostart::validate_login_autostart_enable(enabled)?;
@@ -210,6 +228,7 @@ pub fn run() {
         ))
         .invoke_handler(tauri::generate_handler![
             get_sidecar_info,
+            get_server_log_path,
             sync_runtime_settings,
             apply_login_autostart_setting,
         ])
@@ -278,10 +297,13 @@ pub fn run() {
             // Build app state and start in-process HTTP server
             let db_arc = Arc::new(db);
             let event_bus = Arc::new(sidecar::services::event_bus::EventBus::new(256));
-            let server_manager = Arc::new(sidecar::services::server_manager::ServerManager::new(
-                db_arc.clone(),
-                event_bus.clone(),
-            ));
+            let server_manager = Arc::new(
+                sidecar::services::server_manager::ServerManager::new(
+                    db_arc.clone(),
+                    event_bus.clone(),
+                )
+                .with_logs_dir(data_dir.join("logs")),
+            );
             let app_state = Arc::new(sidecar::http::AppState::new(
                 db_arc.clone(),
                 api_token.clone(),

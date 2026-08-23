@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { KeyValueTable } from "@/components/shared/KeyValueTable";
 import { KeyValueEditor } from "@/components/shared/KeyValueEditor";
 import { CopyButton } from "@/components/shared/CopyButton";
+import { OpenLogButton } from "@/components/servers/OpenLogButton";
 import { UnsavedChangesDialog } from "@/components/shared/UnsavedChangesDialog";
 import { ToolCategoryBadge } from "@/components/shared/ToolCategoryBadge";
 import { useParams, useNavigate } from "react-router-dom";
@@ -365,7 +366,10 @@ export function ServerDetail() {
 
           {server.errorMessage && (
             <div className="rounded-xl bg-error-warm/8 border border-error-warm/20 p-4">
-              <label className="font-headline text-xs text-error-warm mb-1.5 block">Error</label>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="font-headline text-xs text-error-warm block">Error</label>
+                <OpenLogButton serverId={server.id} />
+              </div>
               <p className="font-mono text-xs text-error-warm">{server.errorMessage}</p>
             </div>
           )}

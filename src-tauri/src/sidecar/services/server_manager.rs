@@ -14,7 +14,9 @@ use crate::sidecar::db::profile_repo::ProfileRepository;
 use crate::sidecar::db::server_repo::{Server, ServerRepository};
 use crate::sidecar::db::tool_discovery_repo::{ToolDiscoveryRepository, ToolInsert};
 use crate::sidecar::db::Database;
+use crate::sidecar::mcp::transport::stdio_client::redact_sensitive_stderr_values;
 use crate::sidecar::services::event_bus::{EventBus, Evt};
+use crate::sidecar::services::server_log;
 use crate::sidecar::services::settings;
 use crate::sidecar::services::tool_catalog::{ToolCatalogService, ToolDetail};
 use serde_json::Value;
@@ -44,6 +46,7 @@ pub struct ServerManager {
     db: Arc<Database>,
     event_bus: Arc<EventBus>,
     connector: Arc<dyn McpConnector>,
+    logs_dir: Option<std::path::PathBuf>,
 }
 
 #[derive(Clone, Copy)]
@@ -68,7 +71,14 @@ impl ServerManager {
             db,
             event_bus,
             connector,
+            logs_dir: None,
         }
+    }
+
+    /// 生产入口:开启 per-server 日志(<logs_dir>/<server_id>.log),测试默认关闭。
+    pub fn with_logs_dir(mut self, logs_dir: std::path::PathBuf) -> Self {
+        self.logs_dir = Some(logs_dir);
+        self
     }
 
     pub async fn load_from_db(&self) {
@@ -196,10 +206,20 @@ impl ServerManager {
 
         self.persist_server_status(id, "starting", None);
 
+        let config = self.get_stored_config(id);
+        let log_path = config
+            .as_ref()
+            .ok()
+            .and_then(|config| self.begin_log_attempt(id, config));
+
         let result =
             match tokio::time::timeout(Duration::from_millis(timeouts.start_ms as u64), async {
-                match self.get_stored_config(id) {
-                    Ok(config) => self.connector.connect(&config, timeouts).await,
+                match config {
+                    Ok(config) => {
+                        self.connector
+                            .connect(&config, timeouts, log_path.clone())
+                            .await
+                    }
                     Err(err) => Err(err),
                 }
             })
@@ -268,6 +288,9 @@ impl ServerManager {
                         false
                     }
                 };
+                if let Some(path) = &log_path {
+                    let _ = server_log::append_event(path, &format!("Start failed: {public_msg}"));
+                }
                 if should_persist {
                     self.persist_server_status(id, "error", Some(&public_msg));
                     Err(e)
@@ -422,6 +445,10 @@ impl ServerManager {
         let slots = self.slots.clone();
         let db = self.db.clone();
         let event_bus = self.event_bus.clone();
+        let log_path = self
+            .logs_dir
+            .as_ref()
+            .map(|dir| server_log::log_path(dir, &server_id));
 
         tokio::spawn(async move {
             while rx.changed().await.is_ok() {
@@ -444,6 +471,9 @@ impl ServerManager {
                     }
                     let repo = ServerRepository::new(&db);
                     let _ = repo.update_status(&server_id, "error", Some(&msg));
+                    if let Some(path) = &log_path {
+                        let _ = server_log::append_event(path, &msg);
+                    }
                     event_bus.emit(Evt::ServerStatus {
                         server_id: server_id.clone(),
                         status: "error".into(),
@@ -490,6 +520,16 @@ impl ServerManager {
         })
     }
 
+    /// 启动前截断并写入尝试标记;未配置日志目录或写入失败时返回 None(不影响启动)。
+    fn begin_log_attempt(
+        &self,
+        id: &str,
+        config: &StoredServerConfig,
+    ) -> Option<std::path::PathBuf> {
+        let logs_dir = self.logs_dir.as_ref()?;
+        server_log::begin_attempt(logs_dir, id, &config.command_line()).ok()
+    }
+
     fn get_timeout_settings(&self) -> ServerTimeouts {
         settings::get_settings(&self.db)
             .map(|settings| ServerTimeouts {
@@ -512,6 +552,32 @@ pub(crate) struct StoredServerConfig {
     env: Option<Value>,
     headers: Option<Value>,
     working_dir: Option<String>,
+}
+
+impl StoredServerConfig {
+    /// 日志标记用的一行描述(经脱敏):stdio 为完整命令行,http 为 URL。
+    fn command_line(&self) -> String {
+        let raw = if self.connection_type == "stdio" {
+            let args = self
+                .args
+                .as_ref()
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .unwrap_or_default();
+            format!("{} {}", self.command.as_deref().unwrap_or(""), args)
+                .trim()
+                .to_string()
+        } else {
+            self.url.clone().unwrap_or_default()
+        };
+        // 命令行 args 与 URL 可能携带凭据,与 stderr 同规则脱敏后再落盘。
+        redact_sensitive_stderr_values(&raw)
+    }
 }
 
 #[cfg(test)]
@@ -1355,6 +1421,7 @@ process.stdin.on("data", (chunk) => {{
             &'a self,
             _config: &'a StoredServerConfig,
             _timeouts: ServerTimeouts,
+            _log_path: Option<std::path::PathBuf>,
         ) -> BoxedConnectFuture<'a> {
             self.connect_calls
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);

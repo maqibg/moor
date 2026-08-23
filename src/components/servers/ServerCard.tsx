@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { ErrorBanner } from "@/components/shared/ErrorBanner";
+import { OpenLogButton } from "@/components/servers/OpenLogButton";
 import {
   AlertTriangle,
   Loader2,
@@ -354,7 +355,12 @@ export function ServerCard({
             />
           )}
           {isError && server.errorMessage && (
-            <ErrorBanner message={server.errorMessage} variant="mono" className="mt-3" />
+            <ErrorBanner
+              message={server.errorMessage}
+              variant="mono"
+              className="mt-3"
+              action={<OpenLogButton serverId={server.id} />}
+            />
           )}
         </div>
       </CardContent>

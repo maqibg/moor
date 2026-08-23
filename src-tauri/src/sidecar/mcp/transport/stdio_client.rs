@@ -1,5 +1,6 @@
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
+use std::io::Write as IoWrite;
 #[cfg(all(target_os = "macos", not(test)))]
 use std::process::{Command as StdCommand, Stdio as StdStdio};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -11,6 +12,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::{oneshot, watch, Mutex as AsyncMutex};
 
 use super::format_timeout_duration;
+use crate::sidecar::services::server_log;
 
 type PendingMap = Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>;
 type StderrLines = Arc<Mutex<VecDeque<String>>>;
@@ -41,6 +43,7 @@ impl StdioClientTransport {
         cwd: Option<&str>,
         env: HashMap<String, String>,
         request_timeout: Duration,
+        log_path: Option<std::path::PathBuf>,
     ) -> Result<Self, String> {
         let mut cmd = Command::new(command);
         cmd.args(args)
@@ -103,7 +106,17 @@ impl StdioClientTransport {
             let _ = alive_tx.send(false);
         });
 
-        // stderr reader task
+        // stderr reader task；有日志路径时把脱敏后的完整行追加到 per-server 日志文件。
+        // 打开失败静默降级为仅内存队列——日志绝不能影响启动。
+        let log_file = log_path
+            .and_then(|path| {
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                    .ok()
+            })
+            .map(|file| Arc::new(Mutex::new(file)));
         let stderr_lines_clone = stderr_lines.clone();
         tokio::spawn(async move {
             let reader = BufReader::new(stderr);
@@ -112,6 +125,13 @@ impl StdioClientTransport {
                 {
                     let mut stderr_lines = stderr_lines_clone.lock().unwrap();
                     record_stderr_line(&mut stderr_lines, &line);
+                }
+                if let Some(log_file) = &log_file {
+                    let redacted = redact_sensitive_stderr_values(&line);
+                    let timestamp = server_log::timestamp();
+                    if let Ok(mut file) = log_file.lock() {
+                        let _ = writeln!(file, "[{timestamp}] [stderr] {redacted}");
+                    }
                 }
                 tracing::warn!(target: "mcp::stdio::stderr", "{}", line);
             }
@@ -293,18 +313,21 @@ fn stderr_summary(lines: &VecDeque<String>) -> Option<String> {
     (!lines.is_empty()).then(|| lines.iter().cloned().collect::<Vec<_>>().join(" | "))
 }
 
-fn redact_sensitive_stderr_values(line: &str) -> String {
+pub fn redact_sensitive_stderr_values(line: &str) -> String {
     let redacted = sensitive_stderr_key_regex()
         .replace_all(line, |caps: &regex_lite::Captures<'_>| {
             format!("{}{}{}", &caps[1], &caps[2], STDERR_REDACTED)
         });
-    authorization_stderr_regex()
+    let redacted = authorization_stderr_regex()
         .replace_all(&redacted, |caps: &regex_lite::Captures<'_>| {
             format!("{}{}{}", &caps[1], &caps[2], STDERR_REDACTED)
+        });
+    url_userinfo_stderr_regex()
+        .replace_all(&redacted, |caps: &regex_lite::Captures<'_>| {
+            format!("{}{}@", &caps[1], STDERR_REDACTED)
         })
         .to_string()
 }
-
 fn sensitive_stderr_key_regex() -> &'static regex_lite::Regex {
     static REGEX: OnceLock<regex_lite::Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
@@ -320,6 +343,15 @@ fn authorization_stderr_regex() -> &'static regex_lite::Regex {
     REGEX.get_or_init(|| {
         regex_lite::Regex::new(r"(?i)\b(authorization)\b(\s*[:=]\s*)([^,;]+)")
             .expect("authorization stderr regex should compile")
+    })
+}
+
+// URL userinfo(://user:pass@ 或 ://key@)整体脱敏:key=value 正则覆盖不到该凭据形态。
+fn url_userinfo_stderr_regex() -> &'static regex_lite::Regex {
+    static REGEX: OnceLock<regex_lite::Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        regex_lite::Regex::new(r"(?i)(://)([^/@\s]+(?::[^/@\s]*)?)@")
+            .expect("url userinfo stderr regex should compile")
     })
 }
 

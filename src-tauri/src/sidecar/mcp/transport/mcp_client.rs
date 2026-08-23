@@ -22,6 +22,7 @@ pub struct StdioConnectConfig {
     pub cwd: Option<String>,
     pub env: HashMap<String, String>,
     pub request_timeout_ms: u32,
+    pub log_path: Option<std::path::PathBuf>,
 }
 
 pub struct HttpConnectConfig {
@@ -39,6 +40,7 @@ impl McpClient {
             config.cwd.as_deref(),
             config.env,
             Duration::from_millis(config.request_timeout_ms as u64),
+            config.log_path,
         )
         .await?;
         let mut client = Self {

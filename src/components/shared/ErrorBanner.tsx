@@ -1,13 +1,15 @@
 import { AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { ReactNode } from "react";
 
 interface ErrorBannerProps {
   message: string;
   variant?: "default" | "mono";
   className?: string;
+  action?: ReactNode;
 }
 
-export function ErrorBanner({ message, variant = "default", className }: ErrorBannerProps) {
+export function ErrorBanner({ message, variant = "default", className, action }: ErrorBannerProps) {
   return (
     <div
       role="alert"
@@ -26,6 +28,7 @@ export function ErrorBanner({ message, variant = "default", className }: ErrorBa
       >
         {message}
       </p>
+      {action && <div className="ml-auto shrink-0">{action}</div>}
     </div>
   );
 }
