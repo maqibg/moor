@@ -40,3 +40,54 @@ pub fn append_event(path: &Path, message: &str) -> std::io::Result<()> {
 pub fn timestamp() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_logs_dir(test_name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "moor-server-log-{test_name}-{}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn log_path_appends_server_id_with_log_extension() {
+        assert_eq!(
+            log_path(Path::new("/data/logs"), "abc-123"),
+            PathBuf::from("/data/logs/abc-123.log")
+        );
+    }
+
+    #[test]
+    fn begin_attempt_creates_dir_and_truncates_existing_file() {
+        let dir = temp_logs_dir("begin-attempt");
+        let path = log_path(&dir, "srv1");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&path, "stale contents from a previous attempt").unwrap();
+
+        let returned = begin_attempt(&dir, "srv1", "npx -y some-mcp").unwrap();
+
+        assert_eq!(returned, path);
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("=== Start attempt: npx -y some-mcp ==="));
+        assert!(!contents.contains("stale contents"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn append_event_creates_missing_file_and_appends() {
+        let dir = temp_logs_dir("append-event");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = log_path(&dir, "srv2");
+
+        append_event(&path, "Start failed: boom").unwrap();
+        append_event(&path, "exited unexpectedly").unwrap();
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("Start failed: boom"));
+        assert!(contents.contains("exited unexpectedly"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

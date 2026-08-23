@@ -720,6 +720,33 @@ mod tests {
             )
         );
     }
+
+    #[test]
+    fn stderr_summary_redacts_url_userinfo() {
+        let mut lines = VecDeque::new();
+
+        record_stderr_line(
+            &mut lines,
+            "connect https://user:pass@example.com/db then postgres://key@host:5432",
+        );
+
+        assert_eq!(
+            stderr_summary(&lines).as_deref(),
+            Some("connect https://[REDACTED]@example.com/db then postgres://[REDACTED]@host:5432")
+        );
+    }
+
+    #[test]
+    fn stderr_summary_leaves_urls_without_userinfo_untouched() {
+        let mut lines = VecDeque::new();
+
+        record_stderr_line(&mut lines, "GET https://example.com/health 200");
+
+        assert_eq!(
+            stderr_summary(&lines).as_deref(),
+            Some("GET https://example.com/health 200")
+        );
+    }
 }
 
 #[cfg(test)]

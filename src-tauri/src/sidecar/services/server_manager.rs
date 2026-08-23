@@ -207,10 +207,13 @@ impl ServerManager {
         self.persist_server_status(id, "starting", None);
 
         let config = self.get_stored_config(id);
-        let log_path = config
-            .as_ref()
-            .ok()
-            .and_then(|config| self.begin_log_attempt(id, config));
+        // 配置读取失败也要留下 attempt + failure 记录——这恰是最需要诊断的一类失败。
+        let log_path = match &config {
+            Ok(config) => self.begin_log_attempt(id, config),
+            Err(_) => self.logs_dir.as_ref().and_then(|dir| {
+                server_log::begin_attempt(dir, id, "<config unavailable>").ok()
+            }),
+        };
 
         let result =
             match tokio::time::timeout(Duration::from_millis(timeouts.start_ms as u64), async {
