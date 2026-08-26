@@ -1082,7 +1082,9 @@ process.stdin.on("data", (chunk) => {{
         .expect("server start should return before the outer timeout");
         let err = result.expect_err("slow first start should fail");
 
-        assert!(err.contains("Server start timed out after 5s"), "unexpected start error: {err}");
+        // 握手期请求超时被钳制到 start_ms(session.rs:111),与外层启动超时
+        // 同 deadline 竞速,任一层先触发均证明 5s deadline 被尊重(同 :966 断言)
+        assert!(err.contains("timed out after 5s"), "unexpected start error: {err}");
         let runtime = manager
             .get_server(&server_id)
             .await
