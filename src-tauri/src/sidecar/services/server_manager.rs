@@ -963,7 +963,7 @@ process.stdin.on("data", (chunk) => {{
         .await
         .expect("tool call should return before the outer timeout")
         .expect_err("runtime requests should restore the configured request timeout");
-        assert!(err.contains("timed out after 5s"));
+        assert!(err.contains("timed out after 5s"), "unexpected request error: {err}");
 
         manager.stop_server(&server_id).await.expect("stop failed");
         let _ = std::fs::remove_dir_all(data_dir);
@@ -1082,7 +1082,7 @@ process.stdin.on("data", (chunk) => {{
         .expect("server start should return before the outer timeout");
         let err = result.expect_err("slow first start should fail");
 
-        assert!(err.contains("Server start timed out after 5s"));
+        assert!(err.contains("Server start timed out after 5s"), "unexpected start error: {err}");
         let runtime = manager
             .get_server(&server_id)
             .await
