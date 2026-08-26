@@ -1,5 +1,18 @@
 # moor
 
+## 0.7.2
+
+### Patch Changes
+
+- c512eb8: feat(config): configuration import and client management enhancements
+  - Client registry now declares a canonical gateway entry name; Kimi Code and dsh pin the entry to `moor-mcp`, so re-importing a client config replaces the handwritten entry instead of registering a second gateway connection.
+  - ConverterPanel loads client snippets dynamically from the API instead of a hardcoded client list, and snippets now expose a stable `clientId`.
+  - ServerCard and ServerDetail surface server status errors more robustly, and a mutation lock prevents concurrent execution of critical operations across hooks.
+  - ConfigImportPanel disables the import button while an import is in progress.
+
+- c512eb8: fix(types): export the `MCP_SESSION_IDLE_TTL_MS` constants from the `@moor/types` package entry (`DEFAULT` / `MIN` / `MAX`), so consumers no longer need to hardcode session idle TTL bounds.
+- 0966c8a: Surface per-server log files for failed MCP server startups. Lifecycle events (start attempt, failure reason, unexpected exit) and redacted stderr (stdio servers only) are now written to `logs/<server-id>.log` under the app data directory, and startup error banners on the server card and detail page include an "Open Logs" button that opens the log file directly (with the full path shown on hover). Also extends credential redaction to URL userinfo (`scheme://user:pass@host`), which applies to both the log files and the existing startup error summaries.
+
 ## 0.7.1
 
 ### Patch Changes
