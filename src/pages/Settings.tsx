@@ -333,7 +333,8 @@ function AdvancedSection({
     {
       onMutate: () => onError(null),
       onError: (err) => onError(getErrorMessage(err, "Failed to update sidecar port")),
-      onSuccess: (port) => onPortApplied(port),
+      // onSuccess 首参是 mutation 返回值(void),端口在第二参 variables
+      onSuccess: (_data, port) => onPortApplied(port),
     },
   );
 
