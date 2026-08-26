@@ -27,3 +27,27 @@ jobs:
 
       - name: Run cargo test
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+  frontend-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # cargo-test 不覆盖前端;类型错误须在 push 阶段拦截,而非 release 构建时爆
+      - name: Lint, format check and type-check
+        run: pnpm exec vp check
+
+      - name: Run frontend tests
+        run: pnpm exec vp test
