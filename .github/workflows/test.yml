@@ -37,6 +37,8 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
+          # v5 默认开启会在此步寻找 pnpm(尚未安装)而失败
+          package-manager-cache: false
 
       - uses: pnpm/action-setup@v5
         with:

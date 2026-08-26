@@ -37,6 +37,8 @@ jobs:
         with:
           node-version: 24
           registry-url: "https://registry.npmjs.org"
+          # v5 默认开启会在此步寻找 pnpm(尚未安装)而失败;store 缓存由下方 cache 步管理
+          package-manager-cache: false
 
       - name: Resolve release metadata
         id: release
@@ -212,6 +214,8 @@ jobs:
         with:
           node-version: 24
           registry-url: "https://registry.npmjs.org"
+          # v5 默认开启会在此步寻找 pnpm(尚未安装)而失败;store 缓存由下方 cache 步管理
+          package-manager-cache: false
 
       - name: Resolve release metadata
         id: release
@@ -377,6 +381,8 @@ jobs:
         with:
           node-version: 24
           registry-url: "https://registry.npmjs.org"
+          # v5 默认开启会在此步寻找 pnpm(尚未安装)而失败;store 缓存由下方 cache 步管理
+          package-manager-cache: false
 
       - name: Resolve release metadata
         id: release
