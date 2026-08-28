@@ -81,17 +81,9 @@ mod tests {
     async fn create_validate_and_remove_session() {
         let store = McpSessionStore::new();
         let id = store.create().await.expect("session created");
-        assert!(
-            store
-                .validate_and_touch(&id, TEST_TTL)
-                .await
-        );
+        assert!(store.validate_and_touch(&id, TEST_TTL).await);
         assert!(store.remove(&id).await);
-        assert!(
-            !store
-                .validate_and_touch(&id, TEST_TTL)
-                .await
-        );
+        assert!(!store.validate_and_touch(&id, TEST_TTL).await);
     }
 
     #[tokio::test(start_paused = true)]
@@ -99,11 +91,7 @@ mod tests {
         let store = McpSessionStore::new();
         let id = store.create().await.expect("session created");
         tokio::time::advance(TEST_TTL + Duration::from_secs(1)).await;
-        assert!(
-            !store
-                .validate_and_touch(&id, TEST_TTL)
-                .await
-        );
+        assert!(!store.validate_and_touch(&id, TEST_TTL).await);
         assert_eq!(store.len().await, 0);
     }
 
@@ -111,10 +99,7 @@ mod tests {
     async fn sweep_expired_removes_only_idle_sessions() {
         let store = McpSessionStore::new();
         let idle = store.create().await.expect("session created");
-        store
-            .create()
-            .await
-            .expect("second session created");
+        store.create().await.expect("second session created");
         tokio::time::advance(TEST_TTL + Duration::from_secs(1)).await;
         // Refresh the second session so only the first one is idle.
         let mut sessions = store.sessions.write().await;

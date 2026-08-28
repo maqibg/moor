@@ -222,7 +222,7 @@ async fn handle_mcp_post(state: Arc<AppState>, req: axum::extract::Request) -> R
                     jsonrpc::make_error(
                         id,
                         jsonrpc::INTERNAL_ERROR,
-                        "MCP session capacity reached"
+                        "MCP session capacity reached",
                     )
                     .to_string(),
                 )
