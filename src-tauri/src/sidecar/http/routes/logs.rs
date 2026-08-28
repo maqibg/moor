@@ -15,6 +15,7 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/logs", get(list))
         .route("/api/logs/stats", get(stats))
+        .route("/api/logs/insights", get(insights))
 }
 
 #[derive(Deserialize)]
@@ -44,6 +45,25 @@ async fn list(
         .map_err(AppError::internal)?;
     Ok(Json(
         serde_json::to_value(logs).map_err(|e| AppError::internal(e.to_string()))?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct InsightsQuery {
+    from: Option<String>,
+    to: Option<String>,
+}
+
+async fn insights(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<InsightsQuery>,
+) -> Result<Json<Value>, AppError> {
+    let repo = AuditLogRepository::new(&state.db);
+    let insights = repo
+        .get_insights(query.from.as_deref(), query.to.as_deref())
+        .map_err(AppError::internal)?;
+    Ok(Json(
+        serde_json::to_value(insights).map_err(|e| AppError::internal(e.to_string()))?,
     ))
 }
 
@@ -164,6 +184,66 @@ mod tests {
 
         assert_eq!(logs.as_array().expect("logs should be array").len(), 1);
         assert_eq!(logs[0]["serverId"], "server-a");
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn insights_returns_grouped_rows_over_http() {
+        let data_dir = temp_data_dir("insights-http");
+        let state = test_state(data_dir.clone());
+        insert_server(&state.db, "server-a", "Alpha");
+        insert_server(&state.db, "server-b", "Beta");
+        let repo = AuditLogRepository::new(&state.db);
+        repo.insert(
+            "log-a",
+            "2026-01-01T00:00:00Z",
+            None,
+            Some("server-a"),
+            "search",
+            None,
+            None,
+            Some("boom"),
+            10,
+            None,
+        )
+        .expect("failed to insert first log");
+        repo.insert(
+            "log-b",
+            "2026-01-02T00:00:00Z",
+            None,
+            Some("server-a"),
+            "search",
+            None,
+            None,
+            None,
+            20,
+            None,
+        )
+        .expect("failed to insert second log");
+
+        let response = router()
+            .with_state(state)
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/logs/insights")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("route should respond");
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .expect("response body should read");
+        let insights: serde_json::Value =
+            serde_json::from_slice(&body).expect("response should be json");
+
+        assert_eq!(insights["totalCalls"], 2);
+        assert_eq!(insights["tools"].as_array().expect("tools").len(), 1);
+        assert_eq!(insights["tools"][0]["serverName"], "Alpha");
+        assert_eq!(insights["tools"][0]["p50Ms"], 10.0);
+        assert_eq!(insights["tools"][0]["p95Ms"], 20.0);
+        assert_eq!(insights["servers"].as_array().expect("servers").len(), 1);
         let _ = std::fs::remove_dir_all(data_dir);
     }
 }

@@ -21,4 +21,11 @@ describe("api routes", () => {
       }),
     ).toBe("/api/logs?server_id=server%2F1&tool_name=read%26write&from=2026-01-01T00%3A00%3A00Z");
   });
+
+  it("encodes insights query", () => {
+    expect(routes.logs.insights({ from: "2026-01-01T00:00:00Z" })).toBe(
+      "/api/logs/insights?from=2026-01-01T00%3A00%3A00Z",
+    );
+    expect(routes.logs.insights()).toBe("/api/logs/insights");
+  });
 });

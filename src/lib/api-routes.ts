@@ -55,6 +55,8 @@ export const routes = {
   logs: {
     list: (params?: LogListParams) => withQuery("/api/logs", params ?? {}),
     stats: () => "/api/logs/stats",
+    insights: (params?: { from?: string; to?: string }) =>
+      withQuery("/api/logs/insights", params ?? {}),
   },
   import: {
     scan: () => "/api/import/scan",

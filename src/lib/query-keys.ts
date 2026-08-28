@@ -20,6 +20,7 @@ export const logKeys = {
   list: (filters?: { server_id?: string; tool_name?: string; from?: string; to?: string }) =>
     ["logs", filters] as const,
   stats: () => ["logs", "stats"] as const,
+  insights: (window?: { from?: string }) => ["logs", "insights", window] as const,
 };
 
 export const importKeys = {

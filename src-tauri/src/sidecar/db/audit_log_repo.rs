@@ -42,6 +42,46 @@ pub struct TopServer {
     pub count: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolInsight {
+    pub tool_name: String,
+    pub server_id: Option<String>,
+    pub server_name: Option<String>,
+    pub call_count: i64,
+    pub error_count: i64,
+    pub error_rate: f64,
+    pub avg_duration_ms: Option<f64>,
+    pub p50_ms: Option<f64>,
+    pub p95_ms: Option<f64>,
+    pub last_called_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerInsight {
+    pub server_id: String,
+    pub server_name: Option<String>,
+    pub call_count: i64,
+    pub error_count: i64,
+    pub error_rate: f64,
+    pub avg_duration_ms: Option<f64>,
+    pub last_called_at: Option<String>,
+}
+
+/// 调用洞察：在时间窗口内按 (server, tool) 与 server 两级聚合。
+/// 与 LogStats(全局、无窗口)并行存在，洞察面板是它的新消费方。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogInsights {
+    pub total_calls: i64,
+    pub error_calls: i64,
+    pub error_rate: f64,
+    pub avg_duration_ms: Option<f64>,
+    pub tools: Vec<ToolInsight>,
+    pub servers: Vec<ServerInsight>,
+}
+
 fn map_audit_log(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditLogEntry> {
     let args_str: Option<String> = row.get("arguments")?;
     let result_str: Option<String> = row.get("result")?;
@@ -57,6 +97,18 @@ fn map_audit_log(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditLogEntry> {
         duration_ms: row.get("duration_ms")?,
         agent_info: row.get("agent_info")?,
     })
+}
+
+/// nearest-rank 分位数：rank = ceil(q/100 * n)，取第 rank 个值（1-based）。
+fn percentile_nearest_rank(values: &[f64], q: f64) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let rank = ((q / 100.0) * sorted.len() as f64).ceil() as usize;
+    let idx = rank.clamp(1, sorted.len()) - 1;
+    Some(sorted[idx])
 }
 
 pub struct AuditLogRepository<'a> {
@@ -129,6 +181,155 @@ impl<'a> AuditLogRepository<'a> {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             &[&id, &timestamp, &profile_id, &server_id, &tool_name, &args_json, &result_json, &error, &duration_ms, &agent_info],
         )
+    }
+
+    /// 按时间窗口聚合洞察。分位数用 nearest-rank：本地单用户量级下
+    /// 直接拉窗口内 duration 明细在内存排序，量级受 retention 上限约束。
+    pub fn get_insights(
+        &self,
+        from: Option<&str>,
+        to: Option<&str>,
+    ) -> Result<LogInsights, String> {
+        let mut conditions = String::new();
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        if let Some(f) = from {
+            conditions += " AND a.timestamp >= ?";
+            params.push(Box::new(f.to_string()));
+        }
+        if let Some(t) = to {
+            conditions += " AND a.timestamp <= ?";
+            params.push(Box::new(t.to_string()));
+        }
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+
+        let (total_calls, error_calls, avg_duration_ms) = self
+            .db
+            .query_one(
+                &format!(
+                    "SELECT COUNT(*), COALESCE(SUM(CASE WHEN a.error IS NOT NULL THEN 1 ELSE 0 END), 0), AVG(a.duration_ms)
+                     FROM audit_logs a WHERE 1=1{conditions}"
+                ),
+                &param_refs,
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, Option<f64>>(2)?,
+                    ))
+                },
+            )?
+            .unwrap_or((0, 0, None));
+        let error_rate = if total_calls > 0 {
+            error_calls as f64 / total_calls as f64
+        } else {
+            0.0
+        };
+
+        let mut durations: std::collections::HashMap<(Option<String>, String), Vec<f64>> =
+            std::collections::HashMap::new();
+        self.db.query_all(
+            &format!(
+                "SELECT a.server_id, a.tool_name, a.duration_ms FROM audit_logs a
+                 WHERE a.duration_ms IS NOT NULL{conditions}"
+            ),
+            &param_refs,
+            |row| {
+                let key = (row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?);
+                durations
+                    .entry(key)
+                    .or_default()
+                    .push(row.get::<_, f64>(2)?);
+                Ok(())
+            },
+        )?;
+
+        let mut tools = self.db.query_all(
+            &format!(
+                "SELECT a.tool_name, a.server_id, s.name AS server_name, COUNT(*) AS call_count,
+                        COALESCE(SUM(CASE WHEN a.error IS NOT NULL THEN 1 ELSE 0 END), 0) AS error_count,
+                        AVG(a.duration_ms) AS avg_duration_ms, MAX(a.timestamp) AS last_called_at
+                 FROM audit_logs a LEFT JOIN mcp_servers s ON s.id = a.server_id
+                 WHERE 1=1{conditions}
+                 GROUP BY a.server_id, a.tool_name
+                 ORDER BY call_count DESC"
+            ),
+            &param_refs,
+            |row| {
+                let call_count: i64 = row.get(3)?;
+                let error_count: i64 = row.get(4)?;
+                Ok(ToolInsight {
+                    tool_name: row.get(0)?,
+                    server_id: row.get(1)?,
+                    server_name: row.get(2)?,
+                    call_count,
+                    error_count,
+                    error_rate: if call_count > 0 {
+                        error_count as f64 / call_count as f64
+                    } else {
+                        0.0
+                    },
+                    avg_duration_ms: row.get(5)?,
+                    p50_ms: None,
+                    p95_ms: None,
+                    last_called_at: row.get(6)?,
+                })
+            },
+        )?;
+        for tool in &mut tools {
+            if let Some(vals) = durations.get(&(tool.server_id.clone(), tool.tool_name.clone())) {
+                tool.p50_ms = percentile_nearest_rank(vals, 50.0);
+                tool.p95_ms = percentile_nearest_rank(vals, 95.0);
+            }
+        }
+
+        let servers = self.db.query_all(
+            &format!(
+                "SELECT a.server_id, s.name AS server_name, COUNT(*) AS call_count,
+                        COALESCE(SUM(CASE WHEN a.error IS NOT NULL THEN 1 ELSE 0 END), 0) AS error_count,
+                        AVG(a.duration_ms) AS avg_duration_ms, MAX(a.timestamp) AS last_called_at
+                 FROM audit_logs a LEFT JOIN mcp_servers s ON s.id = a.server_id
+                 WHERE a.server_id IS NOT NULL{conditions}
+                 GROUP BY a.server_id
+                 ORDER BY call_count DESC"
+            ),
+            &param_refs,
+            |row| {
+                let call_count: i64 = row.get(2)?;
+                let error_count: i64 = row.get(3)?;
+                Ok(ServerInsight {
+                    server_id: row.get(0)?,
+                    server_name: row.get(1)?,
+                    call_count,
+                    error_count,
+                    error_rate: if call_count > 0 {
+                        error_count as f64 / call_count as f64
+                    } else {
+                        0.0
+                    },
+                    avg_duration_ms: row.get(4)?,
+                    last_called_at: row.get(5)?,
+                })
+            },
+        )?;
+
+        Ok(LogInsights {
+            total_calls,
+            error_calls,
+            error_rate,
+            avg_duration_ms,
+            tools,
+            servers,
+        })
+    }
+
+    /// 滚动保留：删除 timestamp 早于 cutoff 的审计行，返回删除行数。
+    /// 事务内执行以拿到准确的 affected count。
+    pub fn purge_before(&self, cutoff: &str) -> Result<usize, String> {
+        self.db.transaction(|conn| {
+            conn.execute("DELETE FROM audit_logs WHERE timestamp < ?1", [cutoff])
+                .map_err(|e| e.to_string())
+        })
     }
 
     pub fn get_stats(&self) -> Result<LogStats, String> {
@@ -294,6 +495,148 @@ mod tests {
         assert_eq!(stats.top_servers.len(), 1);
         assert_eq!(stats.top_servers[0].server_id, "s1");
         assert_eq!(stats.top_servers[0].count, 2);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn insights_groups_by_server_and_tool_with_error_rate() {
+        let (db, path) = temp_db();
+        let repo = AuditLogRepository::new(&db);
+        insert_server(&db, "s1");
+        insert_log(&repo, "a", "search", Some("s1"), None, 10);
+        insert_log(&repo, "b", "search", Some("s1"), Some("boom"), 20);
+        insert_log(&repo, "c", "fetch", None, None, 30);
+
+        let insights = repo.get_insights(None, None).expect("insights");
+
+        assert_eq!(insights.total_calls, 3);
+        assert_eq!(insights.error_calls, 1);
+        // 同名工具在不同 server 上必须分开统计，才能支撑「跳到该 server 的工具开关」
+        assert_eq!(insights.tools.len(), 2);
+        let search = insights
+            .tools
+            .iter()
+            .find(|t| t.tool_name == "search")
+            .expect("search row");
+        assert_eq!(search.server_id.as_deref(), Some("s1"));
+        assert_eq!(search.server_name.as_deref(), Some("s1"));
+        assert_eq!(search.call_count, 2);
+        assert_eq!(search.error_count, 1);
+        assert!((search.error_rate - 0.5).abs() < 1e-9);
+        assert_eq!(insights.servers.len(), 1);
+        assert_eq!(insights.servers[0].call_count, 2);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn insights_respects_time_window() {
+        let (db, path) = temp_db();
+        let repo = AuditLogRepository::new(&db);
+        repo.insert(
+            "old",
+            "2026-01-01T00:00:00Z",
+            None,
+            None,
+            "search",
+            None,
+            None,
+            None,
+            5,
+            None,
+        )
+        .expect("insert");
+        repo.insert(
+            "new",
+            "2026-02-01T00:00:00Z",
+            None,
+            None,
+            "fetch",
+            None,
+            None,
+            None,
+            9,
+            None,
+        )
+        .expect("insert");
+
+        let insights = repo
+            .get_insights(Some("2026-01-15T00:00:00Z"), None)
+            .expect("insights");
+
+        assert_eq!(insights.total_calls, 1);
+        assert_eq!(insights.tools.len(), 1);
+        assert_eq!(insights.tools[0].tool_name, "fetch");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn insights_percentiles_use_nearest_rank() {
+        let (db, path) = temp_db();
+        let repo = AuditLogRepository::new(&db);
+        for (i, duration) in [10, 20, 30, 40, 100].iter().enumerate() {
+            repo.insert(
+                &format!("l{i}"),
+                "2026-01-01T00:00:00Z",
+                None,
+                None,
+                "search",
+                None,
+                None,
+                None,
+                *duration,
+                None,
+            )
+            .expect("insert");
+        }
+
+        let insights = repo.get_insights(None, None).expect("insights");
+        let tool = &insights.tools[0];
+
+        // n=5: p50 rank=ceil(2.5)=3 → 30; p95 rank=ceil(4.75)=5 → 100
+        assert_eq!(tool.p50_ms, Some(30.0));
+        assert_eq!(tool.p95_ms, Some(100.0));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn purge_before_deletes_only_older_rows() {
+        let (db, path) = temp_db();
+        let repo = AuditLogRepository::new(&db);
+        repo.insert(
+            "old",
+            "2026-01-01T00:00:00Z",
+            None,
+            None,
+            "search",
+            None,
+            None,
+            None,
+            1,
+            None,
+        )
+        .expect("insert");
+        repo.insert(
+            "keep",
+            "2026-03-01T00:00:00Z",
+            None,
+            None,
+            "search",
+            None,
+            None,
+            None,
+            2,
+            None,
+        )
+        .expect("insert");
+
+        let deleted = repo.purge_before("2026-02-01T00:00:00Z").expect("purge");
+
+        assert_eq!(deleted, 1);
+        assert_eq!(repo.get_stats().expect("stats").total_calls, 1);
 
         let _ = std::fs::remove_file(path);
     }

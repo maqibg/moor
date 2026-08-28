@@ -5,7 +5,7 @@ import {
   LayoutDashboard,
   Server,
   FolderOpen,
-  FileText,
+  BarChart3,
   Braces,
   HelpCircle,
   Cog,
@@ -15,7 +15,7 @@ const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/servers", label: "Servers", icon: Server },
   { to: "/profiles", label: "Profiles", icon: FolderOpen },
-  { to: "/logs", label: "Audit Logs", icon: FileText },
+  { to: "/logs", label: "Insights", icon: BarChart3 },
   { to: "/config", label: "Client Config", icon: Braces },
 ];
 
