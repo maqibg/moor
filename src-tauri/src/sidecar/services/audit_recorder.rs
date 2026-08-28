@@ -49,3 +49,43 @@ impl AuditRecorder {
         );
     }
 }
+
+/// 启动审计日志滚动清理任务：启动立即执行一次，此后每 6 小时一轮。
+/// 每轮重新读取设置，logRetentionDays 的修改无需重启（下一轮生效）；0 = 永久保留。
+/// 清理失败只告警不重试——残留数据比中断网关更安全。
+pub fn spawn_retention_sweeper(db: std::sync::Arc<Database>) {
+    use tokio::time::{interval, MissedTickBehavior};
+
+    tokio::spawn(async move {
+        let mut ticker = interval(std::time::Duration::from_secs(6 * 60 * 60));
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        loop {
+            ticker.tick().await;
+            let db = db.clone();
+            let deleted = tokio::task::spawn_blocking(move || purge_expired(&db))
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::warn!(error = %e, "Audit retention sweep task failed");
+                    0
+                });
+            if deleted > 0 {
+                tracing::info!(deleted, "Purged expired audit log entries");
+            }
+        }
+    });
+}
+
+fn purge_expired(db: &Database) -> usize {
+    let days = crate::sidecar::services::settings::audit_retention_days(db);
+    if days == 0 {
+        return 0;
+    }
+    let cutoff = (chrono::Utc::now() - chrono::Duration::days(days as i64)).to_rfc3339();
+    match AuditLogRepository::new(db).purge_before(&cutoff) {
+        Ok(count) => count,
+        Err(e) => {
+            tracing::warn!(error = %e, "Audit retention purge failed");
+            0
+        }
+    }
+}

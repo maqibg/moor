@@ -286,6 +286,12 @@ pub fn audit_logging_enabled(db: &Database) -> bool {
         .unwrap_or_else(|_| default_settings().advanced.enable_audit_logging)
 }
 
+/// 审计日志滚动保留天数；读取失败时退回默认值。0 表示永久保留。
+pub fn audit_retention_days(db: &Database) -> u16 {
+    get_settings(db)
+        .map(|settings| settings.advanced.log_retention_days)
+        .unwrap_or_else(|_| default_settings().advanced.log_retention_days)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
