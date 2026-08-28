@@ -27,6 +27,37 @@ pub struct ProfileDetailServer {
     pub profile_server: ProfileServerState,
 }
 
+/// 批量 upsert 的单项输入：enabled 与 disabled_tools 均为可选补丁，语义与单条接口一致。
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileServerUpsertInput {
+    pub server_id: String,
+    pub enabled: Option<bool>,
+    pub disabled_tools: Option<Vec<String>>,
+}
+
+/// upsert 合并语义的唯一实现：enabled 与 disabled_tools 是相互独立的可选补丁，
+/// 缺省方保留现有值；新行缺省 enabled=true / 空禁用表。
+/// 单条与批量接口共用——两处语义分叉会导致治理面板与单点编辑互相覆盖。
+fn resolve_profile_server_state(
+    existing: Option<(i64, String)>,
+    enabled: Option<bool>,
+    disabled_tools: Option<&Vec<String>>,
+) -> (i64, String) {
+    let tools_json =
+        |tools: &Vec<String>| serde_json::to_string(tools).unwrap_or_else(|_| "[]".into());
+    match (existing, enabled, disabled_tools) {
+        (Some(_), Some(en), Some(tools)) => (en as i64, tools_json(tools)),
+        (Some((_, t)), Some(en), None) => (en as i64, t),
+        (Some((e, _)), None, Some(tools)) => (e, tools_json(tools)),
+        (Some((e, t)), None, None) => (e, t),
+        (None, _, _) => (
+            enabled.unwrap_or(true) as i64,
+            disabled_tools.map_or_else(|| "[]".to_string(), tools_json),
+        ),
+    }
+}
+
 fn map_profile(row: &rusqlite::Row<'_>) -> rusqlite::Result<Profile> {
     let is_active: i64 = row.get("is_active")?;
     let server_count: Option<i64> = row.get("server_count")?;
@@ -189,27 +220,11 @@ impl<'a> ProfileRepository<'a> {
             |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
         )?;
 
-        let (final_enabled, final_tools) = match (&existing, enabled, disabled_tools) {
-            (Some(_), Some(en), Some(tools)) => (
-                en as i64,
-                serde_json::to_string(tools).unwrap_or_else(|_| "[]".into()),
-            ),
-            (Some((_, t)), Some(en), None) => (en as i64, t.clone()),
-            (Some((e, _)), None, Some(tools)) => (
-                *e,
-                serde_json::to_string(tools).unwrap_or_else(|_| "[]".into()),
-            ),
-            (Some((e, t)), None, None) => (*e, t.clone()),
-            (None, _, _) => (
-                enabled.unwrap_or(true) as i64,
-                disabled_tools.map_or_else(
-                    || "[]".to_string(),
-                    |t| serde_json::to_string(t).unwrap_or_else(|_| "[]".into()),
-                ),
-            ),
-        };
+        let had_existing = existing.is_some();
+        let (final_enabled, final_tools) =
+            resolve_profile_server_state(existing, enabled, disabled_tools);
 
-        if existing.is_some() {
+        if had_existing {
             self.db.run(
                 "UPDATE profile_servers SET enabled = ?1, disabled_tools = ?2 WHERE profile_id = ?3 AND server_id = ?4",
                 &[&final_enabled, &final_tools, &profile_id, &server_id],
@@ -225,6 +240,74 @@ impl<'a> ProfileRepository<'a> {
             enabled: final_enabled != 0,
             disabled_tools: serde_json::from_str(&final_tools).unwrap_or_default(),
         })
+    }
+
+    /// 批量 upsert：单事务内逐项应用与单条接口相同的合并语义。
+    /// 治理面板的批量开关依赖原子性——部分成功会让 UI 与网关目录状态分叉。
+    pub fn upsert_profile_servers_batch(
+        &self,
+        profile_id: &str,
+        items: &[ProfileServerUpsertInput],
+    ) -> Result<(), String> {
+        self.db.transaction(|conn| {
+            for item in items {
+                let existing = match conn.query_row(
+                    "SELECT enabled, disabled_tools FROM profile_servers WHERE profile_id = ?1 AND server_id = ?2",
+                    rusqlite::params![profile_id, item.server_id],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                ) {
+                    Ok(row) => Some(row),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                    Err(e) => return Err(e.to_string()),
+                };
+                let (final_enabled, final_tools) = resolve_profile_server_state(
+                    existing,
+                    item.enabled,
+                    item.disabled_tools.as_ref(),
+                );
+                conn.execute(
+                    "INSERT INTO profile_servers (profile_id, server_id, enabled, disabled_tools) VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(profile_id, server_id) DO UPDATE SET enabled = excluded.enabled, disabled_tools = excluded.disabled_tools",
+                    rusqlite::params![profile_id, item.server_id, final_enabled, final_tools],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+            Ok(())
+        })
+    }
+
+    /// 克隆 profile：复制全部 profile_servers（enabled + disabled_tools），新 profile 恒为非激活。
+    /// 「从现有 profile 创建」入口的唯一数据路径。不存在时返回 None。
+    pub fn clone_profile(
+        &self,
+        source_id: &str,
+        new_name: &str,
+    ) -> Result<Option<Profile>, String> {
+        let source = self.db.query_one(
+            "SELECT id FROM profiles WHERE id = ?1",
+            &[&source_id],
+            |row| row.get::<_, String>(0),
+        )?;
+        if source.is_none() {
+            return Ok(None);
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        self.db.transaction(|conn| {
+            conn.execute(
+                "INSERT INTO profiles (id, name, is_active, created_at, updated_at) VALUES (?1, ?2, 0, ?3, ?3)",
+                rusqlite::params![&id, &new_name, &now],
+            )
+            .map_err(|e| e.to_string())?;
+            conn.execute(
+                "INSERT INTO profile_servers (profile_id, server_id, enabled, disabled_tools)
+                 SELECT ?1, server_id, enabled, disabled_tools FROM profile_servers WHERE profile_id = ?2",
+                rusqlite::params![&id, &source_id],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })?;
+        self.find_by_id(&id)
     }
 
     pub fn find_active_profile_server_ids(&self) -> Result<Vec<String>, String> {

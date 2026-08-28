@@ -122,6 +122,35 @@ impl ToolCatalogService {
             })
             .collect()
     }
+
+    /// 治理面板数据：按 server 分组返回 profile 内全部已发现工具及禁用态。
+    /// 复用 get_tool_details 的 exposed name 冲突消解，保证与 /mcp 目录一致。
+    /// 读取失败降级为空组——面板是只读视图，不应因单个 server 失败而整体 500。
+    pub fn get_profile_tool_groups(db: &Database, profile_id: &str) -> Vec<ProfileToolGroup> {
+        let servers = match ProfileRepository::new(db).find_profile_servers(profile_id) {
+            Ok(servers) => servers,
+            Err(_) => return vec![],
+        };
+        servers
+            .into_iter()
+            .map(|server| ProfileToolGroup {
+                server_id: server.server.id.clone(),
+                server_name: server.server.name.clone(),
+                server_enabled: server.profile_server.enabled,
+                tools: Self::get_tool_details(db, &server.server.id, Some(profile_id), None),
+            })
+            .collect()
+    }
+}
+
+/// 治理面板分组：profile 内全部 server 的已发现工具及其在该 profile 下的禁用态。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileToolGroup {
+    pub server_id: String,
+    pub server_name: String,
+    pub server_enabled: bool,
+    pub tools: Vec<ToolDetail>,
 }
 
 fn build_tool_catalog_entries(profile_tools: Vec<ProfileTool>) -> Vec<ToolCatalogEntry> {

@@ -46,6 +46,9 @@ export const routes = {
     activate: (id: string) => `/api/profiles/${pathSegment(id)}/activate`,
     updateServer: (profileId: string, serverId: string) =>
       `/api/profiles/${pathSegment(profileId)}/servers/${pathSegment(serverId)}`,
+    tools: (id: string) => `/api/profiles/${pathSegment(id)}/tools`,
+    clone: (id: string) => `/api/profiles/${pathSegment(id)}/clone`,
+    bulkServerState: (id: string) => `/api/profiles/${pathSegment(id)}/servers-state`,
   },
   settings: {
     get: () => "/api/settings",

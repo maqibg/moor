@@ -4,7 +4,7 @@ import { api, apiPost, apiPut, apiDelete } from "@/lib/api/client";
 import { routes } from "@/lib/api-routes";
 import { serverKeys, profileKeys, logKeys } from "@/lib/query-keys";
 import { useSSEEvent } from "@/contexts/SSEContext";
-import type { Profile, ProfileDetail } from "@moor/types";
+import type { Profile, ProfileDetail, ProfileServerUpsert, ProfileToolGroup } from "@moor/types";
 
 export function useProfiles() {
   const queryClient = useQueryClient();
@@ -75,9 +75,38 @@ export function useProfiles() {
     }) => {
       await apiPut(routes.profiles.updateServer(profileId, serverId), updates);
     },
-    onSuccess: (_data, { serverId }) => {
+    onSuccess: (_data, { profileId, serverId }) => {
       // disabled_tools 变化影响各 profile 变体的 tools 查询，失效归 hook 负责
+      void queryClient.invalidateQueries({ queryKey: profileKeys.detail(profileId) });
+      void queryClient.invalidateQueries({ queryKey: profileKeys.tools(profileId) });
       void queryClient.invalidateQueries({ queryKey: serverKeys.toolsRoot(serverId) });
+    },
+  });
+
+  const updateProfileServers = useMutation({
+    mutationFn: async ({
+      profileId,
+      updates,
+    }: {
+      profileId: string;
+      updates: ProfileServerUpsert[];
+    }) => {
+      await apiPut(routes.profiles.bulkServerState(profileId), { updates });
+    },
+    onSuccess: (_data, { profileId, updates }) => {
+      void queryClient.invalidateQueries({ queryKey: profileKeys.detail(profileId) });
+      void queryClient.invalidateQueries({ queryKey: profileKeys.tools(profileId) });
+      for (const update of updates) {
+        void queryClient.invalidateQueries({ queryKey: serverKeys.toolsRoot(update.serverId) });
+      }
+    },
+  });
+
+  const cloneProfile = useMutation({
+    mutationFn: async ({ sourceId, name }: { sourceId: string; name: string }) =>
+      apiPost<Profile>(routes.profiles.clone(sourceId), { name }),
+    onSuccess: (profile) => {
+      queryClient.setQueryData<Profile[]>(profileKeys.list(), (prev) => [...(prev ?? []), profile]);
     },
   });
 
@@ -91,6 +120,11 @@ export function useProfiles() {
     deleteProfile: deleteProfile.mutateAsync,
     updateProfile: updateProfile.mutateAsync,
     updateProfileServer: updateProfileServer.mutateAsync,
+    updateProfileServers: updateProfileServers.mutateAsync,
+    cloneProfile: cloneProfile.mutateAsync,
+    // 批量接口是快照覆盖语义，进行中禁用控件以防并发写互相覆盖
+    isUpdatingServer: updateProfileServer.isPending,
+    isUpdatingServers: updateProfileServers.isPending,
   };
 }
 
@@ -112,4 +146,24 @@ export function useProfile(id: string | undefined) {
   }, [queryClient, id]);
 
   return { profile, isLoading, error, refresh };
+}
+
+export function useProfileTools(id: string | undefined) {
+  const queryClient = useQueryClient();
+
+  const {
+    data: groups = [],
+    isLoading,
+    error,
+  } = useQuery<ProfileToolGroup[]>({
+    queryKey: profileKeys.tools(id!),
+    queryFn: ({ signal }) => api<ProfileToolGroup[]>(routes.profiles.tools(id!), { signal }),
+    enabled: !!id,
+  });
+
+  const refresh = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: profileKeys.tools(id!) });
+  }, [queryClient, id]);
+
+  return { groups, isLoading, error, refresh };
 }

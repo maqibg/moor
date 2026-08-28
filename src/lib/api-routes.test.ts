@@ -22,7 +22,12 @@ describe("api routes", () => {
     ).toBe("/api/logs?server_id=server%2F1&tool_name=read%26write&from=2026-01-01T00%3A00%3A00Z");
   });
 
-  it("encodes insights query", () => {
+  it("encodes profile governance endpoints and insights query", () => {
+    expect(routes.profiles.tools("profile/1")).toBe("/api/profiles/profile%2F1/tools");
+    expect(routes.profiles.clone("profile/1")).toBe("/api/profiles/profile%2F1/clone");
+    expect(routes.profiles.bulkServerState("profile&1")).toBe(
+      "/api/profiles/profile%261/servers-state",
+    );
     expect(routes.logs.insights({ from: "2026-01-01T00:00:00Z" })).toBe(
       "/api/logs/insights?from=2026-01-01T00%3A00%3A00Z",
     );

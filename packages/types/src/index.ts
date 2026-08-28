@@ -14,7 +14,13 @@ export type {
   ScannedServer,
   UnsupportedServer,
 } from "./scanned.js";
-export type { Profile, ProfileDetail, ProfileServerState } from "./profile.js";
+export type {
+  Profile,
+  ProfileDetail,
+  ProfileServerState,
+  ProfileServerUpsert,
+  ProfileToolGroup,
+} from "./profile.js";
 export type { MCPTool, ToolCatalogEntry } from "./mcp.js";
 export type { ToolDetail } from "./tool.js";
 export type { AuditLogEntry, LogInsights, LogStats, ServerInsight, ToolInsight } from "./audit.js";

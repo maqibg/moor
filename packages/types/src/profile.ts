@@ -1,4 +1,5 @@
 import type { Server } from "./server.js";
+import type { ToolDetail } from "./tool.js";
 
 export interface Profile {
   id: string;
@@ -16,4 +17,19 @@ export interface ProfileServerState {
 
 export interface ProfileDetail extends Profile {
   servers: Array<Server & { profileServer: ProfileServerState }>;
+}
+
+/** 治理面板分组：一个 server 在指定 profile 下的全部已发现工具及禁用态。 */
+export interface ProfileToolGroup {
+  serverId: string;
+  serverName: string;
+  serverEnabled: boolean;
+  tools: ToolDetail[];
+}
+
+/** 批量更新 profile-server 状态的单项补丁；enabled 与 disabledTools 相互独立、可缺省。 */
+export interface ProfileServerUpsert {
+  serverId: string;
+  enabled?: boolean;
+  disabledTools?: string[];
 }

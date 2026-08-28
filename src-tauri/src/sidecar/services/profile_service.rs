@@ -3,10 +3,14 @@
 //! 封装 Profile 持久化和领域事件发射,让路由层只负责 HTTP 形状。
 
 use crate::sidecar::db::profile_repo::{
-    Profile, ProfileDetailServer, ProfileRepository, ProfileServerState, RemoveResult,
+    Profile, ProfileDetailServer, ProfileRepository, ProfileServerState, ProfileServerUpsertInput,
+    RemoveResult,
 };
+use crate::sidecar::db::server_repo::ServerRepository;
 use crate::sidecar::db::Database;
 use crate::sidecar::services::event_bus::{EventBus, Evt};
+use crate::sidecar::services::tool_catalog::{ProfileToolGroup, ToolCatalogService};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 pub struct ProfileService;
@@ -122,6 +126,30 @@ impl ProfileService {
             .ok_or_else(|| ProfileServiceError::NotFound("Server not found in profile".into()))
     }
 
+    /// 校验 server 存在：FK 约束失败会以原始 500 暴露，这里提前拦成 Validation（400）。
+    fn ensure_servers_exist(
+        db: &Database,
+        server_ids: &[String],
+    ) -> Result<(), ProfileServiceError> {
+        let known: HashSet<String> = ServerRepository::new(db)
+            .find_by_ids(server_ids)
+            .map_err(ProfileServiceError::Internal)?
+            .into_iter()
+            .map(|server| server.id)
+            .collect();
+        let missing: Vec<&str> = server_ids
+            .iter()
+            .filter(|id| !known.contains(*id))
+            .map(|id| id.as_str())
+            .collect();
+        if !missing.is_empty() {
+            return Err(ProfileServiceError::Validation(format!(
+                "unknown server ids: {missing:?}"
+            )));
+        }
+        Ok(())
+    }
+
     pub fn upsert_profile_server(
         db: &Database,
         profile_id: &str,
@@ -129,9 +157,57 @@ impl ProfileService {
         enabled: Option<bool>,
         disabled_tools: Option<&Vec<String>>,
     ) -> Result<ProfileServerState, ProfileServiceError> {
+        Self::ensure_servers_exist(db, &[server_id.to_string()])?;
         ProfileRepository::new(db)
             .upsert_profile_server(profile_id, server_id, enabled, disabled_tools)
             .map_err(ProfileServiceError::Internal)
+    }
+
+    /// 批量更新 profile-server 状态。profile 不存在返回 NotFound（404 优先于写入），
+    /// server 不存在返回 Validation（400），不让 FK 约束以 500 暴露。
+    pub fn upsert_profile_servers_batch(
+        db: &Database,
+        profile_id: &str,
+        items: &[ProfileServerUpsertInput],
+    ) -> Result<(), ProfileServiceError> {
+        let repo = ProfileRepository::new(db);
+        repo.find_by_id(profile_id)
+            .map_err(ProfileServiceError::Internal)?
+            .ok_or_else(|| ProfileServiceError::NotFound("Profile not found".into()))?;
+        if items.is_empty() {
+            return Ok(());
+        }
+        let server_ids: Vec<String> = items.iter().map(|item| item.server_id.clone()).collect();
+        Self::ensure_servers_exist(db, &server_ids)?;
+        repo.upsert_profile_servers_batch(profile_id, items)
+            .map_err(ProfileServiceError::Internal)
+    }
+
+    /// 克隆 profile（含 server 绑定与工具禁用态），新 profile 非激活。
+    pub fn clone_profile(
+        db: &Database,
+        source_id: &str,
+        name: &str,
+    ) -> Result<Profile, ProfileServiceError> {
+        if name.is_empty() {
+            return Err(ProfileServiceError::Validation("name is required".into()));
+        }
+        ProfileRepository::new(db)
+            .clone_profile(source_id, name)
+            .map_err(ProfileServiceError::Internal)?
+            .ok_or_else(|| ProfileServiceError::NotFound("Profile not found".into()))
+    }
+
+    /// 治理面板的分组工具矩阵。profile 不存在返回 NotFound。
+    pub fn get_profile_tool_groups(
+        db: &Database,
+        profile_id: &str,
+    ) -> Result<Vec<ProfileToolGroup>, ProfileServiceError> {
+        ProfileRepository::new(db)
+            .find_by_id(profile_id)
+            .map_err(ProfileServiceError::Internal)?
+            .ok_or_else(|| ProfileServiceError::NotFound("Profile not found".into()))?;
+        Ok(ToolCatalogService::get_profile_tool_groups(db, profile_id))
     }
 }
 

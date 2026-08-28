@@ -9,6 +9,7 @@ export const serverKeys = {
 export const profileKeys = {
   list: () => ["profiles"] as const,
   detail: (id: string) => ["profiles", id] as const,
+  tools: (id: string) => ["profiles", id, "tools"] as const,
 };
 
 export const settingKeys = {

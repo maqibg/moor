@@ -2,6 +2,13 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { useProfiles } from "@/hooks/useProfiles";
 import { Plus, Trash2, Check, Code, FlaskConical, User, Home } from "lucide-react";
@@ -32,17 +39,33 @@ const profileAccents = [
 ];
 
 export function Profiles() {
-  const { profiles, createProfile, activateProfile, deleteProfile } = useProfiles();
+  const { profiles, createProfile, activateProfile, deleteProfile, cloneProfile } = useProfiles();
   const [newName, setNewName] = useState("");
+  const [templateId, setTemplateId] = useState("");
   const [creating, setCreating] = useState(false);
   const navigate = useNavigate();
   const displayProfiles = getProfilesForDisplay(profiles);
 
-  const handleCreate = async () => {
-    if (!newName.trim()) return;
-    await createProfile(newName.trim());
+  const resetForm = () => {
     setNewName("");
+    setTemplateId("");
     setCreating(false);
+  };
+
+  const handleCreate = async () => {
+    const name = newName.trim();
+    if (!name) return;
+    try {
+      if (templateId && templateId !== "none") {
+        await cloneProfile({ sourceId: templateId, name });
+      } else {
+        await createProfile(name);
+      }
+    } catch {
+      // 失败提示由全局 MutationCache onError 兜底；保留表单输入便于重试
+      return;
+    }
+    resetForm();
   };
 
   return (
@@ -62,7 +85,7 @@ export function Profiles() {
       {/* Create Form */}
       {creating && (
         <Card className="animate-scale-in border-cursor-orange/20">
-          <CardContent className="p-4 flex items-center gap-3">
+          <CardContent className="p-4 flex items-center gap-3 flex-wrap">
             <Input
               placeholder="Profile name"
               value={newName}
@@ -71,14 +94,23 @@ export function Profiles() {
               autoFocus
               className="max-w-sm"
             />
-            <Button onClick={handleCreate}>Create</Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setCreating(false);
-                setNewName("");
-              }}
-            >
+            <Select value={templateId} onValueChange={setTemplateId}>
+              <SelectTrigger className="w-[220px]">
+                <SelectValue placeholder="Start from scratch" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Start from scratch</SelectItem>
+                {profiles.map((profile) => (
+                  <SelectItem key={profile.id} value={profile.id}>
+                    Copy of {profile.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button onClick={handleCreate} disabled={!newName.trim()}>
+              Create
+            </Button>
+            <Button variant="outline" onClick={resetForm}>
               Cancel
             </Button>
           </CardContent>
