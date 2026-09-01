@@ -1,5 +1,18 @@
 # moor
 
+## 0.8.0
+
+### Minor Changes
+
+- f5fd472: feat(clients): add Claude Desktop, Grok Build and Pi client presets
+  - Client registry adds Claude Desktop (stdio bridged via `npx mcp-remote`), Grok Build (`~/.grok/config.toml`), and Pi (`~/.pi/agent/mcp.json`, requires the community `pi-mcp-adapter` package).
+  - Claude Code preset renamed to `claude-code` with config path corrected to `~/.claude.json`.
+
+- f5fd472: feat(logs): tool-call insights, governance panel and audit log retention
+  - New insights endpoint aggregates tool-call usage by server and tool with error rates, surfaced in a governance view on the logs page.
+  - Profile detail gains a tool governance panel with bulk server-state upsert and clone support.
+  - An audit log retention sweeper now prunes old audit records automatically.
+
 ## 0.7.2
 
 ### Patch Changes
