@@ -1,7 +1,7 @@
 # OpenCode MCP Servers
 
 > Source: https://opencode.ai/docs/mcp-servers/
-> Accessed: 2026-04-30
+> Accessed: 2026-08-29
 >
 > Note: This document is an external documentation mirror/reference. Copyright belongs to the original site; content may be outdated, please refer to the official link. Follow the original site's license when citing or redistributing.
 
@@ -103,6 +103,7 @@ use the mcp_everything tool to add the number 3 and 4
 | `type`        | String  | Yes      | Must be `"local"`                                                             |
 | `command`     | Array   | Yes      | Command and arguments to start the MCP server                                 |
 | `environment` | Object  |          | Environment variables set at runtime                                          |
+| `cwd`         | String  |          | Working directory for the server; relative paths resolve from the workspace   |
 | `enabled`     | Boolean |          | Whether to enable the MCP server on startup                                   |
 | `timeout`     | Number  |          | Timeout for fetching tools from the MCP server (ms), default 5000 (5 seconds) |
 

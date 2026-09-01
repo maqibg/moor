@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/Node.js-22+-339933?logo=nodedotjs" alt="Node.js 22+">
   <img src="https://img.shields.io/badge/platform-macOS-black?logo=apple" alt="macOS">
   <img src="https://img.shields.io/badge/platform-Windows-0078D4?logo=windows" alt="Windows">
-  <img src="https://img.shields.io/badge/pnpm-10+-F69220?logo=pnpm" alt="pnpm">
+  <img src="https://img.shields.io/badge/pnpm-11+-F69220?logo=pnpm" alt="pnpm">
 </p>
 
 <p align="center">
@@ -94,10 +94,10 @@ Abre **Moor.app**. El Dashboard muestra tu Perfil activo, el estado de los servi
 
 ### Escanear configuraciones existentes
 
-Moor puede detectar automáticamente los servidores MCP que ya hayas configurado para Claude Code, Codex, OpenCode, Cursor, Kimi Code y dsh:
+Moor puede detectar automáticamente los servidores MCP que ya hayas configurado para Claude Code, Claude Desktop, Codex, OpenCode, Cursor, Kimi Code, dsh, Grok Build y Pi:
 
 1. Ve a **Servers** → **Import**
-2. Haz clic en **Scan** — Moor lee `~/.claude/settings.json`, `~/.codex/config.toml`, `~/.config/opencode/opencode.json` / `.jsonc`, `~/.cursor/mcp.json`, `~/.kimi-code/mcp.json` y `~/.dsh/cordis.patch.yml`
+2. Haz clic en **Scan** — Moor lee `~/.claude.json`, `~/.codex/config.toml`, `~/.config/opencode/opencode.json` / `.jsonc`, `~/.cursor/mcp.json`, `~/.kimi-code/mcp.json`, `~/.dsh/cordis.patch.yml`, `~/Library/Application Support/Claude/claude_desktop_config.json`, `~/.grok/config.toml` y `~/.pi/agent/mcp.json` (Pi requiere `pi install npm:pi-mcp-adapter`)
 3. Selecciona los servidores que deseas importar
 
 También puedes pegar una configuración MCP en JSON con **Import JSON**. Moor importa servidores stdio y HTTP/SSE, e informa sobre entradas no soportadas como configuraciones OpenAPI sin guardarlas.
@@ -158,18 +158,21 @@ Más allá del encendido/apagado a nivel de servidor, profundiza en cualquier se
 
 Importación con un solo clic desde:
 
-- **Claude Code**: `~/.claude/settings.json`
+- **Claude Code**: `~/.claude.json`
 - **Codex**: `~/.codex/config.toml`
 - **OpenCode**: `~/.config/opencode/opencode.json` / `.jsonc`
 - **Cursor**: `~/.cursor/mcp.json`
 - **Kimi Code**: `~/.kimi-code/mcp.json`
 - **dsh**: `~/.dsh/cordis.patch.yml`
+- **Claude Desktop**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Grok Build**: `~/.grok/config.toml`
+- **Pi**: `~/.pi/agent/mcp.json` (requiere `pi install npm:pi-mcp-adapter`)
 
 También se admiten la entrada manual y la importación por lotes mediante JSON pegado para servidores stdio y HTTP/SSE.
 
 ### Configuración de cliente
 
-Genera fragmentos de configuración listos para copiar para Claude Code, Codex, OpenCode, Cursor, Kimi Code y dsh. Los fragmentos contienen solo el endpoint `/mcp`; el `X-Moor-Token` de Moor está reservado para llamadas a la API de gestión interna.
+Genera fragmentos de configuración listos para copiar para Claude Code, Claude Desktop, Codex, OpenCode, Cursor, Kimi Code, dsh, Grok Build y Pi. Los fragmentos contienen solo el endpoint `/mcp`; el `X-Moor-Token` de Moor está reservado para llamadas a la API de gestión interna.
 
 ### Registros de auditoría
 
@@ -222,12 +225,12 @@ Moor.app
 AI Agent ──HTTP──▶ POST /mcp ──▶ Moor Gateway ──stdio/HTTP──▶ MCP Servers
                               │
 WebView ──IPC──▶ get_sidecar_info ─┐
-WebView ──fetch──▶ /api/runtime ───┤ (fallback en modo de desarrollo del navegador)
+WebView ──env──▶ VITE_MOOR_API_URL/TOKEN ─┤ (fallback en modo de desarrollo del navegador)
 WebView ──fetch──▶ /api/* ─────────┘
 WebView ◀──SSE──── /api/events
 ```
 
-- **Detección de runtime**: WebView → Tauri IPC (`get_sidecar_info`) → Rust (puerto, token); en modo de desarrollo del navegador recurre a HTTP `GET /api/runtime`
+- **Detección de runtime**: WebView → Tauri IPC (`get_sidecar_info`) → Rust (puerto, token); en modo de desarrollo del navegador (`pnpm dev`) recurre a las variables de entorno `VITE_MOOR_API_URL` / `VITE_MOOR_API_TOKEN` (ver `src/lib/api/runtime.ts`; `GET /api/runtime` existe pero requiere token)
 - **Operaciones de negocio**: WebView → HTTP `fetch()` → Servidor Axum en proceso (Rust)
 - **Operaciones de sistema**: WebView → Tauri IPC → Rust (bandeja, ventana, auto-inicio)
 
@@ -321,17 +324,23 @@ vp test
 | -------- | ------------------------------------- | --------------------------------------------------------------- |
 | `GET`    | `/api/profiles`                       | Listar todos los perfiles                                       |
 | `POST`   | `/api/profiles`                       | Crear perfil                                                    |
+| `GET`    | `/api/profiles/:id`                   | Detalle del perfil (con servidores)                             |
 | `PUT`    | `/api/profiles/:id`                   | Actualizar perfil                                               |
 | `DELETE` | `/api/profiles/:id`                   | Eliminar perfil                                                 |
 | `PUT`    | `/api/profiles/:id/activate`          | Establecer como perfil activo                                   |
+| `POST`   | `/api/profiles/:id/clone`             | Clonar un perfil                                                |
+| `GET`    | `/api/profiles/:id/servers/:serverId` | Obtener conmutador de servidor + herramientas deshabilitadas    |
 | `PUT`    | `/api/profiles/:id/servers/:serverId` | Actualizar conmutador de servidor + herramientas deshabilitadas |
+| `PUT`    | `/api/profiles/:id/servers-state`     | Upsert masivo de conmutadores de servidor                       |
+| `GET`    | `/api/profiles/:id/tools`             | Herramientas expuestas por el perfil                            |
 
 ### Registros de auditoría
 
-| Método | Ruta              | Descripción                  |
-| ------ | ----------------- | ---------------------------- |
-| `GET`  | `/api/logs`       | Consultar logs (con filtros) |
-| `GET`  | `/api/logs/stats` | Estadísticas agregadas       |
+| Método | Ruta                 | Descripción                                       |
+| ------ | -------------------- | ------------------------------------------------- |
+| `GET`  | `/api/logs`          | Consultar logs (con filtros)                      |
+| `GET`  | `/api/logs/stats`    | Estadísticas agregadas                            |
+| `GET`  | `/api/logs/insights` | Insights de gobernanza de llamadas a herramientas |
 
 ### Gestión de configuración
 

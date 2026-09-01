@@ -1,7 +1,7 @@
 # Connect Claude Code to tools via MCP
 
 > Source: https://code.claude.com/docs/en/mcp
-> Accessed: 2026-04-30
+> Accessed: 2026-08-29
 >
 > Note: This document is an external documentation mirror/reference. Copyright belongs to the original site; content may be outdated, please refer to the official link. Follow the original site's license when citing or redistributing.
 
@@ -76,7 +76,7 @@ claude mcp add --transport stdio --env AIRTABLE_API_KEY=YOUR_KEY airtable \
 Once configured, you can manage your MCP servers with these commands:
 
 ```bash
-# List all configured servers
+# List all configured servers (with health status)
 claude mcp list
 
 # Get details for a specific server
@@ -85,9 +85,20 @@ claude mcp get github
 # Remove a server
 claude mcp remove github
 
+# Authenticate with an OAuth server from the shell (v2.1.186+)
+claude mcp login my-server
+
+# Clear stored OAuth credentials
+claude mcp logout my-server
+
+# Reset .mcp.json approval choices for the current project
+claude mcp reset-project-choices
+
 # (within Claude Code) Check server status
 /mcp
 ```
+
+Server names may only contain letters, numbers, hyphens, and underscores. The names `workspace`, `claude-in-chrome`, `computer-use`, `Claude Preview`, and `Claude Browser` are reserved and skipped with a warning.
 
 ### Dynamic tool updates
 
@@ -474,11 +485,28 @@ Use these to write a single helper script that serves multiple MCP servers.
 
 ## Add MCP servers from JSON configuration
 
-If you have a JSON configuration for an MCP server, you can add it directly.
+If you have a JSON configuration for an MCP server, you can add it directly with `claude mcp add-json`:
+
+```bash
+# Pass the object INSIDE mcpServers, not the wrapper
+claude mcp add-json example '{"command":"npx","args":["-y","@example/mcp-server"]}'
+
+# WebSocket servers are JSON-only (--transport does not accept "ws")
+claude mcp add-json events-server \
+  '{"type":"ws","url":"wss://mcp.example.com/socket","headers":{"Authorization":"Bearer YOUR_TOKEN"}}'
+```
+
+**Entry `type` rules**: the `type` field accepts `http` (with `streamable-http` as an alias), `sse`, `ws`, or `stdio`. A JSON entry that has a `url` but no `type` is a configuration error — entries without a `type` are read as stdio and fail with a missing-`command` error, so repair `url`-only entries by adding `"type": "http"` (or `"sse"` / `"ws"`).
 
 ## Import MCP servers from Claude Desktop
 
-If you've already configured MCP servers in Claude Desktop, you can import them.
+If you've already configured MCP servers in Claude Desktop, import them with:
+
+```bash
+claude mcp add-from-claude-desktop
+```
+
+This is available on macOS and WSL. Imported names that Claude Desktop rejects (invalid characters) are skipped; duplicates get numeric suffixes (`server_1`).
 
 ## Use MCP servers from Claude.ai
 
@@ -515,6 +543,20 @@ You can use this in Claude Desktop by adding this configuration to claude_deskto
   }
 }
 ```
+
+## Timeouts
+
+| Mechanism                | Setting                                                 | Notes                                                                                            |
+| ------------------------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Server startup timeout   | `MCP_TIMEOUT` env var (ms)                              | e.g. `MCP_TIMEOUT=10000 claude`                                                                  |
+| Per-tool-call wall clock | `timeout` field (ms) in the server entry                | Hard wall-clock limit per tool call; overrides `MCP_TOOL_TIMEOUT`; values below 1000 are ignored |
+| Global tool timeout      | `MCP_TOOL_TIMEOUT` env var                              | Defaults to roughly 28 hours when unset                                                          |
+| Idle disconnect          | `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` (ms), `0` disables  | Default 5 min (HTTP/SSE/WS/claude.ai), 30 min (stdio); v2.1.187+                                 |
+| Auto-backgrounding       | `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS` (ms), `0` disables | Tools running longer than 2 min are backgrounded; v2.1.212+                                      |
+
+For HTTP/SSE/claude.ai connectors, each request timer is the greatest of 60s, the server tool timeout, and `MCP_TIMEOUT`.
+
+In stdio `command`/`args` for `.mcp.json`/`~/.claude.json` entries, `${CLAUDE_PROJECT_DIR}` references require a default such as `${CLAUDE_PROJECT_DIR:-.}` (plugin configs substitute it directly).
 
 ## MCP output limits and warnings
 

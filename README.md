@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/platform-macOS-black?logo=apple" alt="macOS">
   <img src="https://img.shields.io/badge/platform-Windows-0078D4?logo=windows" alt="Windows">
   <img src="https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black" alt="Linux">
-  <img src="https://img.shields.io/badge/pnpm-10+-F69220?logo=pnpm" alt="pnpm">
+  <img src="https://img.shields.io/badge/pnpm-11+-F69220?logo=pnpm" alt="pnpm">
 </p>
 
 <p align="center">
@@ -95,10 +95,10 @@ Open **Moor.app**. The Dashboard shows your active Profile, server status, and r
 
 ### Scan Existing Configs
 
-Moor can automatically detect MCP servers you've already configured for Claude Code, Codex, OpenCode, Cursor, Kimi Code, and dsh:
+Moor can automatically detect MCP servers you've already configured for Claude Code, Claude Desktop, Codex, OpenCode, Cursor, Kimi Code, dsh, Grok Build, and Pi:
 
 1. Go to **Servers** → **Import**
-2. Click **Scan** — Moor reads `~/.claude/settings.json`, `~/.codex/config.toml`, `~/.config/opencode/opencode.json` / `.jsonc`, `~/.cursor/mcp.json`, `~/.kimi-code/mcp.json`, and `~/.dsh/cordis.patch.yml`
+2. Click **Scan** — Moor reads `~/.claude.json`, `~/.codex/config.toml`, `~/.config/opencode/opencode.json` / `.jsonc`, `~/.cursor/mcp.json`, `~/.kimi-code/mcp.json`, `~/.dsh/cordis.patch.yml`, `~/Library/Application Support/Claude/claude_desktop_config.json`, `~/.grok/config.toml`, and `~/.pi/agent/mcp.json` (Pi needs the community adapter: `pi install npm:pi-mcp-adapter`)
 3. Select the servers you want to import
 
 You can also paste a JSON MCP configuration with **Import JSON**. Moor imports stdio and HTTP/SSE servers, and reports unsupported entries such as OpenAPI configs without saving them.
@@ -157,18 +157,21 @@ Beyond server-level on/off, drill into any server to disable specific tools. Dis
 
 One-click import from:
 
-- **Claude Code**: `~/.claude/settings.json`
+- **Claude Code**: `~/.claude.json`
 - **Codex**: `~/.codex/config.toml`
 - **OpenCode**: `~/.config/opencode/opencode.json` / `.jsonc`
 - **Cursor**: `~/.cursor/mcp.json`
 - **Kimi Code**: `~/.kimi-code/mcp.json`
 - **dsh**: `~/.dsh/cordis.patch.yml`
+- **Claude Desktop**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Grok Build**: `~/.grok/config.toml`
+- **Pi**: `~/.pi/agent/mcp.json` (requires `pi install npm:pi-mcp-adapter`)
 
 Manual entry and pasted JSON batch import are also supported for stdio and HTTP/SSE servers.
 
 ### Client Configuration
 
-Generate ready-to-copy configuration snippets for Claude Code, Codex, OpenCode, Cursor, Kimi Code, and dsh. The snippets contain only the `/mcp` endpoint; Moor's `X-Moor-Token` is reserved for internal management API calls.
+Generate ready-to-copy configuration snippets for Claude Code, Claude Desktop, Codex, OpenCode, Cursor, Kimi Code, dsh, Grok Build, and Pi. The snippets contain only the `/mcp` endpoint; Moor's `X-Moor-Token` is reserved for internal management API calls.
 
 ### Audit Logs
 
@@ -219,12 +222,12 @@ Moor.app
 AI Agent ──HTTP──▶ POST /mcp ──▶ Moor Gateway ──stdio/HTTP──▶ MCP Servers
                               │
 WebView ──IPC──▶ get_sidecar_info ─┐
-WebView ──fetch──▶ /api/runtime ───┤ (fallback in browser dev mode)
+WebView ──env──▶ VITE_MOOR_API_URL/TOKEN ─┤ (fallback in browser dev mode)
 WebView ──fetch──▶ /api/* ─────────┘
 WebView ◀──SSE──── /api/events
 ```
 
-- **Runtime discovery**: WebView → Tauri IPC (`get_sidecar_info`) → Rust (port, token); falls back to HTTP `GET /api/runtime` in browser dev mode
+- **Runtime discovery**: WebView → Tauri IPC (`get_sidecar_info`) → Rust (port, token); in browser dev mode (`pnpm dev`) falls back to the `VITE_MOOR_API_URL` / `VITE_MOOR_API_TOKEN` env vars — see `src/lib/api/runtime.ts` (`GET /api/runtime` exists but is token-protected)
 - **Business operations**: WebView → HTTP `fetch()` → In-process Axum server (Rust)
 - **System operations**: WebView → Tauri IPC → Rust (tray, window, auto-start)
 
@@ -318,15 +321,19 @@ vp test
 | `PUT`    | `/api/profiles/:id`                   | Update profile                        |
 | `DELETE` | `/api/profiles/:id`                   | Delete profile                        |
 | `PUT`    | `/api/profiles/:id/activate`          | Set as active profile                 |
+| `POST`   | `/api/profiles/:id/clone`             | Clone a profile                       |
 | `GET`    | `/api/profiles/:id/servers/:serverId` | Get server toggle + disabled tools    |
 | `PUT`    | `/api/profiles/:id/servers/:serverId` | Update server toggle + disabled tools |
+| `PUT`    | `/api/profiles/:id/servers-state`     | Bulk upsert server toggles            |
+| `GET`    | `/api/profiles/:id/tools`             | Tools exposed by the profile          |
 
 ### Audit Logs
 
-| Method | Path              | Description               |
-| ------ | ----------------- | ------------------------- |
-| `GET`  | `/api/logs`       | Query logs (with filters) |
-| `GET`  | `/api/logs/stats` | Aggregate statistics      |
+| Method | Path                 | Description                   |
+| ------ | -------------------- | ----------------------------- |
+| `GET`  | `/api/logs`          | Query logs (with filters)     |
+| `GET`  | `/api/logs/stats`    | Aggregate statistics          |
+| `GET`  | `/api/logs/insights` | Tool-call governance insights |
 
 ### Settings Management
 
@@ -351,17 +358,17 @@ vp test
 
 ## Tech Stack
 
-| Layer         | Technology                                           |
-| ------------- | ---------------------------------------------------- |
-| Frontend      | React 19, vite-plus, TypeScript 5.7, Tailwind CSS v4 |
-| UI Primitives | Radix UI                                             |
-| UI Components | shadcn/ui (New York style)                           |
-| Desktop       | Tauri 2 (Rust)                                       |
-| Gateway       | Rust, Axum, Tokio, rusqlite (in-process)             |
-| Database      | SQLite (rusqlite)                                    |
-| MCP Protocol  | Rust 自实现 (JSON-RPC over Streamable HTTP / stdio)  |
-| Icons         | Lucide React                                         |
-| Tooling       | vite-plus (vp CLI), Oxlint, Oxfmt, Vitest            |
+| Layer         | Technology                                                         |
+| ------------- | ------------------------------------------------------------------ |
+| Frontend      | React 19, vite-plus, TypeScript 5.7, Tailwind CSS v4               |
+| UI Primitives | Radix UI                                                           |
+| UI Components | shadcn/ui (New York style)                                         |
+| Desktop       | Tauri 2 (Rust)                                                     |
+| Gateway       | Rust, Axum, Tokio, rusqlite (in-process)                           |
+| Database      | SQLite (rusqlite)                                                  |
+| MCP Protocol  | Custom Rust implementation (JSON-RPC over Streamable HTTP / stdio) |
+| Icons         | Lucide React                                                       |
+| Tooling       | vite-plus (vp CLI), Oxlint, Oxfmt, Vitest                          |
 
 ## Acknowledgements
 

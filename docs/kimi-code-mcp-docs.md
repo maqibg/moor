@@ -1,7 +1,7 @@
 # Kimi Code CLI Model Context Protocol (MCP)
 
 > Source: https://www.kimi.com/code/docs/en/kimi-code-cli/customization/mcp.html
-> Accessed: 2026-08-17
+> Accessed: 2026-08-29
 >
 > Note: This document is an external documentation mirror/reference. Copyright belongs to the original site; content may be outdated, please refer to the official link. Follow the original site's license when citing or redistributing.
 

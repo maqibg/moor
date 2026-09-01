@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/Node.js-22+-339933?logo=nodedotjs" alt="Node.js 22+">
   <img src="https://img.shields.io/badge/platform-macOS-black?logo=apple" alt="macOS">
   <img src="https://img.shields.io/badge/platform-Windows-0078D4?logo=windows" alt="Windows">
-  <img src="https://img.shields.io/badge/pnpm-10+-F69220?logo=pnpm" alt="pnpm">
+  <img src="https://img.shields.io/badge/pnpm-11+-F69220?logo=pnpm" alt="pnpm">
 </p>
 
 <p align="center">
@@ -94,10 +94,10 @@ pnpm install
 
 ### 既存設定をスキャンする
 
-Moor は、Claude Code、Codex、OpenCode、Cursor、Kimi Code、dsh 用に既に設定済みの MCP Server を自動検出できます：
+Moor は、Claude Code、Claude Desktop、Codex、OpenCode、Cursor、Kimi Code、dsh、Grok Build、Pi 用に既に設定済みの MCP Server を自動検出できます：
 
 1. **Servers** → **Import** に移動
-2. **Scan** をクリック — Moor は `~/.claude/settings.json`、`~/.codex/config.toml`、`~/.config/opencode/opencode.json` / `.jsonc`、`~/.cursor/mcp.json`、`~/.kimi-code/mcp.json`、`~/.dsh/cordis.patch.yml` を読み取ります
+2. **Scan** をクリック — Moor は `~/.claude.json`、`~/.codex/config.toml`、`~/.config/opencode/opencode.json` / `.jsonc`、`~/.cursor/mcp.json`、`~/.kimi-code/mcp.json`、`~/.dsh/cordis.patch.yml`、`~/Library/Application Support/Claude/claude_desktop_config.json`、`~/.grok/config.toml`、`~/.pi/agent/mcp.json`（Pi は先に `pi install npm:pi-mcp-adapter` が必要）を読み取ります
 3. インポートしたい Server を選択
 
 **Import JSON** を使用して JSON MCP 設定を貼り付けることもできます。Moor は stdio および HTTP/SSE Server をインポートし、OpenAPI 設定などのサポートされていないエントリは保存せずに報告します。
@@ -158,18 +158,21 @@ Server レベルのオン/オフに加えて、任意の Server を展開して�
 
 以下からワンクリックでインポート：
 
-- **Claude Code**: `~/.claude/settings.json`
+- **Claude Code**: `~/.claude.json`
 - **Codex**: `~/.codex/config.toml`
 - **OpenCode**: `~/.config/opencode/opencode.json` / `.jsonc`
 - **Cursor**: `~/.cursor/mcp.json`
 - **Kimi Code**: `~/.kimi-code/mcp.json`
 - **dsh**: `~/.dsh/cordis.patch.yml`
+- **Claude Desktop**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Grok Build**: `~/.grok/config.toml`
+- **Pi**: `~/.pi/agent/mcp.json`（先に `pi install npm:pi-mcp-adapter` が必要）
 
 stdio および HTTP/SSE Server の手動入力と JSON 貼り付けによるバッチインポートもサポートされています。
 
 ### クライアント設定
 
-Claude Code、Codex、OpenCode、Cursor、Kimi Code、dsh 向けにコピーするだけで使える設定スニペットを生成します。スニペットには `/mcp` エンドポイントのみが含まれます。Moor の `X-Moor-Token` は内部管理 API 用に予約されています。
+Claude Code、Claude Desktop、Codex、OpenCode、Cursor、Kimi Code、dsh、Grok Build、Pi 向けにコピーするだけで使える設定スニペットを生成します。スニペットには `/mcp` エンドポイントのみが含まれます。Moor の `X-Moor-Token` は内部管理 API 用に予約されています。
 
 ### 監査ログ
 
@@ -222,12 +225,12 @@ Moor.app
 AI Agent ──HTTP──▶ POST /mcp ──▶ Moor Gateway ──stdio/HTTP──▶ MCP Servers
                               │
 WebView ──IPC──▶ get_sidecar_info ─┐
-WebView ──fetch──▶ /api/runtime ───┤ (ブラウザ開発モードでフォールバック)
+WebView ──env──▶ VITE_MOOR_API_URL/TOKEN ─┤ (ブラウザ開発モードでフォールバック)
 WebView ──fetch──▶ /api/* ─────────┘
 WebView ◀──SSE──── /api/events
 ```
 
-- **ランタイム検出**: WebView → Tauri IPC (`get_sidecar_info`) → Rust（ポート、トークン）；ブラウザ開発モードでは HTTP `GET /api/runtime` にフォールバック
+- **ランタイム検出**: WebView → Tauri IPC (`get_sidecar_info`) → Rust（ポート、トークン）；ブラウザ開発モード（`pnpm dev`）では `VITE_MOOR_API_URL` / `VITE_MOOR_API_TOKEN` 環境変数にフォールバックします（`src/lib/api/runtime.ts` 参照。`GET /api/runtime` も存在しますがトークンが必要です）
 - **業務操作**: WebView → HTTP `fetch()` → インプロセス Axum サーバー（Rust）
 - **システム操作**: WebView → Tauri IPC → Rust（トレイ、ウィンドウ、自動起動）
 
@@ -321,17 +324,23 @@ vp test
 | -------- | ------------------------------------- | ---------------------------------- |
 | `GET`    | `/api/profiles`                       | すべての Profile を一覧            |
 | `POST`   | `/api/profiles`                       | Profile を作成                     |
+| `GET`    | `/api/profiles/:id`                   | Profile 詳細（Server 含む）        |
 | `PUT`    | `/api/profiles/:id`                   | Profile を更新                     |
 | `DELETE` | `/api/profiles/:id`                   | Profile を削除                     |
 | `PUT`    | `/api/profiles/:id/activate`          | アクティブ Profile に設定          |
+| `POST`   | `/api/profiles/:id/clone`             | Profile を複製                     |
+| `GET`    | `/api/profiles/:id/servers/:serverId` | Server 切り替え + 無効ツールを取得 |
 | `PUT`    | `/api/profiles/:id/servers/:serverId` | Server 切り替え + 無効ツールを更新 |
+| `PUT`    | `/api/profiles/:id/servers-state`     | Server 切り替えを一括更新          |
+| `GET`    | `/api/profiles/:id/tools`             | Profile が公開するツールを取得     |
 
 ### 監査ログ
 
-| メソッド | パス              | 説明                         |
-| -------- | ----------------- | ---------------------------- |
-| `GET`    | `/api/logs`       | ログをクエリ（フィルタ対応） |
-| `GET`    | `/api/logs/stats` | 集計統計                     |
+| メソッド | パス                 | 説明                                 |
+| -------- | -------------------- | ------------------------------------ |
+| `GET`    | `/api/logs`          | ログをクエリ（フィルタ対応）         |
+| `GET`    | `/api/logs/stats`    | 集計統計                             |
+| `GET`    | `/api/logs/insights` | ツール呼び出しのガバナンスインサイト |
 
 ### 設定管理
 

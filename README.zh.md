@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/Node.js-22+-339933?logo=nodedotjs" alt="Node.js 22+">
   <img src="https://img.shields.io/badge/platform-macOS-black?logo=apple" alt="macOS">
   <img src="https://img.shields.io/badge/platform-Windows-0078D4?logo=windows" alt="Windows">
-  <img src="https://img.shields.io/badge/pnpm-10+-F69220?logo=pnpm" alt="pnpm">
+  <img src="https://img.shields.io/badge/pnpm-11+-F69220?logo=pnpm" alt="pnpm">
 </p>
 
 <p align="center">
@@ -90,10 +90,10 @@ pnpm install
 
 ### 扫描现有配置
 
-Moor 可以自动检测你已为 Claude Code、Codex、OpenCode、Cursor、Kimi Code 和 dsh 配置的 MCP Server：
+Moor 可以自动检测你已为 Claude Code、Claude Desktop、Codex、OpenCode、Cursor、Kimi Code、dsh、Grok Build 和 Pi 配置的 MCP Server：
 
 1. 进入 **Servers** → **Import**
-2. 点击 **Scan** — Moor 会读取 `~/.claude/settings.json`、`~/.codex/config.toml`、`~/.config/opencode/opencode.json` / `.jsonc`、`~/.cursor/mcp.json`、`~/.kimi-code/mcp.json` 以及 `~/.dsh/cordis.patch.yml`
+2. 点击 **Scan** — Moor 会读取 `~/.claude.json`、`~/.codex/config.toml`、`~/.config/opencode/opencode.json` / `.jsonc`、`~/.cursor/mcp.json`、`~/.kimi-code/mcp.json`、`~/.dsh/cordis.patch.yml`、`~/Library/Application Support/Claude/claude_desktop_config.json`、`~/.grok/config.toml` 以及 `~/.pi/agent/mcp.json`（Pi 需先安装社区 adapter：`pi install npm:pi-mcp-adapter`）
 3. 选择要导入的 Server
 
 你也可以通过 **Import JSON** 粘贴 JSON MCP 配置。Moor 支持导入 stdio 和 HTTP/SSE Server，对于不支持的条目（例如 OpenAPI 配置）会报告但不会保存。
@@ -158,18 +158,21 @@ Moor 会处理剩下的一切——聚合 `tools/list`、路由 `tools/call`、�
 
 一键导入来自以下客户端的配置：
 
-- **Claude Code**: `~/.claude/settings.json`
+- **Claude Code**: `~/.claude.json`
 - **Codex**: `~/.codex/config.toml`
 - **OpenCode**: `~/.config/opencode/opencode.json` / `.jsonc`
 - **Cursor**: `~/.cursor/mcp.json`
 - **Kimi Code**: `~/.kimi-code/mcp.json`
 - **dsh**: `~/.dsh/cordis.patch.yml`
+- **Claude Desktop**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Grok Build**: `~/.grok/config.toml`
+- **Pi**: `~/.pi/agent/mcp.json`（需先 `pi install npm:pi-mcp-adapter`）
 
 也支持手动输入和粘贴 JSON 批量导入 stdio 与 HTTP/SSE Server。
 
 ### 客户端配置
 
-为 Claude Code、Codex、OpenCode、Cursor、Kimi Code 和 dsh 生成即拷即用的配置片段。片段仅包含 `/mcp` 端点；Moor 的 `X-Moor-Token` 保留给内部管理 API 使用。
+为 Claude Code、Claude Desktop、Codex、OpenCode、Cursor、Kimi Code、dsh、Grok Build 和 Pi 生成即拷即用的配置片段。片段仅包含 `/mcp` 端点；Moor 的 `X-Moor-Token` 保留给内部管理 API 使用。
 
 ### 审计日志
 
@@ -220,12 +223,12 @@ Moor.app
 AI Agent ──HTTP──▶ POST /mcp ──▶ Moor Gateway ──stdio/HTTP──▶ MCP Servers
                               │
 WebView ──IPC──▶ get_sidecar_info ─┐
-WebView ──fetch──▶ /api/runtime ───┤ (纯浏览器开发模式回退)
+WebView ──env──▶ VITE_MOOR_API_URL/TOKEN ─┤ (纯浏览器开发模式回退)
 WebView ──fetch──▶ /api/* ─────────┘
 WebView ◀──SSE──── /api/events
 ```
 
-- **运行时发现**: WebView → Tauri IPC (`get_sidecar_info`) → Rust（端口、token）；纯浏览器开发模式下回退到 HTTP `GET /api/runtime`
+- **运行时发现**: WebView → Tauri IPC (`get_sidecar_info`) → Rust（端口、token）；纯浏览器开发模式（`pnpm dev`）下回退到 `VITE_MOOR_API_URL` / `VITE_MOOR_API_TOKEN` 环境变量（见 `src/lib/api/runtime.ts`；`GET /api/runtime` 端点仍存在但需要 token）
 - **业务操作**: WebView → HTTP `fetch()` → 进程内 Axum 服务器（Rust）
 - **系统操作**: WebView → Tauri IPC → Rust（托盘、窗口、自启动）
 
@@ -311,21 +314,27 @@ vp test
 
 ### Profile 管理
 
-| 方法     | 路径                                  | 说明                        |
-| -------- | ------------------------------------- | --------------------------- |
-| `GET`    | `/api/profiles`                       | 列出所有 Profile            |
-| `POST`   | `/api/profiles`                       | 创建 Profile                |
-| `PUT`    | `/api/profiles/:id`                   | 更新 Profile                |
-| `DELETE` | `/api/profiles/:id`                   | 删除 Profile                |
-| `PUT`    | `/api/profiles/:id/activate`          | 激活 Profile                |
-| `PUT`    | `/api/profiles/:id/servers/:serverId` | 更新 Server 开关 + 禁用工具 |
+| 方法     | 路径                                  | 说明                            |
+| -------- | ------------------------------------- | ------------------------------- |
+| `GET`    | `/api/profiles`                       | 列出所有 Profile                |
+| `POST`   | `/api/profiles`                       | 创建 Profile                    |
+| `GET`    | `/api/profiles/:id`                   | 获取 Profile 详情（含 Servers） |
+| `PUT`    | `/api/profiles/:id`                   | 更新 Profile                    |
+| `DELETE` | `/api/profiles/:id`                   | 删除 Profile                    |
+| `PUT`    | `/api/profiles/:id/activate`          | 激活 Profile                    |
+| `POST`   | `/api/profiles/:id/clone`             | 克隆 Profile                    |
+| `GET`    | `/api/profiles/:id/servers/:serverId` | 获取 Server 开关 + 禁用工具     |
+| `PUT`    | `/api/profiles/:id/servers/:serverId` | 更新 Server 开关 + 禁用工具     |
+| `PUT`    | `/api/profiles/:id/servers-state`     | 批量更新 Server 开关状态        |
+| `GET`    | `/api/profiles/:id/tools`             | 获取 Profile 暴露的工具         |
 
 ### 审计日志
 
-| 方法  | 路径              | 说明                 |
-| ----- | ----------------- | -------------------- |
-| `GET` | `/api/logs`       | 查询日志（支持筛选） |
-| `GET` | `/api/logs/stats` | 聚合统计             |
+| 方法  | 路径                 | 说明                 |
+| ----- | -------------------- | -------------------- |
+| `GET` | `/api/logs`          | 查询日志（支持筛选） |
+| `GET` | `/api/logs/stats`    | 聚合统计             |
+| `GET` | `/api/logs/insights` | 工具调用治理洞察     |
 
 ### Settings 管理
 

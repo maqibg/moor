@@ -2,7 +2,7 @@
 
 > Source: https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/mcp/mcp-client/README.md
 > Additional sources: https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/mcp/README.md, https://github.com/deepseek-ai/deepseek-harness/blob/master/examples/mcp-memory/mcp-reference-memory.cordis.yml, https://github.com/deepseek-ai/deepseek-harness/blob/master/README.md, https://www.deepseek.com/harness/
-> Accessed: 2026-08-17
+> Accessed: 2026-08-29
 >
 > Note: This document is an edited, user-oriented excerpt of the sources above (the primary source is a package-level, developer-facing README), not a verbatim mirror. Copyright belongs to the original site; content may be outdated, please refer to the official links. Follow the original site's license when citing or redistributing.
 

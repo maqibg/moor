@@ -1,6 +1,6 @@
 # Moor
 
-Local MCP Gateway Manager: aggregates multiple MCP servers behind one HTTP endpoint, filters tools by Profile, and audits every call. The business layer is a single Rust in-process gateway (`src-tauri/src/sidecar/`); the legacy Node sidecar is being removed (ADR-0001).
+Local MCP Gateway Manager: aggregates multiple MCP servers behind one HTTP endpoint, filters tools by Profile, and audits every call. The business layer is a single Rust in-process gateway (`src-tauri/src/sidecar/`); the legacy Node sidecar was removed (ADR-0001).
 
 ## Language
 
@@ -51,7 +51,7 @@ The per-client body of Config Import knowledge — registry entry (id, paths, fo
 _Avoid_: client list, client config map (the scattered copies).
 
 **Scan**:
-Detecting servers from a known client's config file (Claude Code, Codex, OpenCode, Cursor).
+Detecting servers from a known client's config file (registry-driven — see `clients.rs` `ALL_CLIENTS`; currently 9 clients).
 _Avoid_: discover (reserve for ToolDiscovery).
 
 **Audit Log**:
@@ -63,7 +63,7 @@ _Avoid_: history, trace.
 Names for deepened modules from the 2026-05-29 architecture review, updated for the single-Rust decision (ADR-0001).
 
 **Server Runtime**:
-The one deep module owning a Server's full lifecycle — registry, status state machine, sessions, and tool catalog. Canonical implementation: Rust `server_manager.rs` (the aggregate root) with in-domain files `server_manager/{status,session,errors}.rs`; the 14-method public interface is unchanged. The Node `server-manager` / `server-service` / `server-lifecycle` / `session-manager` split is being removed, not collapsed.
+The one deep module owning a Server's full lifecycle — registry, status state machine, sessions, and tool catalog. Canonical implementation: Rust `server_manager.rs` (the aggregate root) with in-domain files `server_manager/{status,session,errors}.rs`; the 14-method public interface is unchanged. The Node `server-manager` / `server-service` / `server-lifecycle` / `session-manager` split was removed, not collapsed.
 _Avoid_: ServerManager, ServerService (the split).
 
 **Config Import**:

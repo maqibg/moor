@@ -1,7 +1,7 @@
 # Codex MCP Configuration Guide
 
-> Source: https://developers.openai.com/codex/mcp
-> Accessed: 2026-04-30
+> Source: https://learn.chatgpt.com/docs/extend/mcp?surface=cli (formerly https://developers.openai.com/codex/mcp, now a permanent redirect)
+> Accessed: 2026-08-29
 >
 > Note: This document is an external documentation mirror/reference. Copyright belongs to the original site; content may be outdated, please refer to the official link. Follow the original site's license when citing or redistributing.
 
@@ -16,6 +16,7 @@ Codex supports MCP Servers in both CLI and IDE extensions.
 - **Streamable HTTP Server**: Accessed via URL
   - Bearer Token authentication
   - OAuth authentication (run `codex mcp login <server-name>`)
+  - `auth = "chatgpt"` reuses the current ChatGPT session token for trusted first-party origins
 
 ## Configuration File Location
 
@@ -81,23 +82,44 @@ String entries and `source = "local"` read from Codex's local environment. `sour
 
 ### Streamable HTTP Server Configuration
 
-| Field                  | Required | Description                                                                          |
-| ---------------------- | -------- | ------------------------------------------------------------------------------------ |
-| `url`                  | Yes      | Server URL                                                                           |
-| `bearer_token_env_var` | No       | Name of environment variable containing Bearer Token, sent in `Authorization` header |
-| `http_headers`         | No       | Mapping of header names to static values                                             |
-| `env_http_headers`     | No       | Mapping of header names to environment variable names (values read from env)         |
+| Field                  | Required | Description                                                                                |
+| ---------------------- | -------- | ------------------------------------------------------------------------------------------ |
+| `url`                  | Yes      | Server URL                                                                                 |
+| `auth`                 | No       | `oauth` (default) or `chatgpt` — reuse the current session for trusted first-party origins |
+| `bearer_token_env_var` | No       | Name of environment variable containing Bearer Token, sent in `Authorization` header       |
+| `http_headers`         | No       | Mapping of header names to static values                                                   |
+| `env_http_headers`     | No       | Mapping of header names to environment variable names (values read from env)               |
 
 ### General Configuration Options
 
-| Field                 | Default | Description                                                      |
-| --------------------- | ------- | ---------------------------------------------------------------- |
-| `startup_timeout_sec` | `10`    | Server startup timeout (seconds)                                 |
-| `tool_timeout_sec`    | `60`    | Tool execution timeout (seconds)                                 |
-| `enabled`             | —       | Set to `false` to disable Server without deleting                |
-| `required`            | —       | Set to `true` to fail startup if this Server fails to initialize |
-| `enabled_tools`       | —       | Tool whitelist                                                   |
-| `disabled_tools`      | —       | Tool blacklist (applied after `enabled_tools`)                   |
+| Field                         | Default | Description                                                                 |
+| ----------------------------- | ------- | --------------------------------------------------------------------------- |
+| `startup_timeout_sec`         | `10`    | Server startup timeout (seconds)                                            |
+| `tool_timeout_sec`            | `60`    | Tool execution timeout (seconds)                                            |
+| `enabled`                     | —       | Set to `false` to disable Server without deleting                           |
+| `required`                    | —       | Set to `true` to fail startup if this Server fails to initialize            |
+| `enabled_tools`               | —       | Tool whitelist                                                              |
+| `disabled_tools`              | —       | Tool blacklist (applied after `enabled_tools`)                              |
+| `default_tools_approval_mode` | —       | Per-server default for tool approval: `auto`, `prompt`, `writes`, `approve` |
+| `tools.<tool>.approval_mode`  | —       | Per-tool override of the approval mode                                      |
+
+### Tool Approval Modes
+
+`default_tools_approval_mode` values:
+
+- `auto` — approve automatically
+- `prompt` — ask before every call
+- `writes` — prompt only for tools not marked read-only
+- `approve` — treat all calls as pre-approved
+
+```toml
+[mcp_servers.chrome_devtools]
+url = "http://localhost:3000/mcp"
+default_tools_approval_mode = "prompt"
+
+[mcp_servers.chrome_devtools.tools.open]
+approval_mode = "approve"
+```
 
 ### OAuth Callback Configuration
 
@@ -113,6 +135,24 @@ mcp_oauth_callback_url = "https://devbox.example.internal/callback"
 - Local callback URLs (e.g., `localhost`) bind to the local interface; non-local URLs bind to `0.0.0.0` so the callback is reachable
 
 If the MCP Server declares `scopes_supported`, Codex prioritizes those scopes during OAuth login; otherwise it falls back to scopes configured in `config.toml`.
+
+For providers without Dynamic Client Registration, pre-register a client per server:
+
+```toml
+[mcp_servers.example.oauth]
+client_id = "my-client"
+callback_url = "http://127.0.0.1/callback"
+```
+
+Equivalent CLI: `codex mcp add example --url https://mcp.example.com --oauth-client-id my-client`, or `codex mcp login <server-name> --oauth-client-registration cimd|dcr` to pick the registration flow.
+
+### Plugin-Bundled Servers
+
+Plugins may bundle MCP servers; user config cannot set their transport, but controls state and policy via `[plugins."<plugin>@<scope>".mcp_servers.<name>]` with `enabled`, `enabled_tools`, `default_tools_approval_mode`, and per-tool `approval_mode`. Plugin `.mcp.json` OAuth uses camelCase (`clientId`, `callbackUrl`, `callbackPort`).
+
+### Server Instructions
+
+Codex reads the MCP `instructions` field from the initialization response as server-wide guidance; keep the first 512 characters self-contained.
 
 ## Complete config.toml Examples
 

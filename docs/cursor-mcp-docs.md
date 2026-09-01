@@ -1,7 +1,7 @@
 # Cursor MCP Documentation
 
 > Source: https://cursor.com/docs/mcp
-> Accessed: 2026-05-02
+> Accessed: 2026-08-29
 >
 > Note: This document is an external documentation mirror/reference. Copyright belongs to the original site; content may be outdated, please refer to the official link. Follow the original site's license when citing or redistributing.
 
@@ -117,7 +117,7 @@ Add an `auth` object to remote server entries that use `url`:
       "auth": {
         "CLIENT_ID": "${env:FIGMA_CLIENT_ID}",
         "CLIENT_SECRET": "${env:FIGMA_CLIENT_SECRET}",
-        "scopes": "file_read"
+        "scopes": ["file_read"]
       }
     }
   }
@@ -130,15 +130,12 @@ Add an `auth` object to remote server entries that use `url`:
 | **CLIENT_SECRET** | No       | OAuth 2.0 Client Secret (if the provider uses confidential clients)                                                           |
 | **scopes**        | No       | OAuth scopes to request. If omitted, Cursor will use `/.well-known/oauth-authorization-server` to discover `scopes_supported` |
 
-#### Static redirect URL
+#### Static redirect URLs
 
-Cursor uses a **fixed OAuth redirect URL** for all MCP servers:
+Cursor uses fixed OAuth redirect URLs, identified via the OAuth `state` parameter. When configuring the MCP provider's OAuth app, register the applicable URL as an allowed redirect URI:
 
-```
-https://cursor.com/mcp/auth/callback
-```
-
-When configuring the MCP provider's OAuth app, register this URL as an allowed redirect URI. The server is identified via the OAuth `state` parameter, so one redirect URL works for all MCP servers.
+- Web/agents: `https://www.cursor.com/agents/mcp/oauth/callback`
+- Desktop: `http://localhost:8787/callback`
 
 #### Combining with config interpolation
 
@@ -164,13 +161,13 @@ Use environment variables for Client ID and Client Secret instead of hardcoding 
 
 For STDIO servers (local command-line servers), configure these fields in your `mcp.json`:
 
-| Field       | Required | Description                                                                                             | Examples                                  |
-| ----------- | -------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| **type**    | Yes      | Server connection type                                                                                  | `"stdio"`                                 |
-| **command** | Yes      | Command to start the server executable. Must be available on your system path or contain its full path. | `"npx"`, `"node"`, `"python"`, `"docker"` |
-| **args**    | No       | Array of arguments passed to the command                                                                | `["server.py", "--port", "3000"]`         |
-| **env**     | No       | Environment variables for the server                                                                    | `{"API_KEY": "${env:api-key}"}`           |
-| **envFile** | No       | Path to an environment file to load more variables                                                      | `".env"`, `"${workspaceFolder}/.env"`     |
+| Field       | Required | Description                                                                                                     | Examples                                  |
+| ----------- | -------- | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| **type**    | Yes      | Server connection type                                                                                          | `"stdio"`                                 |
+| **command** | Yes      | Command to start the server executable. Must be available on your system path or contain its full path.         | `"npx"`, `"node"`, `"python"`, `"docker"` |
+| **args**    | No       | Array of arguments passed to the command                                                                        | `["server.py", "--port", "3000"]`         |
+| **env**     | No       | Environment variables for the server                                                                            | `{"API_KEY": "${env:api-key}"}`           |
+| **envFile** | No       | Path to an environment file to load more variables. STDIO servers only — remote servers must use interpolation. | `".env"`, `"${workspaceFolder}/.env"`     |
 
 ### Using the Extension API
 

@@ -30,11 +30,11 @@ pub const ALL_CLIENTS: &[ClientMeta] = &[
     ClientMeta {
         id: "claude-code",
         name: "Claude Code",
-        config_path_segments: &[&[".claude", "settings.json"]],
+        config_path_segments: &[&[".claude.json"]],
         format: "json",
         top_level_key: "mcpServers",
         gateway_entry_name: "moor",
-        description: "Add to ~/.claude/settings.json → mcpServers",
+        description: "Add to ~/.claude.json → mcpServers",
     },
     ClientMeta {
         id: "codex",
@@ -86,8 +86,56 @@ pub const ALL_CLIENTS: &[ClientMeta] = &[
         gateway_entry_name: "moor-mcp",
         description: "Append to ~/.dsh/cordis.patch.yml (dsh-mcp-client plugin rows)",
     },
+    ClientMeta {
+        id: "grok-build",
+        name: "Grok Build",
+        config_path_segments: &[&[".grok", "config.toml"]],
+        format: "toml",
+        top_level_key: "mcp_servers",
+        gateway_entry_name: "moor",
+        description: "Add to ~/.grok/config.toml or project .grok/config.toml (or: grok mcp add --transport http moor <url>)",
+    },
+    // Pi's MCP support comes from the community pi-mcp-adapter package — the
+    // adapter must be installed first (pi install npm:pi-mcp-adapter).
+    ClientMeta {
+        id: "pi",
+        name: "Pi",
+        config_path_segments: &[&[".pi", "agent", "mcp.json"]],
+        format: "json",
+        top_level_key: "mcpServers",
+        gateway_entry_name: "moor",
+        description: "Add to ~/.pi/agent/mcp.json (requires: pi install npm:pi-mcp-adapter)",
+    },
+    // claude_desktop_config.json accepts stdio servers only — the formatter
+    // bridges HTTP through `npx mcp-remote`. Windows uses %APPDATA%\Claude,
+    // which the home-relative segments model only on macOS.
+    ClientMeta {
+        id: "claude-desktop",
+        name: "Claude Desktop",
+        config_path_segments: &[&["Library", "Application Support", "Claude", "claude_desktop_config.json"]],
+        format: "json",
+        top_level_key: "mcpServers",
+        gateway_entry_name: "moor",
+        description: "Add to ~/Library/Application Support/Claude/claude_desktop_config.json (stdio via mcp-remote)",
+    },
 ];
 
 pub fn get_client_by_id(id: &str) -> Option<&'static ClientMeta> {
     ALL_CLIENTS.iter().find(|c| c.id == id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 新增 client 必须附带 docs/{id}-mcp-docs.md（ClientConfig 四步 checklist 第 1 步）。
+    #[test]
+    fn every_client_has_a_docs_file() {
+        for c in ALL_CLIENTS {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../docs")
+                .join(format!("{}-mcp-docs.md", c.id));
+            assert!(path.is_file(), "missing {}", path.display());
+        }
+    }
 }
