@@ -7,7 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useInfiniteLogs, useLogStats } from "@/hooks/useLogs";
 import { StatCard } from "@/components/shared/StatCard";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { ToolInsightsPanel } from "@/components/logs/ToolInsightsPanel";
+import { ToolInsightsPanel } from "@/components/insights/ToolInsightsPanel";
 import { PageHeader } from "@/components/shared/PageHeader";
 import {
   Search,
