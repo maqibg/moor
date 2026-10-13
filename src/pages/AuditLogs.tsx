@@ -7,6 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useInfiniteLogs, useLogStats } from "@/hooks/useLogs";
 import { StatCard } from "@/components/shared/StatCard";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { ToolInsightsPanel } from "@/components/logs/ToolInsightsPanel";
 import { PageHeader } from "@/components/shared/PageHeader";
 import {
   Search,
@@ -201,6 +202,9 @@ export function AuditLogs() {
           </CardContent>
         </Card>
       )}
+
+      {/* Windowed tool-call insights */}
+      <ToolInsightsPanel />
 
       {/* Logs Table */}
       <div className="animate-fade-in-up stagger-6">

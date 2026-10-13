@@ -11,12 +11,16 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { KeyValueTable } from "@/components/shared/KeyValueTable";
 import { KeyValueEditor } from "@/components/shared/KeyValueEditor";
 import { CopyButton } from "@/components/shared/CopyButton";
+import { OpenLogButton } from "@/components/servers/OpenLogButton";
+import { HealthBadge, ServerHealthPanel } from "@/components/servers/ServerHealth";
 import { UnsavedChangesDialog } from "@/components/shared/UnsavedChangesDialog";
 import { ToolCategoryBadge } from "@/components/shared/ToolCategoryBadge";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Play, Square, RefreshCw, Terminal, Pencil, X, Check } from "lucide-react";
 import { useProfiles } from "@/hooks/useProfiles";
 import { useServerActions, useServer, useServerTools } from "@/hooks/useServers";
+import { useServerHealth } from "@/hooks/useServerHealth";
+import { findServerHealth } from "@/lib/server-health";
 import { useEditSession } from "@/hooks/useEditSession";
 import { findDuplicateHeaderKeys, type EditForm } from "@/lib/server-form";
 import { cn } from "@/lib/utils";
@@ -126,6 +130,7 @@ export function ServerDetail() {
 
   const { server, isLoading: loading } = useServer(id);
   const { tools, refresh: refreshTools } = useServerTools(id, activeProfile?.id);
+  const { snapshots: healthSnapshots } = useServerHealth();
 
   const {
     isEditing,
@@ -237,6 +242,9 @@ export function ServerDetail() {
                   {server.name}
                 </h1>
                 <StatusBadge status={server.status} />
+                {server.status === "running" && (
+                  <HealthBadge snapshot={findServerHealth(healthSnapshots, server.id)} />
+                )}
               </div>
               <p className="font-mono text-[11px] text-[var(--fg-40)] mt-0.5 truncate">
                 {commandText || t("No command configured")}
@@ -272,6 +280,9 @@ export function ServerDetail() {
           )}
         </div>
       </div>
+
+      {/* Health */}
+      <ServerHealthPanel serverId={server.id} running={server.status === "running"} />
 
       {/* Configuration */}
       <Card>
@@ -361,9 +372,10 @@ export function ServerDetail() {
 
           {server.errorMessage && (
             <div className="rounded-xl bg-error-warm/8 border border-error-warm/20 p-4">
-              <label className="font-headline text-xs text-error-warm mb-1.5 block">
-                {t("Error")}
-              </label>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="font-headline text-xs text-error-warm block">{t("Error")}</label>
+                <OpenLogButton serverId={server.id} />
+              </div>
               <p className="font-mono text-xs text-error-warm">{server.errorMessage}</p>
             </div>
           )}

@@ -90,11 +90,45 @@ async fn execute(
 }
 
 async fn snippets_handler(State(state): State<Arc<AppState>>) -> Result<Json<Value>, AppError> {
-    let base_url = format!("http://127.0.0.1:{}/mcp", state.port);
-    let result = snippets::generate_snippets(&base_url);
+    let allow_lan = crate::sidecar::services::settings::get_settings(&state.db)
+        .map(|settings| settings.advanced.allow_lan_mcp_access)
+        .unwrap_or(false);
+    let base_url = mcp_base_url(state.port, allow_lan);
+    let result = snippets::generate_snippets(&base_url).map_err(AppError::internal)?;
     Ok(Json(
         serde_json::to_value(result).map_err(|e| AppError::internal(e.to_string()))?,
     ))
+}
+
+/// Snippets are copied into client configs verbatim, so when LAN access is on the
+/// reachable address matters: advertising loopback for a WSL2/LAN client produces
+/// a config that cannot connect.
+fn mcp_base_url(port: u16, allow_lan: bool) -> String {
+    let host = if allow_lan {
+        primary_private_ipv4()
+            .map(|ip| ip.to_string())
+            .unwrap_or_else(|| "127.0.0.1".to_string())
+    } else {
+        "127.0.0.1".to_string()
+    };
+    format!("http://{host}:{port}/mcp")
+}
+
+/// Best-effort primary private IPv4. A UDP `connect` only selects a route (no
+/// packet is sent) and the result is restricted to RFC1918 addresses, so a
+/// public address can never be advertised.
+fn primary_private_ipv4() -> Option<std::net::Ipv4Addr> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("192.168.0.1:9").ok()?;
+    private_ipv4_or_none(socket.local_addr().ok()?)
+}
+
+/// 只接受 RFC1918 的 IPv4：公网、环回、链路本地与全部 IPv6 一律拒绝。
+fn private_ipv4_or_none(addr: std::net::SocketAddr) -> Option<std::net::Ipv4Addr> {
+    match addr {
+        std::net::SocketAddr::V4(v4) if v4.ip().is_private() => Some(*v4.ip()),
+        _ => None,
+    }
 }
 
 #[derive(Deserialize)]
@@ -235,6 +269,54 @@ mod tests {
             "snippets should contain the runtime port {expected_host}"
         );
         let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn only_rfc1918_ipv4_addresses_can_be_advertised() {
+        use std::net::{Ipv4Addr, SocketAddr};
+        for (addr, expected) in [
+            ("192.168.1.10:9", Some(Ipv4Addr::new(192, 168, 1, 10))),
+            ("10.0.0.5:9", Some(Ipv4Addr::new(10, 0, 0, 5))),
+            ("172.26.32.1:9", Some(Ipv4Addr::new(172, 26, 32, 1))),
+            // 172.32 起不再是 RFC1918
+            ("172.32.0.1:9", None),
+            // 公网、环回、链路本地都不得广告
+            ("8.8.8.8:9", None),
+            ("127.0.0.1:9", None),
+            ("169.254.1.1:9", None),
+        ] {
+            let parsed: SocketAddr = addr.parse().expect("address should parse");
+            assert_eq!(
+                private_ipv4_or_none(parsed),
+                expected,
+                "unexpected decision for {addr}"
+            );
+        }
+        // IPv6（含唯一本地地址）一律不接受
+        assert_eq!(
+            private_ipv4_or_none("[fd00::1]:9".parse().expect("address should parse")),
+            None
+        );
+    }
+
+    #[test]
+    fn mcp_base_url_uses_loopback_unless_lan_access_is_enabled() {
+        assert_eq!(mcp_base_url(9223, false), "http://127.0.0.1:9223/mcp");
+
+        // With LAN access on the host is either a detected private address or the
+        // loopback fallback (no route); a public address must never appear.
+        let url = mcp_base_url(9223, true);
+        assert!(url.starts_with("http://") && url.ends_with(":9223/mcp"), "{url}");
+        let host = url
+            .trim_start_matches("http://")
+            .trim_end_matches(":9223/mcp");
+        match host.parse::<std::net::Ipv4Addr>() {
+            Ok(ip) => assert!(
+                ip.is_private() || ip.is_loopback(),
+                "snippet host must stay private, got {ip}"
+            ),
+            Err(_) => assert_eq!(host, "127.0.0.1"),
+        }
     }
 
     #[test]

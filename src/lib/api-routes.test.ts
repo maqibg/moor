@@ -25,4 +25,9 @@ describe("api routes", () => {
       "/api/logs?server_id=server%2F1&tool_name=read%26write&from=2026-01-01T00%3A00%3A00Z&limit=50&offset=100",
     );
   });
+
+  it("addresses the server health endpoints", () => {
+    expect(routes.servers.health()).toBe("/api/servers/health");
+    expect(routes.servers.checkHealth("server/1")).toBe("/api/servers/server%2F1/check-health");
+  });
 });

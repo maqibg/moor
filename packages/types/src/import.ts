@@ -1,4 +1,5 @@
 export interface ClientSnippet {
+  clientId: string;
   client: string;
   description: string;
   snippet: string;

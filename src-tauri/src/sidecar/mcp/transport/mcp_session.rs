@@ -32,7 +32,6 @@ impl SessionEntry {
 
 pub struct McpSessionStore {
     sessions: Mutex<HashMap<String, SessionEntry>>,
-    global_sender: broadcast::Sender<Value>,
     ttl: Duration,
     max_sessions: usize,
 }
@@ -43,10 +42,8 @@ impl McpSessionStore {
     }
 
     fn with_limits(ttl: Duration, max_sessions: usize) -> Self {
-        let (global_sender, _) = broadcast::channel(SESSION_EVENT_CAPACITY);
         Self {
             sessions: Mutex::new(HashMap::new()),
-            global_sender,
             ttl,
             max_sessions: max_sessions.max(1),
         }
@@ -98,10 +95,6 @@ impl McpSessionStore {
         Some(entry.sender.subscribe())
     }
 
-    pub fn subscribe_global(&self) -> broadcast::Receiver<Value> {
-        self.global_sender.subscribe()
-    }
-
     pub async fn remove(&self, session_id: &str) -> bool {
         self.sessions.lock().await.remove(session_id).is_some()
     }
@@ -111,7 +104,6 @@ impl McpSessionStore {
             "jsonrpc": "2.0",
             "method": "notifications/tools/list_changed"
         });
-        let _ = self.global_sender.send(notification.clone());
 
         let now = Instant::now();
         let mut sessions = self.sessions.lock().await;
@@ -200,7 +192,11 @@ mod tests {
     async fn forwards_profile_changes_as_mcp_notifications() {
         let event_bus = Arc::new(EventBus::new(8));
         let store = Arc::new(McpSessionStore::new());
-        let mut receiver = store.subscribe_global();
+        let session_id = store.create("2025-11-25").await;
+        let mut receiver = store
+            .subscribe(&session_id)
+            .await
+            .expect("session should be subscribable");
         let task = tokio::spawn(forward_tool_list_changes(
             event_bus.subscribe(),
             store.clone(),

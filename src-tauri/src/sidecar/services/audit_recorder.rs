@@ -240,7 +240,8 @@ mod tests {
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].profile_id, None);
         assert_eq!(logs[0].server_id, None);
-        assert_eq!(logs[0].timestamp, "2026-03-01T00:00:00Z");
+        // Stored timestamps are normalized to UTC RFC3339 with nanosecond precision.
+        assert_eq!(logs[0].timestamp, "2026-03-01T00:00:00.000000000Z");
         assert_eq!(logs[0].arguments.as_ref().unwrap()["token"], "[REDACTED]");
         assert_eq!(logs[0].arguments.as_ref().unwrap()["query"], "moor");
 

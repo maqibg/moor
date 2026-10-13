@@ -1,6 +1,34 @@
 use super::Database;
 use serde::{Deserialize, Serialize};
 
+/// Audit timestamps are stored as UTC RFC3339 with fixed nanosecond precision so
+/// lexicographic SQL comparisons are also chronological.
+pub(crate) fn normalize_timestamp(timestamp: &str) -> Result<String, String> {
+    chrono::DateTime::parse_from_rfc3339(timestamp)
+        .map(|value| {
+            value
+                .with_timezone(&chrono::Utc)
+                .to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+        })
+        .map_err(|_| "Timestamp must be a valid RFC3339 value".to_string())
+}
+
+/// Normalizes both window bounds and rejects inverted ranges; callers apply the
+/// window as a half-open `[from, to)` interval.
+pub(crate) fn normalize_time_window(
+    from: Option<&str>,
+    to: Option<&str>,
+) -> Result<(Option<String>, Option<String>), String> {
+    let from = from.map(normalize_timestamp).transpose()?;
+    let to = to.map(normalize_timestamp).transpose()?;
+    if let (Some(from), Some(to)) = (&from, &to) {
+        if from > to {
+            return Err("Time window start must not be after its end".to_string());
+        }
+    }
+    Ok((from, to))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditLogEntry {
@@ -40,6 +68,56 @@ pub struct TopTool {
 pub struct TopServer {
     pub server_id: String,
     pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolInsight {
+    pub tool_name: String,
+    pub server_id: Option<String>,
+    pub server_name: Option<String>,
+    pub call_count: i64,
+    pub error_count: i64,
+    pub error_rate: f64,
+    pub avg_duration_ms: Option<f64>,
+    pub p50_ms: Option<f64>,
+    pub p95_ms: Option<f64>,
+    pub last_called_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerInsight {
+    pub server_id: String,
+    pub server_name: Option<String>,
+    pub call_count: i64,
+    pub error_count: i64,
+    pub error_rate: f64,
+    pub avg_duration_ms: Option<f64>,
+    pub last_called_at: Option<String>,
+}
+
+/// Tool-call insights within a time window, aggregated by (server, tool) and by
+/// server. Coexists with the windowless `LogStats` used by the dashboard.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogInsights {
+    pub total_calls: i64,
+    pub error_calls: i64,
+    pub error_rate: f64,
+    pub avg_duration_ms: Option<f64>,
+    pub tools: Vec<ToolInsight>,
+    pub servers: Vec<ServerInsight>,
+}
+
+/// Nearest-rank percentile over already-sorted values: rank = ceil(q/100 * n).
+fn percentile_nearest_rank(values: &[f64], q: f64) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    let rank = ((q / 100.0) * values.len() as f64).ceil() as usize;
+    let index = rank.clamp(1, values.len()) - 1;
+    Some(values[index])
 }
 
 pub struct AuditLogInsert {
@@ -90,6 +168,7 @@ impl<'a> AuditLogRepository<'a> {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<AuditLogEntry>, String> {
+        let (from, to) = normalize_time_window(from, to)?;
         let mut sql = "SELECT * FROM audit_logs WHERE 1=1".to_string();
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -106,7 +185,7 @@ impl<'a> AuditLogRepository<'a> {
             params.push(Box::new(f.to_string()));
         }
         if let Some(t) = to {
-            sql += " AND timestamp <= ?";
+            sql += " AND timestamp < ?";
             params.push(Box::new(t.to_string()));
         }
 
@@ -136,6 +215,7 @@ impl<'a> AuditLogRepository<'a> {
         duration_ms: i64,
         agent_info: Option<&str>,
     ) -> Result<(), String> {
+        let timestamp = normalize_timestamp(timestamp)?;
         let args_json = arguments.map(|v| serde_json::to_string(v).unwrap_or_default());
         let result_json = result.map(|v| serde_json::to_string(v).unwrap_or_default());
         self.db.run(
@@ -157,6 +237,7 @@ impl<'a> AuditLogRepository<'a> {
                 )
                 .map_err(|error| error.to_string())?;
             for entry in entries {
+                let timestamp = normalize_timestamp(&entry.timestamp)?;
                 let arguments = entry
                     .arguments
                     .as_ref()
@@ -172,7 +253,7 @@ impl<'a> AuditLogRepository<'a> {
                 statement
                     .execute(rusqlite::params![
                         &entry.id,
-                        &entry.timestamp,
+                        &timestamp,
                         entry.profile_id.as_deref(),
                         entry.server_id.as_deref(),
                         &entry.tool_name,
@@ -189,9 +270,153 @@ impl<'a> AuditLogRepository<'a> {
     }
 
     pub fn delete_before(&self, cutoff: &str) -> Result<usize, String> {
+        let cutoff = normalize_timestamp(cutoff)?;
         self.db.transaction(|conn| {
-            conn.execute("DELETE FROM audit_logs WHERE timestamp < ?1", [cutoff])
+            conn.execute("DELETE FROM audit_logs WHERE timestamp < ?1", [&cutoff])
                 .map_err(|error| error.to_string())
+        })
+    }
+
+    /// Aggregates tool-call usage inside a half-open `[from, to)` window.
+    /// Durations are pulled per call and sorted in memory; the row count is
+    /// bounded by the audit retention setting.
+    pub fn get_insights(
+        &self,
+        from: Option<&str>,
+        to: Option<&str>,
+    ) -> Result<LogInsights, String> {
+        let (from, to) = normalize_time_window(from, to)?;
+        let mut conditions = String::new();
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        if let Some(f) = from {
+            conditions += " AND a.timestamp >= ?";
+            params.push(Box::new(f));
+        }
+        if let Some(t) = to {
+            conditions += " AND a.timestamp < ?";
+            params.push(Box::new(t));
+        }
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
+
+        let (total_calls, error_calls, avg_duration_ms) = self
+            .db
+            .query_one(
+                &format!(
+                    "SELECT COUNT(*), COALESCE(SUM(CASE WHEN a.error IS NOT NULL THEN 1 ELSE 0 END), 0), AVG(a.duration_ms)
+                     FROM audit_logs a WHERE 1=1{conditions}"
+                ),
+                &param_refs,
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, Option<f64>>(2)?,
+                    ))
+                },
+            )?
+            .unwrap_or((0, 0, None));
+        let error_rate = if total_calls > 0 {
+            error_calls as f64 / total_calls as f64
+        } else {
+            0.0
+        };
+
+        let mut durations: std::collections::HashMap<(Option<String>, String), Vec<f64>> =
+            std::collections::HashMap::new();
+        self.db.query_all(
+            &format!(
+                "SELECT a.server_id, a.tool_name, a.duration_ms FROM audit_logs a
+                 WHERE a.duration_ms IS NOT NULL{conditions}"
+            ),
+            &param_refs,
+            |row| {
+                let key = (row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?);
+                durations
+                    .entry(key)
+                    .or_default()
+                    .push(row.get::<_, f64>(2)?);
+                Ok(())
+            },
+        )?;
+
+        let mut tools = self.db.query_all(
+            &format!(
+                "SELECT a.tool_name, a.server_id, s.name AS server_name, COUNT(*) AS call_count,
+                        COALESCE(SUM(CASE WHEN a.error IS NOT NULL THEN 1 ELSE 0 END), 0) AS error_count,
+                        AVG(a.duration_ms) AS avg_duration_ms, MAX(a.timestamp) AS last_called_at
+                 FROM audit_logs a LEFT JOIN mcp_servers s ON s.id = a.server_id
+                 WHERE 1=1{conditions}
+                 GROUP BY a.server_id, a.tool_name
+                 ORDER BY call_count DESC"
+            ),
+            &param_refs,
+            |row| {
+                let call_count: i64 = row.get(3)?;
+                let error_count: i64 = row.get(4)?;
+                Ok(ToolInsight {
+                    tool_name: row.get(0)?,
+                    server_id: row.get(1)?,
+                    server_name: row.get(2)?,
+                    call_count,
+                    error_count,
+                    error_rate: if call_count > 0 {
+                        error_count as f64 / call_count as f64
+                    } else {
+                        0.0
+                    },
+                    avg_duration_ms: row.get(5)?,
+                    p50_ms: None,
+                    p95_ms: None,
+                    last_called_at: row.get(6)?,
+                })
+            },
+        )?;
+        for tool in &mut tools {
+            if let Some(values) = durations.get_mut(&(tool.server_id.clone(), tool.tool_name.clone())) {
+                values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                tool.p50_ms = percentile_nearest_rank(values, 50.0);
+                tool.p95_ms = percentile_nearest_rank(values, 95.0);
+            }
+        }
+
+        let servers = self.db.query_all(
+            &format!(
+                "SELECT a.server_id, s.name AS server_name, COUNT(*) AS call_count,
+                        COALESCE(SUM(CASE WHEN a.error IS NOT NULL THEN 1 ELSE 0 END), 0) AS error_count,
+                        AVG(a.duration_ms) AS avg_duration_ms, MAX(a.timestamp) AS last_called_at
+                 FROM audit_logs a LEFT JOIN mcp_servers s ON s.id = a.server_id
+                 WHERE a.server_id IS NOT NULL{conditions}
+                 GROUP BY a.server_id
+                 ORDER BY call_count DESC"
+            ),
+            &param_refs,
+            |row| {
+                let call_count: i64 = row.get(2)?;
+                let error_count: i64 = row.get(3)?;
+                Ok(ServerInsight {
+                    server_id: row.get(0)?,
+                    server_name: row.get(1)?,
+                    call_count,
+                    error_count,
+                    error_rate: if call_count > 0 {
+                        error_count as f64 / call_count as f64
+                    } else {
+                        0.0
+                    },
+                    avg_duration_ms: row.get(4)?,
+                    last_called_at: row.get(5)?,
+                })
+            },
+        )?;
+
+        Ok(LogInsights {
+            total_calls,
+            error_calls,
+            error_rate,
+            avg_duration_ms,
+            tools,
+            servers,
         })
     }
 

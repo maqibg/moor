@@ -1,5 +1,5 @@
 use super::clients::{self, ClientMeta};
-use super::import_parser::{self, ParsedImport};
+use super::import_parser::{self, ImportDiagnostic, ParsedImport};
 use std::fs;
 
 use super::import_parser::ScannedServer;
@@ -18,6 +18,22 @@ fn parse_config_file(config_path: &std::path::Path, source: &str, format: &str) 
     };
     let parsed = match format {
         "toml" => import_parser::parse_codex_toml_config(&content, source),
+        // dsh patches carry `!!js` dynamic expressions that cannot be statically
+        // evaluated; surface a diagnostic instead of returning silently empty.
+        "yaml" => {
+            return ParsedImport {
+                diagnostics: vec![ImportDiagnostic {
+                    source: source.to_string(),
+                    message: "YAML config uses dynamic `!!js` expressions and cannot be statically scanned.".to_string(),
+                    code: None,
+                    line: None,
+                    column: None,
+                    offset: None,
+                    length: None,
+                }],
+                ..ParsedImport::default()
+            };
+        }
         _ => import_parser::parse_json_mcp_config(&content, source),
     };
     ignore_missing_mcp_sections(parsed, source)
@@ -45,6 +61,12 @@ fn ignore_missing_mcp_sections(result: ParsedImport, source: &str) -> ParsedImpo
 
 fn scan_client(client: &ClientMeta) -> ParsedImport {
     let paths = clients::resolve_config_paths(client);
+    if client.id == "zcode" {
+        // zcode 需要「主配置 + 回退路径」两个段；路径表变更时退化为常规扫描。
+        if let [native, fallback, ..] = paths.as_slice() {
+            return scan_zcode_paths(native, fallback);
+        }
+    }
     let results: Vec<ParsedImport> = paths
         .iter()
         .map(|p| parse_config_file(p, client.id, client.format))
@@ -58,6 +80,22 @@ fn scan_client(client: &ClientMeta) -> ParsedImport {
     }
 
     merged
+}
+
+fn scan_zcode_paths(native: &std::path::Path, fallback: &std::path::Path) -> ParsedImport {
+    if let Some(content) = read_file_if_exists(native) {
+        // 原生配置存在条目时整份兼容文件被遮蔽，禁用条目也算存在。
+        let has_servers = serde_json::from_str::<serde_json::Value>(&content)
+            .map(|root| {
+                root.pointer("/mcp/servers")
+                    .is_some_and(|v| v.as_object().map_or(true, |m| !m.is_empty()))
+            })
+            .unwrap_or(true);
+        if has_servers {
+            return parse_config_file(native, "zcode", "json");
+        }
+    }
+    parse_config_file(fallback, "zcode", "json")
 }
 
 pub fn scan_all_configs() -> ParsedImport {
@@ -104,11 +142,17 @@ pub fn build_import_preview(
     let mut duplicates = vec![];
 
     for server in &parsed.servers {
+        let mut candidate = server.clone();
+        // 入库仍使用 HTTP；转换保留 SSE，网关传输层负责协议识别。
+        // 新建与重复项走同一归一，避免同一响应里出现两种连接类型。
+        if candidate.connection_type == "sse" {
+            candidate.connection_type = "http".to_string();
+        }
         if seen.contains(&server.name) {
-            duplicates.push(server.clone());
+            duplicates.push(candidate);
         } else {
             seen.insert(server.name.clone());
-            servers.push(server.clone());
+            servers.push(candidate);
         }
     }
 
@@ -159,6 +203,53 @@ mod tests {
             headers: None,
             working_dir: None,
         }
+    }
+
+    #[test]
+    fn sse_preview_keeps_the_existing_http_import_contract() {
+        let mut server = scanned_server("legacy");
+        server.connection_type = "sse".to_string();
+        let parsed = ParsedImport {
+            servers: vec![server],
+            ..Default::default()
+        };
+        let preview = build_import_preview(&parsed, &Default::default());
+        assert_eq!(preview.servers[0].connection_type, "http");
+        assert_eq!(parsed.servers[0].connection_type, "sse");
+    }
+
+    #[test]
+    fn zcode_native_entries_shadow_fallback_even_when_disabled() {
+        let dir = std::env::temp_dir().join(format!(
+            "moor-zcode-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let native = dir.join("config.json");
+        let fallback = dir.join("mcp.json");
+        std::fs::write(
+            &fallback,
+            r#"{"mcpServers":{"fallback":{"url":"http://localhost/mcp"}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &native,
+            r#"{"mcp":{"servers":{"off":{"url":"http://localhost/mcp","enable":false}}}}"#,
+        )
+        .unwrap();
+        assert!(scan_zcode_paths(&native, &fallback).servers.is_empty());
+        std::fs::write(&native, r#"{"mcp":{"servers":{}}}"#).unwrap();
+        assert_eq!(
+            scan_zcode_paths(&native, &fallback).servers[0].name,
+            "fallback"
+        );
+        std::fs::write(&native, "{broken").unwrap();
+        assert!(!scan_zcode_paths(&native, &fallback).errors.is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

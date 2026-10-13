@@ -11,12 +11,15 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { getApiRuntime, buildApiUrl, buildApiHeaders, resetRuntime } from "@/lib/api/runtime";
 import { logKeys, profileKeys, serverKeys, settingKeys } from "@/lib/query-keys";
 import { mergeServerStatusEvent } from "@/hooks/server-patch-utils";
+import { mergeServerHealthSnapshot } from "@/lib/server-health";
 import type {
   MoorEvent,
   MoorEventData,
   MoorEventType,
   Server,
   ServerDetail,
+  ServerHealth,
+  ServerHealthStatus,
   ServerStatus,
 } from "@moor/types";
 
@@ -31,6 +34,12 @@ const SSEContext = createContext<SSEContextValue | null>(null);
 
 type WarnFn = (message: string) => void;
 const serverStatuses = new Set<ServerStatus>(["stopped", "starting", "running", "error"]);
+const serverHealthStatuses = new Set<ServerHealthStatus>([
+  "unknown",
+  "healthy",
+  "unhealthy",
+  "unsupported",
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -47,6 +56,22 @@ function isServerStatusEvent(data: unknown): data is MoorEventData<"server:statu
     typeof data.serverId === "string" &&
     typeof data.status === "string" &&
     serverStatuses.has(data.status as ServerStatus) &&
+    (data.errorMessage === undefined ||
+      data.errorMessage === null ||
+      typeof data.errorMessage === "string")
+  );
+}
+
+function isServerHealthEvent(data: unknown): data is MoorEventData<"server:health"> {
+  return (
+    isRecord(data) &&
+    typeof data.serverId === "string" &&
+    typeof data.status === "string" &&
+    serverHealthStatuses.has(data.status as ServerHealthStatus) &&
+    typeof data.consecutiveFailures === "number" &&
+    (data.checkedAt === undefined ||
+      data.checkedAt === null ||
+      typeof data.checkedAt === "string") &&
     (data.errorMessage === undefined ||
       data.errorMessage === null ||
       typeof data.errorMessage === "string")
@@ -81,6 +106,8 @@ export function parseMoorSSEEvent(
   switch (event) {
     case "server:status":
       return isServerStatusEvent(data) ? { type: event, data } : invalidEvent(event, warn);
+    case "server:health":
+      return isServerHealthEvent(data) ? { type: event, data } : invalidEvent(event, warn);
     case "server:tools":
       return isServerToolsEvent(data) ? { type: event, data } : invalidEvent(event, warn);
     case "profile:activated":
@@ -106,6 +133,13 @@ export function applyMoorEventToQueryCache(queryClient: QueryClient, event: Moor
               errorMessage: event.data.errorMessage ?? null,
             }
           : server,
+      );
+      // 服务器状态变化（启动/停止/重启）后旧快照不再代表当前会话。
+      void queryClient.invalidateQueries({ queryKey: serverKeys.health() });
+      break;
+    case "server:health":
+      queryClient.setQueryData<ServerHealth[]>(serverKeys.health(), (snapshots) =>
+        mergeServerHealthSnapshot(snapshots, event.data),
       );
       break;
     case "server:tools":

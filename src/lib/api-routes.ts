@@ -24,6 +24,11 @@ type LogListParams = {
   offset?: string | number;
 };
 
+type LogWindowParams = {
+  from?: string;
+  to?: string;
+};
+
 export const routes = {
   servers: {
     list: () => "/api/servers",
@@ -36,6 +41,8 @@ export const routes = {
     order: () => "/api/servers/order",
     tools: (id: string, profileId?: string) =>
       withQuery(`/api/servers/${pathSegment(id)}/tools`, { profile_id: profileId }),
+    health: () => "/api/servers/health",
+    checkHealth: (id: string) => `/api/servers/${pathSegment(id)}/check-health`,
   },
   profiles: {
     list: () => "/api/profiles",
@@ -44,6 +51,9 @@ export const routes = {
     update: (id: string) => `/api/profiles/${pathSegment(id)}`,
     delete: (id: string) => `/api/profiles/${pathSegment(id)}`,
     activate: (id: string) => `/api/profiles/${pathSegment(id)}/activate`,
+    clone: (id: string) => `/api/profiles/${pathSegment(id)}/clone`,
+    tools: (id: string) => `/api/profiles/${pathSegment(id)}/tools`,
+    bulkServersState: (id: string) => `/api/profiles/${pathSegment(id)}/servers-state`,
     updateServer: (profileId: string, serverId: string) =>
       `/api/profiles/${pathSegment(profileId)}/servers/${pathSegment(serverId)}`,
   },
@@ -54,6 +64,7 @@ export const routes = {
   },
   logs: {
     list: (params?: LogListParams) => withQuery("/api/logs", params ?? {}),
+    insights: (params?: LogWindowParams) => withQuery("/api/logs/insights", params ?? {}),
     stats: () => "/api/logs/stats",
   },
   import: {

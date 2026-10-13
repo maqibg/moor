@@ -21,6 +21,7 @@ import {
   getSettingsPageLoadState,
   parseTimeoutSecondsInput,
 } from "./settings-state";
+import { parseHealthIntervalSecondsInput } from "@/lib/server-health";
 
 declare const __APP_VERSION__: string;
 
@@ -49,18 +50,13 @@ function SettingRow({ label, description, children }: SettingRowProps) {
 
 // --- Restart Banner ---
 
-function RestartBanner() {
-  const { t } = useI18n();
+function RestartBanner({ title, message }: { title: string; message: string }) {
   return (
     <div className="flex items-start gap-3 bg-cursor-orange/10 border border-cursor-orange/20 rounded-xl px-4 py-3">
       <AlertTriangle className="h-4 w-4 text-cursor-orange shrink-0 mt-0.5" />
       <div className="min-w-0 space-y-0.5">
-        <p className="font-headline text-sm text-cursor-dark">
-          {t("Port changes require reopening Moor")}
-        </p>
-        <p className="font-body text-xs text-[var(--fg-55)]">
-          {t("Quit and reopen Moor to apply the configured port.")}
-        </p>
+        <p className="font-headline text-sm text-cursor-dark">{title}</p>
+        <p className="font-body text-xs text-[var(--fg-55)]">{message}</p>
       </div>
     </div>
   );
@@ -290,10 +286,12 @@ function AdvancedSection({
   runtimeInfo,
   onError,
   onPortApplied,
+  onLanAccessApplied,
 }: {
   runtimeInfo: SidecarInfo | null;
   onError: (message: string | null) => void;
   onPortApplied: (port: number) => void;
+  onLanAccessApplied: () => void;
 }) {
   const { settings, updateSettings } = useSettings();
   const { t } = useI18n();
@@ -305,17 +303,23 @@ function AdvancedSection({
   const [localStartTimeout, setLocalStartTimeout] = useState(
     String(settings.advanced.mcpServerStartTimeoutMs / 1000),
   );
+  const [localHealthInterval, setLocalHealthInterval] = useState(
+    String(settings.advanced.mcpHealthCheckIntervalSeconds),
+  );
   const [dirtyDrafts, setDirtyDrafts] = useState({
     retention: false,
     port: false,
     requestTimeout: false,
     startTimeout: false,
+    healthInterval: false,
   });
   const [tokenVisible, setTokenVisible] = useState(false);
   const requestTimeoutState = parseTimeoutSecondsInput(localRequestTimeout);
   const startTimeoutState = parseTimeoutSecondsInput(localStartTimeout);
+  const healthIntervalState = parseHealthIntervalSecondsInput(localHealthInterval);
   const requestTimeoutErrorId = "request-timeout-error";
   const startTimeoutErrorId = "server-start-timeout-error";
+  const healthIntervalErrorId = "health-check-interval-error";
   const portStatus = getAdvancedPortStatus({
     runtimeInfo,
     configuredPort: settings.advanced.sidecarPort,
@@ -334,12 +338,16 @@ function AdvancedSection({
     if (!dirtyDrafts.startTimeout) {
       setLocalStartTimeout(String(settings.advanced.mcpServerStartTimeoutMs / 1000));
     }
+    if (!dirtyDrafts.healthInterval) {
+      setLocalHealthInterval(String(settings.advanced.mcpHealthCheckIntervalSeconds));
+    }
   }, [
     dirtyDrafts,
     settings.advanced.logRetentionDays,
     settings.advanced.sidecarPort,
     settings.advanced.mcpRequestTimeoutMs,
     settings.advanced.mcpServerStartTimeoutMs,
+    settings.advanced.mcpHealthCheckIntervalSeconds,
   ]);
 
   const setDraftDirty = useCallback((field: keyof typeof dirtyDrafts, dirty: boolean) => {
@@ -370,6 +378,42 @@ function AdvancedSection({
     }
   };
 
+  const toggleLanAccess = async (value: boolean) => {
+    try {
+      onError(null);
+      await updateSettings({ advanced: { allowLanMcpAccess: value } });
+      onLanAccessApplied();
+    } catch (err) {
+      onError(getErrorMessage(err, t("Failed to update LAN MCP access")));
+    }
+  };
+
+  // 探活开关即时生效（后台循环每次迭代重读设置），不需要重启横幅。
+  const toggleHealthChecks = async (value: boolean) => {
+    try {
+      onError(null);
+      await updateSettings({ advanced: { mcpHealthChecksEnabled: value } });
+    } catch (err) {
+      onError(getErrorMessage(err, t("Failed to update automatic health checks")));
+    }
+  };
+
+  const applyHealthInterval = async () => {
+    try {
+      onError(null);
+      if (!healthIntervalState.valid) {
+        onError(t(healthIntervalState.message));
+        return;
+      }
+      await updateSettings({
+        advanced: { mcpHealthCheckIntervalSeconds: healthIntervalState.seconds },
+      });
+      setDraftDirty("healthInterval", false);
+    } catch (err) {
+      onError(getErrorMessage(err, t("Failed to update health check interval")));
+    }
+  };
+
   type TimeoutKey = "mcpRequestTimeoutMs" | "mcpServerStartTimeoutMs";
 
   const applyTimeout = async (
@@ -394,6 +438,55 @@ function AdvancedSection({
     <div className="space-y-4">
       <Card>
         <CardContent className="p-2 divide-y divide-[var(--fg-06)]">
+          <SettingRow
+            label={t("Automatic Health Checks")}
+            description={t(
+              "Ping running MCP servers in the background. Failures only warn; recovery is manual.",
+            )}
+          >
+            <Switch
+              checked={settings.advanced.mcpHealthChecksEnabled}
+              onCheckedChange={(v) => void toggleHealthChecks(v)}
+            />
+          </SettingRow>
+          <SettingRow
+            label={t("Health Check Interval")}
+            description={t(
+              "Seconds between automatic health checks (30-600). Applies to the next check.",
+            )}
+          >
+            <div className="flex flex-col items-end gap-1">
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={30}
+                  max={600}
+                  step={1}
+                  value={localHealthInterval}
+                  aria-invalid={!healthIntervalState.valid}
+                  aria-describedby={healthIntervalState.valid ? undefined : healthIntervalErrorId}
+                  onChange={(e) => {
+                    setLocalHealthInterval(e.target.value);
+                    setDraftDirty("healthInterval", true);
+                  }}
+                  className="w-20 h-8 text-center text-xs"
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={!healthIntervalState.valid}
+                  onClick={() => void applyHealthInterval()}
+                >
+                  {t("Apply")}
+                </Button>
+              </div>
+              {!healthIntervalState.valid && (
+                <p id={healthIntervalErrorId} className="font-body text-[11px] text-error-warm">
+                  {t(healthIntervalState.message)}
+                </p>
+              )}
+            </div>
+          </SettingRow>
           <SettingRow
             label={t("Log Retention")}
             description={t("Number of days to keep audit logs (0 for unlimited)")}
@@ -422,6 +515,17 @@ function AdvancedSection({
             <Switch
               checked={settings.advanced.enableAuditLogging}
               onCheckedChange={(v) => void updateSettings({ advanced: { enableAuditLogging: v } })}
+            />
+          </SettingRow>
+          <SettingRow
+            label={t("Allow LAN MCP Access")}
+            description={t(
+              "Expose /mcp on all interfaces for WSL2/LAN clients; /api stays loopback-only (requires restart)",
+            )}
+          >
+            <Switch
+              checked={settings.advanced.allowLanMcpAccess}
+              onCheckedChange={(v) => void toggleLanAccess(v)}
             />
           </SettingRow>
           <SettingRow
@@ -617,6 +721,7 @@ export function SettingsPage() {
   const [runtimeInfo, setRuntimeInfo] = useState<SidecarInfo | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [portChangeApplied, setPortChangeApplied] = useState(false);
+  const [lanAccessChangeApplied, setLanAccessChangeApplied] = useState(false);
   const { settings, isLoading, isError, error, resetSettings } = useSettings();
   const loadState = getSettingsPageLoadState({ isLoading, isError, error });
   const portBannerState = loadState.canRenderControls
@@ -651,6 +756,7 @@ export function SettingsPage() {
       resetRuntime();
       await refreshRuntimeInfo();
       setPortChangeApplied(false);
+      setLanAccessChangeApplied(false);
     } catch (err) {
       setErrorMessage(getErrorMessage(err, t("Failed to reset settings")));
     }
@@ -679,7 +785,18 @@ export function SettingsPage() {
       />
 
       {loadState.kind === "error" && <ErrorBanner message={loadState.message} />}
-      {portBannerState?.kind === "restart" && <RestartBanner />}
+      {portBannerState?.kind === "restart" && (
+        <RestartBanner
+          title={t("Port changes require reopening Moor")}
+          message={t("Quit and reopen Moor to apply the configured port.")}
+        />
+      )}
+      {lanAccessChangeApplied && (
+        <RestartBanner
+          title={t("LAN access changes require reopening Moor")}
+          message={t("Quit and reopen Moor to apply the new network binding.")}
+        />
+      )}
       {portBannerState?.kind === "fallback" && (
         <PortFallbackBanner
           previousPort={portBannerState.previousPort}
@@ -709,6 +826,7 @@ export function SettingsPage() {
               <AdvancedSection
                 runtimeInfo={runtimeInfo}
                 onError={setErrorMessage}
+                onLanAccessApplied={() => setLanAccessChangeApplied(true)}
                 onPortApplied={(nextPort) =>
                   setPortChangeApplied(runtimeInfo !== null && runtimeInfo.port !== nextPort)
                 }

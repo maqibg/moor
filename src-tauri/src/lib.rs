@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::{
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -96,6 +96,41 @@ fn get_sidecar_info(state: State<'_, MoorState>) -> Result<SidecarInfo, String> 
     Ok(state.info())
 }
 
+#[tauri::command]
+fn get_server_log_path(_app: tauri::AppHandle, server_id: String) -> Result<String, String> {
+    // 白名单校验防路径拼接逃逸;server id 为 UUID,合法字符仅 [A-Za-z0-9_-]。
+    let valid = !server_id.is_empty()
+        && server_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !valid {
+        return Err("Invalid server id".to_string());
+    }
+    // 与主流程同源：日志也写在 <可执行文件所在目录>/data/logs 下。
+    let data_dir = executable_data_dir()?;
+    Ok(
+        sidecar::services::server_log::log_path(&data_dir.join("logs"), &server_id)
+            .to_string_lossy()
+            .into_owned(),
+    )
+}
+
+/// 数据目录固定在可执行文件同级目录的 `data` 下：随安装目录一起搬迁、备份与卸载，
+/// 不再散落在用户 AppData 里。
+fn resolve_data_dir(exe_dir: &Path) -> PathBuf {
+    exe_dir.join("data")
+}
+
+/// 从当前可执行文件推导数据目录；定位失败时明确报错，而不是静默换一个位置。
+fn executable_data_dir() -> Result<PathBuf, String> {
+    let exe = std::env::current_exe()
+        .map_err(|error| format!("Failed to locate the executable: {error}"))?;
+    let dir = exe
+        .parent()
+        .ok_or_else(|| format!("Executable path has no parent directory: {}", exe.display()))?;
+    Ok(resolve_data_dir(dir))
+}
+
 fn apply_autostart_setting(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
     login_autostart::validate_login_autostart_enable(enabled)?;
@@ -171,12 +206,14 @@ fn persist_fallback_port(
 
 fn migrate_legacy_data_dir(
     data_dir: &PathBuf,
-    legacy_data_dir: Option<&PathBuf>,
+    legacy_data_dirs: &[PathBuf],
 ) -> Result<(), String> {
-    let Some(legacy) = legacy_data_dir else {
-        return Ok(());
-    };
-    if data_dir == legacy {
+    // 按“较新优先”的顺序尝试：同一个文件只从第一个存在它的历史目录复制。
+    let candidates: Vec<&PathBuf> = legacy_data_dirs
+        .iter()
+        .filter(|dir| *dir != data_dir)
+        .collect();
+    if candidates.is_empty() {
         return Ok(());
     }
     fs::create_dir_all(data_dir).map_err(|error| error.to_string())?;
@@ -186,28 +223,34 @@ fn migrate_legacy_data_dir(
     }
 
     let current_settings = data_dir.join("settings.json");
-    let legacy_settings = legacy.join("settings.json");
-    if !current_settings.exists() && legacy_settings.exists() {
-        if let Err(error) = fs::copy(&legacy_settings, &current_settings) {
-            let _ = fs::remove_file(&current_settings);
-            return Err(error.to_string());
+    if !current_settings.exists() {
+        if let Some(legacy_settings) = candidates
+            .iter()
+            .map(|dir| dir.join("settings.json"))
+            .find(|path| path.exists())
+        {
+            if let Err(error) = fs::copy(&legacy_settings, &current_settings) {
+                let _ = fs::remove_file(&current_settings);
+                return Err(error.to_string());
+            }
         }
     }
 
     let current_db = data_dir.join("moor.db");
-    let legacy_db = legacy.join("moor.db");
-    if !current_db.exists() && legacy_db.exists() {
-        let mut copied_files = Vec::new();
-        for name in &["moor.db", "moor.db-wal", "moor.db-shm"] {
-            let source = legacy.join(name);
-            if source.exists() {
-                let destination = data_dir.join(name);
-                copied_files.push(destination.clone());
-                if let Err(error) = fs::copy(&source, destination) {
-                    for copied_file in copied_files {
-                        let _ = fs::remove_file(copied_file);
+    if !current_db.exists() {
+        if let Some(legacy_dir) = candidates.iter().find(|dir| dir.join("moor.db").exists()) {
+            let mut copied_files = Vec::new();
+            for name in &["moor.db", "moor.db-wal", "moor.db-shm"] {
+                let source = legacy_dir.join(name);
+                if source.exists() {
+                    let destination = data_dir.join(name);
+                    copied_files.push(destination.clone());
+                    if let Err(error) = fs::copy(&source, destination) {
+                        for copied_file in copied_files {
+                            let _ = fs::remove_file(copied_file);
+                        }
+                        return Err(error.to_string());
                     }
-                    return Err(error.to_string());
                 }
             }
         }
@@ -231,22 +274,24 @@ pub fn run() {
         ))
         .invoke_handler(tauri::generate_handler![
             get_sidecar_info,
+            get_server_log_path,
             sync_runtime_settings,
             apply_login_autostart_setting,
         ])
         .setup(|app| {
-            let data_dir = app
-                .path()
-                .app_data_dir()
-                .unwrap_or_else(|_| PathBuf::from(".moor"));
-            let legacy_data_dir = app
-                .path()
-                .data_dir()
-                .ok()
-                .map(|dir| dir.join(LEGACY_BUNDLE_IDENTIFIER));
+            // 数据目录随安装目录：<可执行文件所在目录>/data
+            let data_dir = executable_data_dir()?;
+            // 迁移来源按“较新优先”：上一版的 AppData 目录，其次更早的 dev.moor.app 目录。
+            let mut legacy_data_dirs = Vec::new();
+            if let Ok(previous) = app.path().app_data_dir() {
+                legacy_data_dirs.push(previous);
+            }
+            if let Ok(roaming) = app.path().data_dir() {
+                legacy_data_dirs.push(roaming.join(LEGACY_BUNDLE_IDENTIFIER));
+            }
 
             // Legacy data migration
-            if let Err(error) = migrate_legacy_data_dir(&data_dir, legacy_data_dir.as_ref()) {
+            if let Err(error) = migrate_legacy_data_dir(&data_dir, &legacy_data_dirs) {
                 tracing::warn!("Legacy data migration will be retried: {error}");
             }
 
@@ -284,7 +329,12 @@ pub fn run() {
             // Find available port
             let api_token = generate_api_token()?;
             let max_port = configured_port.saturating_add(10);
-            let port = find_available_port("127.0.0.1", configured_port, max_port)
+            let host = if settings.advanced.allow_lan_mcp_access {
+                "0.0.0.0"
+            } else {
+                "127.0.0.1"
+            };
+            let port = find_available_port(host, configured_port, max_port)
                 .map_err(|e| format!("Failed to find available port: {e}"))?;
             let port_fallback_from = (port != configured_port).then_some(configured_port);
             persist_fallback_port(&db, configured_port, port)?;
@@ -298,10 +348,13 @@ pub fn run() {
             // Build app state and start in-process HTTP server
             let db_arc = Arc::new(db);
             let event_bus = Arc::new(sidecar::services::event_bus::EventBus::new(256));
-            let server_manager = Arc::new(sidecar::services::server_manager::ServerManager::new(
-                db_arc.clone(),
-                event_bus.clone(),
-            ));
+            let server_manager = Arc::new(
+                sidecar::services::server_manager::ServerManager::new(
+                    db_arc.clone(),
+                    event_bus.clone(),
+                )
+                .with_logs_dir(data_dir.join("logs")),
+            );
             let app_state = Arc::new(sidecar::http::AppState::new(
                 db_arc.clone(),
                 api_token.clone(),
@@ -330,7 +383,7 @@ pub fn run() {
             app.manage(state);
 
             // Spawn axum server
-            let host = "127.0.0.1".to_string();
+            let host = host.to_string();
             let sm = server_manager.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = sidecar::http::start_server(app_state, &host, port).await {
@@ -341,6 +394,8 @@ pub fn run() {
             // Load servers and start auto-start servers
             let start_auto_start_servers = should_start_auto_start_servers_on_launch(&settings);
             tauri::async_runtime::spawn(async move {
+                // 探活任务必须在 Tokio 上下文中启动，Tauri 主线程没有运行时。
+                sm.spawn_health_checker();
                 sm.load_from_db().await;
                 if start_auto_start_servers {
                     sm.start_auto_start_servers().await;
@@ -577,7 +632,7 @@ mod tests {
             .expect("write legacy settings");
         fs::write(legacy_dir.join("moor.db"), b"legacy-database").expect("write legacy database");
 
-        migrate_legacy_data_dir(&data_dir, Some(&legacy_dir)).expect("migrate legacy data");
+        migrate_legacy_data_dir(&data_dir, &[legacy_dir.clone()]).expect("migrate legacy data");
         assert_eq!(
             fs::read(data_dir.join("settings.json")).expect("read migrated settings"),
             b"legacy-settings"
@@ -592,13 +647,50 @@ mod tests {
             .expect("update current settings");
         fs::write(legacy_dir.join("settings.json"), b"changed-legacy-settings")
             .expect("update legacy settings");
-        migrate_legacy_data_dir(&data_dir, Some(&legacy_dir))
+        migrate_legacy_data_dir(&data_dir, &[legacy_dir.clone()])
             .expect("completed migration should be a no-op");
         assert_eq!(
             fs::read(data_dir.join("settings.json")).expect("read current settings"),
             b"current-settings"
         );
 
+        fs::remove_dir_all(root).expect("remove migration test data");
+    }
+
+    #[test]
+    fn data_dir_lives_next_to_the_executable() {
+        let install_dir = PathBuf::from("install-dir");
+        assert_eq!(
+            resolve_data_dir(&install_dir),
+            install_dir.join("data"),
+            "数据目录必须是可执行文件同级目录下的 data"
+        );
+    }
+
+    #[test]
+    fn migration_prefers_the_newest_legacy_dir_that_has_the_file() {
+        let root = temp_data_dir("legacy-precedence");
+        let data_dir = root.join("current");
+        let newer = root.join("newer");
+        let older = root.join("older");
+        fs::create_dir_all(&newer).expect("create newer dir");
+        fs::create_dir_all(&older).expect("create older dir");
+        // 只有更早的目录有数据库，设置文件则两处都有：各自取「较新优先」的第一个存在者。
+        fs::write(newer.join("settings.json"), b"newer-settings").expect("write newer settings");
+        fs::write(older.join("settings.json"), b"older-settings").expect("write older settings");
+        fs::write(older.join("moor.db"), b"older-database").expect("write older database");
+
+        migrate_legacy_data_dir(&data_dir, &[newer.clone(), older.clone()])
+            .expect("migrate legacy data");
+
+        assert_eq!(
+            fs::read(data_dir.join("settings.json")).expect("read settings"),
+            b"newer-settings"
+        );
+        assert_eq!(
+            fs::read(data_dir.join("moor.db")).expect("read database"),
+            b"older-database"
+        );
         fs::remove_dir_all(root).expect("remove migration test data");
     }
 }

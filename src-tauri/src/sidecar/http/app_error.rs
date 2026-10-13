@@ -31,6 +31,11 @@ impl AppError {
         Self::new(StatusCode::PAYLOAD_TOO_LARGE, "PAYLOAD_TOO_LARGE", msg)
     }
 
+    /// 状态冲突（如服务器未运行、会话已变更），调用方给出稳定的错误码。
+    pub fn conflict(code: &'static str, msg: impl Into<String>) -> Self {
+        Self::new(StatusCode::CONFLICT, code, msg)
+    }
+
     pub fn internal(msg: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", msg)
     }

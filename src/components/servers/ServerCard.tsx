@@ -2,8 +2,11 @@ import { useState, type ReactNode } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/shared/StatusBadge";
+import { HealthBadge } from "@/components/servers/ServerHealth";
 import { ErrorBanner } from "@/components/shared/ErrorBanner";
+import { OpenLogButton } from "@/components/servers/OpenLogButton";
 import {
+  Activity,
   AlertTriangle,
   Loader2,
   PanelRightOpen,
@@ -14,8 +17,10 @@ import {
   Zap,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import type { Server } from "@moor/types";
+import type { Server, ServerHealth } from "@moor/types";
 import type { ServerAction } from "@/hooks/server-patch-utils";
+import { useHealthCheck } from "@/hooks/useServerHealth";
+import { formatHealthFailureSummary, isHealthFailure } from "@/lib/server-health";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { useI18n } from "@/hooks/useI18n";
 
@@ -51,6 +56,7 @@ function getRemoveFeedback({
 
 interface ServerCardProps {
   server: Server;
+  health?: ServerHealth;
   action?: ServerAction;
   dragHandle?: ReactNode;
   isSorting?: boolean;
@@ -84,10 +90,12 @@ function ServerAvatar({ isRunning, isError }: { isRunning: boolean; isError: boo
 
 function ServerIdentity({
   server,
+  health,
   commandPreview,
   displayStatus,
 }: {
   server: Server;
+  health?: ServerHealth;
   commandPreview: string;
   displayStatus: string;
 }) {
@@ -104,6 +112,7 @@ function ServerIdentity({
           </span>
         )}
         <StatusBadge status={displayStatus} />
+        {server.status === "running" && <HealthBadge snapshot={health} />}
       </div>
       {commandPreview && (
         <p className="font-mono text-[11px] text-[var(--fg-40)] truncate">{commandPreview}</p>
@@ -165,8 +174,10 @@ function ServerControls({
   isStopping,
   isBusy,
   isRemoving,
+  isCheckingHealth,
   onStart,
   onStop,
+  onCheckHealth,
   onRequestRemove,
 }: {
   server: Server;
@@ -174,25 +185,43 @@ function ServerControls({
   isStopping: boolean;
   isBusy: boolean;
   isRemoving: boolean;
+  isCheckingHealth: boolean;
   onStart: (id: string) => Promise<void>;
   onStop: (id: string) => Promise<void>;
+  onCheckHealth: () => void;
   onRequestRemove: () => void;
 }) {
   const navigate = useNavigate();
   const { t } = useI18n();
   const controlsDisabled = isBusy || isRemoving;
+  const isRunning = server.status === "running";
 
   return (
     <div className="flex items-center gap-1 shrink-0 bg-surface-300/50 rounded-lg p-1">
       <LifecycleButton
         serverId={server.id}
-        isRunning={server.status === "running"}
+        isRunning={isRunning}
         isStarting={isStarting}
         isStopping={isStopping}
         isBusy={controlsDisabled}
         onStart={onStart}
         onStop={onStop}
       />
+      <Button
+        variant="ghost"
+        size="icon"
+        className="text-[var(--fg-45)] hover:text-cursor-dark hover:bg-surface-400 active:bg-surface-500 transition-all duration-150"
+        disabled={controlsDisabled || !isRunning || isCheckingHealth}
+        onClick={onCheckHealth}
+        title={isCheckingHealth ? t("Checking...") : t("Check now")}
+        aria-label={t("Check health for {{name}}", { name: server.name })}
+      >
+        {isCheckingHealth ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <Activity className="h-4 w-4" />
+        )}
+      </Button>
       <Button
         variant="ghost"
         size="icon"
@@ -283,6 +312,7 @@ function RemoveFeedbackRow({
 
 export function ServerCard({
   server,
+  health,
   action,
   dragHandle,
   isSorting,
@@ -294,12 +324,14 @@ export function ServerCard({
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const healthCheck = useHealthCheck(server.id);
   const isRunning = server.status === "running";
   const isError = server.status === "error";
   const isStarting = server.status === "starting" || action === "starting";
   const isStopping = action === "stopping";
   const commandPreview = getCommandPreview(server);
   const displayStatus = isStopping ? "stopping" : server.status;
+  const healthFailed = isRunning && health !== undefined && isHealthFailure(health.status);
   const removeFeedback = getRemoveFeedback({
     serverName: server.name,
     confirmingRemove,
@@ -345,6 +377,7 @@ export function ServerCard({
               <ServerAvatar isRunning={isRunning} isError={isError} />
               <ServerIdentity
                 server={server}
+                health={health}
                 commandPreview={commandPreview}
                 displayStatus={displayStatus}
               />
@@ -355,8 +388,10 @@ export function ServerCard({
               isStopping={isStopping}
               isBusy={isStarting || isStopping}
               isRemoving={isRemoving}
+              isCheckingHealth={healthCheck.pending}
               onStart={onStart}
               onStop={onStop}
+              onCheckHealth={healthCheck.check}
               onRequestRemove={() => {
                 setConfirmingRemove(true);
                 setRemoveError(null);
@@ -370,8 +405,30 @@ export function ServerCard({
               onConfirm={() => void handleRemove()}
             />
           )}
+          {healthFailed && health && (
+            <ErrorBanner
+              message={formatHealthFailureSummary(health, t)}
+              variant="mono"
+              className="mt-3"
+            />
+          )}
+          {healthCheck.errorKey && (
+            <div className="mt-3 flex items-center gap-2">
+              <ErrorBanner message={t(healthCheck.errorKey)} className="min-w-0 flex-1" />
+              <Button variant="ghost" size="sm" onClick={healthCheck.clearError}>
+                {t("Dismiss")}
+              </Button>
+            </div>
+          )}
           {isError && server.errorMessage && (
-            <ErrorBanner message={server.errorMessage} variant="mono" className="mt-3" />
+            <div className="mt-3 flex items-center gap-2">
+              <ErrorBanner
+                message={server.errorMessage}
+                variant="mono"
+                className="min-w-0 flex-1"
+              />
+              <OpenLogButton serverId={server.id} />
+            </div>
           )}
         </div>
       </CardContent>

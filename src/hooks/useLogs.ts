@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import {
   keepPreviousData,
   useInfiniteQuery,
@@ -8,7 +8,8 @@ import {
 import { api } from "@/lib/api/client";
 import { routes } from "@/lib/api-routes";
 import { logKeys } from "@/lib/query-keys";
-import type { AuditLogEntry, LogStats } from "@moor/types";
+import type { AuditLogEntry, LogInsights, LogStats } from "@moor/types";
+import { type InsightsWindow, windowFromDate } from "@/lib/insights";
 
 const DEFAULT_STATS: LogStats = {
   totalCalls: 0,
@@ -17,6 +18,15 @@ const DEFAULT_STATS: LogStats = {
   avgDurationMs: null,
   topTools: [],
   topServers: [],
+};
+
+const EMPTY_INSIGHTS: LogInsights = {
+  totalCalls: 0,
+  errorCalls: 0,
+  errorRate: 0,
+  avgDurationMs: null,
+  tools: [],
+  servers: [],
 };
 
 export type LogFilters = {
@@ -98,4 +108,23 @@ export function useLogStats() {
   }, [queryClient]);
 
   return { stats, loading, error: error?.message ?? null, refresh };
+}
+
+/** Windowed tool-call insights. The cache key holds the window (stable across
+ * renders) while the lower bound is frozen per window change — a fresh
+ * millisecond timestamp in the key would miss the cache on every render. */
+export function useLogInsights(window: InsightsWindow) {
+  const from = useMemo(() => windowFromDate(window), [window]);
+  const params = from ? { from } : undefined;
+
+  const {
+    data: insights = EMPTY_INSIGHTS,
+    isLoading: loading,
+    error,
+  } = useQuery<LogInsights>({
+    queryKey: logKeys.insights(window),
+    queryFn: ({ signal }) => api<LogInsights>(routes.logs.insights(params), { signal }),
+  });
+
+  return { insights, loading, error: error?.message ?? null };
 }

@@ -17,6 +17,10 @@ const MCP_SESSION_ID_HEADER: &str = "mcp-session-id";
 const MCP_PROTOCOL_VERSION_HEADER: &str = "mcp-protocol-version";
 const MAX_REQUEST_BODY_BYTES: usize = 1024 * 1024;
 
+/// Total GET SSE stream lifetime; the server closes the stream afterwards and
+/// clients are expected to reconnect (MCP Streamable HTTP spec).
+const SSE_STREAM_MAX_LIFETIME: Duration = Duration::from_secs(30 * 60);
+
 /// Handle incoming MCP Streamable HTTP requests at `/mcp`.
 /// POST carries JSON-RPC messages, GET opens the server event stream, and
 /// DELETE explicitly terminates a negotiated session.
@@ -45,11 +49,17 @@ async fn handle_mcp_get(state: Arc<AppState>, headers: &HeaderMap) -> Response {
     }
 
     let session_id = match header_value(headers, MCP_SESSION_ID_HEADER) {
-        Ok(value) => value,
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            // Anonymous keep-alive streams have no legitimate use: negotiated
+            // clients always send the session id obtained from initialize, and
+            // allowing them would let LAN clients open unlimited streams (#64).
+            return transport_error(StatusCode::BAD_REQUEST, "Missing MCP-Session-Id header");
+        }
         Err(response) => return response,
     };
 
-    let receiver = if let Some(session_id) = session_id {
+    let receiver = {
         let Some(session) = state.mcp_sessions.get(session_id).await else {
             return transport_error(StatusCode::NOT_FOUND, "Unknown or expired MCP session");
         };
@@ -62,13 +72,6 @@ async fn handle_mcp_get(state: Arc<AppState>, headers: &HeaderMap) -> Response {
                 return transport_error(StatusCode::NOT_FOUND, "Unknown or expired MCP session")
             }
         }
-    } else {
-        if let Err(response) = validate_protocol_header(headers, None) {
-            return response;
-        }
-        // Session-less GET remains available for older clients that implement
-        // Streamable HTTP but ignore optional session negotiation.
-        state.mcp_sessions.subscribe_global()
     };
 
     let stream = BroadcastStream::new(receiver).filter_map(|message| match message {
@@ -85,6 +88,10 @@ async fn handle_mcp_get(state: Arc<AppState>, headers: &HeaderMap) -> Response {
             ),
         )),
     });
+
+    // Bound the total lifetime so a forgotten or stuck stream cannot pin a
+    // connection indefinitely on LAN-exposed gateways (#65).
+    let stream = bound_to_lifetime(stream, SSE_STREAM_MAX_LIFETIME);
 
     Sse::new(stream)
         .keep_alive(
@@ -294,6 +301,15 @@ fn build_post_response(
         );
     }
     response
+}
+
+/// Closes an SSE stream once its total lifetime elapses; clients reconnect per
+/// the Streamable HTTP spec.
+fn bound_to_lifetime<S>(stream: S, lifetime: Duration) -> impl futures::Stream<Item = S::Item>
+where
+    S: futures::Stream,
+{
+    futures::StreamExt::take_until(stream, tokio::time::sleep(lifetime))
 }
 
 fn transport_error(status: StatusCode, message: &str) -> Response {
@@ -608,5 +624,69 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE);
         let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn get_without_session_returns_bad_request() {
+        let (app, data_dir) = test_app("get-no-session");
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/mcp")
+                    .header(header::ACCEPT, "text/event-stream")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("GET should complete");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), MAX_REQUEST_BODY_BYTES)
+            .await
+            .expect("response body should be readable");
+        assert!(String::from_utf8_lossy(&body).contains("Missing MCP-Session-Id"));
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn put_returns_method_not_allowed() {
+        let (app, data_dir) = test_app("put-method");
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/mcp")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("PUT should complete");
+
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[tokio::test]
+    async fn bounds_sse_stream_lifetime() {
+        let mut bounded = Box::pin(bound_to_lifetime(
+            futures::stream::pending::<Result<Event, Infallible>>(),
+            Duration::from_millis(300),
+        ));
+
+        let early = tokio::time::timeout(
+            Duration::from_millis(50),
+            futures::StreamExt::next(&mut bounded),
+        )
+        .await;
+        assert!(early.is_err(), "stream must stay open before its lifetime bound");
+
+        let ended = tokio::time::timeout(
+            Duration::from_secs(2),
+            futures::StreamExt::next(&mut bounded),
+        )
+        .await
+        .expect("stream must close at its lifetime bound");
+        assert!(ended.is_none(), "the lifetime bound ends the stream");
     }
 }

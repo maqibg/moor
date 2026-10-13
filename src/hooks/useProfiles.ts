@@ -28,6 +28,14 @@ export function useProfiles() {
     },
   });
 
+  const cloneProfile = useMutation({
+    mutationFn: ({ sourceId, name }: { sourceId: string; name: string }) =>
+      apiPost<Profile>(routes.profiles.clone(sourceId), { name }),
+    onSuccess: (profile) => {
+      queryClient.setQueryData<Profile[]>(profileKeys.list(), (prev) => [...(prev ?? []), profile]);
+    },
+  });
+
   const activateProfile = useMutation({
     mutationFn: async (id: string) => {
       await apiPut(routes.profiles.activate(id), {});
@@ -76,6 +84,7 @@ export function useProfiles() {
     error: error?.message ?? null,
     refresh,
     createProfile: createProfile.mutateAsync,
+    cloneProfile: cloneProfile.mutateAsync,
     activateProfile: activateProfile.mutateAsync,
     deleteProfile: deleteProfile.mutateAsync,
     updateProfile: updateProfile.mutateAsync,

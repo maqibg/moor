@@ -14,10 +14,17 @@ export type {
   ScannedServer,
   UnsupportedServer,
 } from "./scanned.js";
-export type { Profile, ProfileDetail, ProfileServerState } from "./profile.js";
+export type {
+  Profile,
+  ProfileDetail,
+  ProfileServerState,
+  ProfileServerUpsertInput,
+  ProfileToolGroup,
+} from "./profile.js";
+export type { ServerHealth, ServerHealthStatus } from "./health.js";
 export type { MCPTool, ToolCatalogEntry } from "./mcp.js";
 export type { ToolDetail } from "./tool.js";
-export type { AuditLogEntry, LogStats } from "./audit.js";
+export type { AuditLogEntry, LogInsights, LogStats, ServerInsight, ToolInsight } from "./audit.js";
 export type { ClientSnippet, ConvertResult } from "./import.js";
 export type {
   MoorEvent,

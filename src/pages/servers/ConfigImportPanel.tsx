@@ -183,6 +183,28 @@ export function ConfigImportPanel({
                 ))}
               </div>
             )}
+            {importPreview && importPreview.diagnostics.length > 0 && (
+              <div className="rounded-lg border border-cursor-orange/20 bg-cursor-orange/5 px-3 py-2">
+                <p className="font-headline text-xs text-[var(--fg-55)] mb-1.5">
+                  {t("Scan notes")} ({importPreview.diagnostics.length})
+                </p>
+                <div className="space-y-1">
+                  {importPreview.diagnostics.map((diagnostic, index) => (
+                    <p
+                      key={`${diagnostic.source}:${diagnostic.code ?? "diagnostic"}:${index}`}
+                      className="font-body text-xs text-[var(--fg-48)]"
+                    >
+                      {typeof diagnostic.line === "number" && (
+                        <span className="font-mono text-[var(--fg-62)]">
+                          {t("line {{line}}", { line: String(diagnostic.line) })}:{" "}
+                        </span>
+                      )}
+                      {diagnostic.message}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
             {importPreview && importPreview.unsupported.length > 0 && (
               <div className="rounded-lg border border-[var(--fg-08)] bg-surface-300/40 px-3 py-2">
                 <p className="font-headline text-xs text-[var(--fg-55)] mb-1.5">

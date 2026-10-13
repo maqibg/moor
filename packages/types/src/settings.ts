@@ -20,8 +20,11 @@ export interface AdvancedSettings {
   logRetentionDays: number;
   enableAuditLogging: boolean;
   sidecarPort: number;
+  allowLanMcpAccess: boolean;
   mcpRequestTimeoutMs: number;
   mcpServerStartTimeoutMs: number;
+  mcpHealthChecksEnabled: boolean;
+  mcpHealthCheckIntervalSeconds: number;
 }
 
 export interface Settings {
@@ -54,8 +57,11 @@ export function createDefaultSettings(): Settings {
       logRetentionDays: 30,
       enableAuditLogging: true,
       sidecarPort: 9223,
+      allowLanMcpAccess: false,
       mcpRequestTimeoutMs: MCP_TIMEOUT_MS_DEFAULT,
       mcpServerStartTimeoutMs: MCP_TIMEOUT_MS_DEFAULT,
+      mcpHealthChecksEnabled: false,
+      mcpHealthCheckIntervalSeconds: 60,
     },
   };
 }

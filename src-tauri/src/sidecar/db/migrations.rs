@@ -1,6 +1,6 @@
 use super::Database;
 
-const CURRENT_SCHEMA_VERSION: i64 = 2;
+const CURRENT_SCHEMA_VERSION: i64 = 3;
 
 pub fn run_migrations(db: &Database) -> Result<(), String> {
     let version = schema_version(db)?;
@@ -10,6 +10,10 @@ pub fn run_migrations(db: &Database) -> Result<(), String> {
     }
     if version < 2 {
         migrate_audit_indexes(db)?;
+        db.exec("PRAGMA user_version = 2")?;
+    }
+    if version < 3 {
+        migrate_audit_timestamps(db)?;
         db.exec(&format!("PRAGMA user_version = {CURRENT_SCHEMA_VERSION}"))?;
     }
     Ok(())
@@ -118,6 +122,44 @@ fn migrate_audit_indexes(db: &Database) -> Result<(), String> {
     )
 }
 
+/// Rewrites stored audit timestamps to UTC RFC3339 with nanosecond precision so
+/// range comparisons stay chronological as strings (#68).
+fn migrate_audit_timestamps(db: &Database) -> Result<(), String> {
+    db.transaction(|conn| {
+        let mut statement = conn
+            .prepare("SELECT id, timestamp FROM audit_logs")
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|error| error.to_string())?;
+        let mut updates = Vec::new();
+        for row in rows {
+            let (id, timestamp) = row.map_err(|error| error.to_string())?;
+            // A single unparsable row must not block startup forever: keep the
+            // original value, warn, and let the migration finish.
+            match super::audit_log_repo::normalize_timestamp(&timestamp) {
+                Ok(normalized) if normalized != timestamp => updates.push((id, normalized)),
+                Ok(_) => {}
+                Err(error) => tracing::warn!(
+                    audit_log_id = %id,
+                    %error,
+                    "Skipping audit row with unparsable timestamp during migration"
+                ),
+            }
+        }
+        for (id, timestamp) in updates {
+            conn.execute(
+                "UPDATE audit_logs SET timestamp = ?1 WHERE id = ?2",
+                rusqlite::params![timestamp, id],
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    })
+}
+
 fn schema_version(db: &Database) -> Result<i64, String> {
     db.query_one("PRAGMA user_version", &[], |row| row.get(0))
         .map(|version| version.unwrap_or(0))
@@ -176,7 +218,10 @@ mod tests {
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("moor-migrations-{ts}.db"));
+        let path = std::env::temp_dir().join(format!(
+            "moor-migrations-{ts}-{}.db",
+            uuid::Uuid::new_v4()
+        ));
         Database::open(&path).expect("open db")
     }
 
@@ -228,7 +273,7 @@ mod tests {
 
         run_migrations(&db).expect("migrate");
 
-        assert_eq!(schema_version(&db).expect("read schema version"), 2);
+        assert_eq!(schema_version(&db).expect("read schema version"), 3);
         let indexes = db
             .query_all("PRAGMA index_list(audit_logs)", &[], |row| {
                 row.get::<_, String>(1)
@@ -239,5 +284,81 @@ mod tests {
         assert!(indexes.contains(&"idx_audit_logs_tool_timestamp".to_string()));
         assert!(!indexes.contains(&"idx_audit_logs_server_id".to_string()));
         assert!(!indexes.contains(&"idx_audit_logs_tool_name".to_string()));
+    }
+
+    #[test]
+    fn normalizes_existing_audit_timestamps() {
+        let db = temp_db();
+        run_migrations(&db).expect("migrate");
+        db.exec("PRAGMA user_version = 2").expect("reset version");
+        for (id, timestamp) in [
+            ("offset", "2026-01-01T08:00:00.123456789+08:00"),
+            ("utc", "2026-01-01T00:00:00Z"),
+        ] {
+            db.run(
+                "INSERT INTO audit_logs (id, timestamp, tool_name) VALUES (?1, ?2, 'search')",
+                &[&id, &timestamp],
+            )
+            .expect("insert row");
+        }
+
+        run_migrations(&db).expect("migrate");
+
+        let rows = db
+            .query_all(
+                "SELECT id, timestamp FROM audit_logs ORDER BY timestamp",
+                &[],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .expect("query");
+        assert_eq!(
+            rows,
+            vec![
+                ("utc".to_string(), "2026-01-01T00:00:00.000000000Z".to_string()),
+                (
+                    "offset".to_string(),
+                    "2026-01-01T00:00:00.123456789Z".to_string()
+                ),
+            ]
+        );
+        assert_eq!(schema_version(&db).expect("read schema version"), 3);
+    }
+
+    #[test]
+    fn unparsable_audit_timestamps_do_not_block_migration() {
+        let db = temp_db();
+        run_migrations(&db).expect("migrate");
+        db.exec("PRAGMA user_version = 2").expect("reset version");
+        for (id, timestamp) in [
+            ("broken", "not-a-timestamp"),
+            ("valid", "2026-01-01T00:00:00Z"),
+        ] {
+            db.run(
+                "INSERT INTO audit_logs (id, timestamp, tool_name) VALUES (?1, ?2, 'search')",
+                &[&id, &timestamp],
+            )
+            .expect("insert row");
+        }
+
+        run_migrations(&db).expect("migration must survive a broken row");
+
+        let rows = db
+            .query_all(
+                "SELECT id, timestamp FROM audit_logs ORDER BY id",
+                &[],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .expect("query");
+        assert_eq!(
+            rows,
+            vec![
+                ("broken".to_string(), "not-a-timestamp".to_string()),
+                (
+                    "valid".to_string(),
+                    "2026-01-01T00:00:00.000000000Z".to_string()
+                ),
+            ]
+        );
+        assert_eq!(schema_version(&db).expect("read schema version"), 3);
     }
 }

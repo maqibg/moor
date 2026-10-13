@@ -1,6 +1,7 @@
 use crate::sidecar::db::tool_discovery_repo::ToolInsert;
 use crate::sidecar::mcp::transport::http_client::HttpClientTransport;
 use crate::sidecar::mcp::transport::stdio_client::StdioClientTransport;
+use crate::sidecar::services::server_log::DiagnosticAttempt;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -24,6 +25,7 @@ pub struct StdioConnectConfig {
     pub cwd: Option<String>,
     pub env: HashMap<String, String>,
     pub request_timeout_ms: u32,
+    pub diagnostics: DiagnosticAttempt,
 }
 
 pub struct HttpConnectConfig {
@@ -41,6 +43,7 @@ impl McpClient {
             config.cwd.as_deref(),
             config.env,
             Duration::from_millis(config.request_timeout_ms as u64),
+            config.diagnostics,
         )
         .await?;
         let client = Self {
@@ -96,6 +99,28 @@ impl McpClient {
                 let id = self.next_id.fetch_add(1, Ordering::Relaxed);
                 t.send_request(id, "tools/call", Some(params)).await
             }
+        }
+    }
+
+    /// Lightweight liveness probe used by health checks. The transports collapse
+    /// JSON-RPC errors to their message, so callers classify on the message
+    /// (see `is_unsupported_method_error` in server_manager).
+    pub async fn ping(&self, timeout: Duration) -> Result<(), String> {
+        let request = async {
+            match &self.transport {
+                McpTransport::Stdio(t) => t.send_request("ping", None).await.map(|_| ()),
+                McpTransport::Http(t) => {
+                    let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+                    t.send_request(id, "ping", None).await.map(|_| ())
+                }
+            }
+        };
+        match tokio::time::timeout(timeout, request).await {
+            Ok(result) => result,
+            Err(_) => Err(format!(
+                "Health check timed out after {}s",
+                timeout.as_secs()
+            )),
         }
     }
 
@@ -212,6 +237,13 @@ impl crate::sidecar::services::server_manager::McpSession for McpClient {
 
     fn set_request_timeout_ms(&self, request_timeout_ms: u32) {
         McpClient::set_request_timeout_ms(self, request_timeout_ms);
+    }
+
+    fn ping(
+        &self,
+        timeout: Duration,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + '_>> {
+        Box::pin(async move { McpClient::ping(self, timeout).await })
     }
 
     fn alive_receiver(&self) -> Option<tokio::sync::watch::Receiver<bool>> {

@@ -4,11 +4,13 @@ export const serverKeys = {
   toolsRoot: (serverId: string) => ["servers", serverId, "tools"] as const,
   tools: (serverId: string, profileId?: string) =>
     ["servers", serverId, "tools", profileId] as const,
+  health: () => ["servers", "health"] as const,
 };
 
 export const profileKeys = {
   list: () => ["profiles"] as const,
   detail: (id: string) => ["profiles", id] as const,
+  governance: (id: string) => ["profiles", id, "tools"] as const,
 };
 
 export const settingKeys = {
@@ -25,4 +27,5 @@ export const logKeys = {
     limit?: number;
   }) => ["logs", "list", filters] as const,
   stats: () => ["logs", "stats"] as const,
+  insights: (window: string) => ["logs", "insights", window] as const,
 };

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   closestCenter,
   DndContext,
@@ -21,12 +21,13 @@ import { ServerCard } from "@/components/servers/ServerCard";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { PageLoading } from "@/components/shared/PageLoading";
 import { useServers } from "@/hooks/useServers";
+import { useServerHealth } from "@/hooks/useServerHealth";
 import { useConfigImport } from "@/hooks/useConfigImport";
 import { FileJson, GripVertical, Plus, RefreshCw, ScanSearch } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { AddServerForm } from "./servers/AddServerForm";
 import { ConfigImportPanel } from "./servers/ConfigImportPanel";
-import type { Server } from "@moor/types";
+import type { Server, ServerHealth } from "@moor/types";
 import { useI18n } from "@/hooks/useI18n";
 
 type ServerActionMap = ReturnType<typeof useServers>["serverActions"];
@@ -53,12 +54,14 @@ function getReorderedServers(
 
 function SortableServerCard({
   server,
+  health,
   action,
   onStart,
   onStop,
   onRemove,
 }: {
   server: Server;
+  health?: ServerHealth;
   action: ServerActionMap[string];
   onStart: (id: string) => Promise<void>;
   onStop: (id: string) => Promise<void>;
@@ -78,6 +81,7 @@ function SortableServerCard({
     <div ref={setNodeRef} style={style} className={cn(isDragging && "relative")}>
       <ServerCard
         server={server}
+        health={health}
         action={action}
         isSorting={isDragging}
         dragHandle={
@@ -118,6 +122,11 @@ export function Servers() {
   const [showJsonImport, setShowJsonImport] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
   const importState = useConfigImport();
+  const { snapshots: healthSnapshots } = useServerHealth();
+  const healthByServerId = useMemo(
+    () => new Map(healthSnapshots.map((snapshot) => [snapshot.serverId, snapshot])),
+    [healthSnapshots],
+  );
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, {
@@ -239,6 +248,7 @@ export function Servers() {
                   <SortableServerCard
                     key={server.id}
                     server={server}
+                    health={healthByServerId.get(server.id)}
                     action={serverActions[server.id]}
                     onStart={startServer}
                     onStop={stopServer}

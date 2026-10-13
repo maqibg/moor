@@ -11,6 +11,9 @@ const SETTINGS_FILE: &str = "settings.json";
 pub const MCP_TIMEOUT_MS_MIN: u32 = 5_000;
 pub const MCP_TIMEOUT_MS_MAX: u32 = 300_000;
 pub const MCP_TIMEOUT_MS_DEFAULT: u32 = 30_000;
+pub const MCP_HEALTH_CHECK_INTERVAL_MIN: u32 = 30;
+pub const MCP_HEALTH_CHECK_INTERVAL_MAX: u32 = 600;
+pub const MCP_HEALTH_CHECK_INTERVAL_DEFAULT: u32 = 60;
 
 /// Distinguishes client input errors (HTTP 400) from internal failures (HTTP 500).
 #[derive(Debug)]
@@ -49,8 +52,11 @@ pub struct AdvancedSettings {
     pub log_retention_days: u16,
     pub enable_audit_logging: bool,
     pub sidecar_port: u16,
+    pub allow_lan_mcp_access: bool,
     pub mcp_request_timeout_ms: u32,
     pub mcp_server_start_timeout_ms: u32,
+    pub mcp_health_checks_enabled: bool,
+    pub mcp_health_check_interval_seconds: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -105,8 +111,11 @@ struct PartialAdvancedSettings {
     log_retention_days: Option<u16>,
     enable_audit_logging: Option<bool>,
     sidecar_port: Option<u16>,
+    allow_lan_mcp_access: Option<bool>,
     mcp_request_timeout_ms: Option<u32>,
     mcp_server_start_timeout_ms: Option<u32>,
+    mcp_health_checks_enabled: Option<bool>,
+    mcp_health_check_interval_seconds: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -135,8 +144,11 @@ pub fn default_settings() -> Settings {
             log_retention_days: 30,
             enable_audit_logging: true,
             sidecar_port: 9223,
+            allow_lan_mcp_access: false,
             mcp_request_timeout_ms: MCP_TIMEOUT_MS_DEFAULT,
             mcp_server_start_timeout_ms: MCP_TIMEOUT_MS_DEFAULT,
+            mcp_health_checks_enabled: false,
+            mcp_health_check_interval_seconds: MCP_HEALTH_CHECK_INTERVAL_DEFAULT,
         },
     }
 }
@@ -203,6 +215,11 @@ fn settings_to_db_entries(settings: &Settings) -> Result<Vec<(&'static str, Stri
             serde_json::to_string(&settings.advanced.sidecar_port).map_err(|e| e.to_string())?,
         ),
         (
+            "advanced.allowLanMcpAccess",
+            serde_json::to_string(&settings.advanced.allow_lan_mcp_access)
+                .map_err(|e| e.to_string())?,
+        ),
+        (
             "advanced.mcpRequestTimeoutMs",
             serde_json::to_string(&settings.advanced.mcp_request_timeout_ms)
                 .map_err(|e| e.to_string())?,
@@ -210,6 +227,16 @@ fn settings_to_db_entries(settings: &Settings) -> Result<Vec<(&'static str, Stri
         (
             "advanced.mcpServerStartTimeoutMs",
             serde_json::to_string(&settings.advanced.mcp_server_start_timeout_ms)
+                .map_err(|e| e.to_string())?,
+        ),
+        (
+            "advanced.mcpHealthChecksEnabled",
+            serde_json::to_string(&settings.advanced.mcp_health_checks_enabled)
+                .map_err(|e| e.to_string())?,
+        ),
+        (
+            "advanced.mcpHealthCheckIntervalSeconds",
+            serde_json::to_string(&settings.advanced.mcp_health_check_interval_seconds)
                 .map_err(|e| e.to_string())?,
         ),
     ])
@@ -325,11 +352,20 @@ pub fn merge_settings_value(mut base: Settings, value: Value) -> Result<Settings
         if let Some(value) = advanced.sidecar_port {
             base.advanced.sidecar_port = value;
         }
+        if let Some(value) = advanced.allow_lan_mcp_access {
+            base.advanced.allow_lan_mcp_access = value;
+        }
         if let Some(value) = advanced.mcp_request_timeout_ms {
             base.advanced.mcp_request_timeout_ms = value;
         }
         if let Some(value) = advanced.mcp_server_start_timeout_ms {
             base.advanced.mcp_server_start_timeout_ms = value;
+        }
+        if let Some(value) = advanced.mcp_health_checks_enabled {
+            base.advanced.mcp_health_checks_enabled = value;
+        }
+        if let Some(value) = advanced.mcp_health_check_interval_seconds {
+            base.advanced.mcp_health_check_interval_seconds = value;
         }
     }
     validate_settings(&base)?;
@@ -366,6 +402,13 @@ fn validate_settings(settings: &Settings) -> Result<(), String> {
             "advanced.mcpServerStartTimeoutMs must be between {MCP_TIMEOUT_MS_MIN} and {MCP_TIMEOUT_MS_MAX}"
         ));
     }
+    if settings.advanced.mcp_health_check_interval_seconds < MCP_HEALTH_CHECK_INTERVAL_MIN
+        || settings.advanced.mcp_health_check_interval_seconds > MCP_HEALTH_CHECK_INTERVAL_MAX
+    {
+        return Err(format!(
+            "advanced.mcpHealthCheckIntervalSeconds must be between {MCP_HEALTH_CHECK_INTERVAL_MIN} and {MCP_HEALTH_CHECK_INTERVAL_MAX}"
+        ));
+    }
     Ok(())
 }
 
@@ -395,6 +438,57 @@ mod tests {
         let db = Database::open(&data_dir.join("moor.db")).expect("failed to open settings db");
         db.run_migrations().expect("failed to migrate settings db");
         db
+    }
+
+    #[test]
+    fn updates_allow_lan_mcp_access() {
+        let data_dir = temp_data_dir("lan-access");
+        let db = test_db(&data_dir);
+
+        let updated = update_settings(
+            &db,
+            serde_json::json!({ "advanced": { "allowLanMcpAccess": true } }),
+        )
+        .expect("settings update should succeed");
+
+        assert!(updated.advanced.allow_lan_mcp_access);
+        let _ = fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn health_check_settings_default_off_and_validate_bounds() {
+        let data_dir = temp_data_dir("health-settings");
+        let db = test_db(&data_dir);
+        init_settings(&db, &data_dir).expect("settings should initialize");
+
+        let defaults = get_settings(&db).expect("settings should load");
+        assert!(!defaults.advanced.mcp_health_checks_enabled);
+        assert_eq!(
+            defaults.advanced.mcp_health_check_interval_seconds,
+            MCP_HEALTH_CHECK_INTERVAL_DEFAULT
+        );
+
+        let updated = update_settings(
+            &db,
+            serde_json::json!({
+                "advanced": {
+                    "mcpHealthChecksEnabled": true,
+                    "mcpHealthCheckIntervalSeconds": 30
+                }
+            }),
+        )
+        .expect("settings update should succeed");
+        assert!(updated.advanced.mcp_health_checks_enabled);
+        assert_eq!(updated.advanced.mcp_health_check_interval_seconds, 30);
+
+        for patch in [
+            serde_json::json!({ "advanced": { "mcpHealthCheckIntervalSeconds": 29 } }),
+            serde_json::json!({ "advanced": { "mcpHealthCheckIntervalSeconds": 601 } }),
+            serde_json::json!({ "advanced": { "mcpHealthCheckIntervalSeconds": 30.5 } }),
+        ] {
+            assert!(update_settings(&db, patch).is_err());
+        }
+        let _ = fs::remove_dir_all(data_dir);
     }
 
     #[test]

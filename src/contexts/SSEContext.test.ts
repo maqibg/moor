@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { QueryClient } from "@tanstack/react-query";
 import { serverKeys } from "@/lib/query-keys";
-import type { Server } from "@moor/types";
+import type { Server, ServerHealth } from "@moor/types";
 import { applyMoorEventToQueryCache, parseMoorSSEEvent } from "./SSEContext";
 
 describe("parseMoorSSEEvent", () => {
@@ -47,6 +47,41 @@ describe("parseMoorSSEEvent", () => {
     ).toBeNull();
     expect(warnings).toHaveLength(1);
   });
+
+  it("accepts a health snapshot payload", () => {
+    const warnings: string[] = [];
+    const payload = {
+      serverId: "server-1",
+      status: "unhealthy",
+      checkedAt: "2026-01-01T00:00:00Z",
+      consecutiveFailures: 3,
+      errorMessage: "ping failed",
+    };
+
+    expect(
+      parseMoorSSEEvent("server:health", payload, (message) => warnings.push(message)),
+    ).toEqual({ type: "server:health", data: payload });
+    expect(warnings).toEqual([]);
+  });
+
+  it("drops health payloads with an unknown status", () => {
+    const warnings: string[] = [];
+
+    expect(
+      parseMoorSSEEvent(
+        "server:health",
+        {
+          serverId: "server-1",
+          status: "degraded",
+          checkedAt: null,
+          consecutiveFailures: 0,
+          errorMessage: null,
+        },
+        (message) => warnings.push(message),
+      ),
+    ).toBeNull();
+    expect(warnings).toHaveLength(1);
+  });
 });
 
 describe("applyMoorEventToQueryCache", () => {
@@ -69,5 +104,35 @@ describe("applyMoorEventToQueryCache", () => {
     });
 
     expect(queryClient.getQueryData<Server[]>(serverKeys.list())?.[0]?.status).toBe("running");
+  });
+
+  it("merges health snapshots into the health cache", () => {
+    const queryClient = new QueryClient();
+    const previous: ServerHealth[] = [
+      {
+        serverId: "server-1",
+        status: "unknown",
+        checkedAt: null,
+        consecutiveFailures: 0,
+        errorMessage: null,
+      },
+    ];
+    queryClient.setQueryData(serverKeys.health(), previous);
+
+    applyMoorEventToQueryCache(queryClient, {
+      type: "server:health",
+      data: {
+        serverId: "server-1",
+        status: "unhealthy",
+        checkedAt: "2026-01-01T00:00:00Z",
+        consecutiveFailures: 3,
+        errorMessage: "ping failed",
+      },
+    });
+
+    const snapshots = queryClient.getQueryData<ServerHealth[]>(serverKeys.health());
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots?.[0].status).toBe("unhealthy");
+    expect(snapshots?.[0].consecutiveFailures).toBe(3);
   });
 });

@@ -130,6 +130,85 @@ impl ToolCatalogService {
             })
             .collect()
     }
+
+    /// 治理面板的分组工具矩阵：profile 内全部 server 的已发现工具及其在该 profile
+    /// 下的禁用态。仓储读取失败时不静默返回空矩阵，而是记录告警后降级。
+    pub fn get_profile_tool_groups(db: &Database, profile_id: &str) -> Vec<ProfileToolGroup> {
+        let servers = match ProfileRepository::new(db).find_profile_servers(profile_id) {
+            Ok(servers) => servers,
+            Err(error) => {
+                tracing::warn!(%profile_id, %error, "Failed to load profile servers");
+                return vec![];
+            }
+        };
+        let tool_repo = ToolDiscoveryRepository::new(db);
+        let profile_tools = match tool_repo.find_by_profile_id(profile_id) {
+            Ok(tools) => tools,
+            Err(error) => {
+                tracing::warn!(%profile_id, %error, "Failed to load profile tools");
+                return vec![];
+            }
+        };
+        let exposed_names: std::collections::HashMap<_, _> =
+            build_tool_catalog_entries(profile_tools)
+                .into_iter()
+                .map(|entry| ((entry.server_id, entry.tool_name), entry.exposed_name))
+                .collect();
+        let discovered = match tool_repo.find_all() {
+            Ok(tools) => tools,
+            Err(error) => {
+                tracing::warn!(%profile_id, %error, "Failed to load discovered tools");
+                vec![]
+            }
+        };
+        let mut discovered_by_server = std::collections::HashMap::<String, Vec<_>>::new();
+        for tool in discovered {
+            discovered_by_server
+                .entry(tool.server_id.clone())
+                .or_default()
+                .push(tool);
+        }
+        servers
+            .into_iter()
+            .map(|server| {
+                let server_slug = normalize_server_name(&server.server.name);
+                let tools = discovered_by_server
+                    .remove(&server.server.id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|tool| ToolDetail {
+                        exposed_name: exposed_names
+                            .get(&(server.server.id.clone(), tool.tool_name.clone()))
+                            .cloned()
+                            .unwrap_or_else(|| format!("{server_slug}__{}", tool.tool_name)),
+                        disabled: server
+                            .profile_server
+                            .disabled_tools
+                            .contains(&tool.tool_name),
+                        tool_name: tool.tool_name,
+                        description: tool.description,
+                        input_schema: tool.input_schema,
+                    })
+                    .collect();
+                ProfileToolGroup {
+                    server_id: server.server.id,
+                    server_name: server.server.name,
+                    server_enabled: server.profile_server.enabled,
+                    tools,
+                }
+            })
+            .collect()
+    }
+}
+
+/// 治理面板分组：profile 内某个 server 的已发现工具及其在该 profile 下的禁用态。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileToolGroup {
+    pub server_id: String,
+    pub server_name: String,
+    pub server_enabled: bool,
+    pub tools: Vec<ToolDetail>,
 }
 
 fn build_tool_catalog_entries(profile_tools: Vec<ProfileTool>) -> Vec<ToolCatalogEntry> {

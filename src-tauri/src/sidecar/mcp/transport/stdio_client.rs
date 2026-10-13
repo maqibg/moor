@@ -2,9 +2,11 @@ use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 #[cfg(all(target_os = "macos", not(test)))]
 use std::process::{Command as StdCommand, Stdio as StdStdio};
+#[cfg(all(target_os = "macos", not(test)))]
+use std::sync::OnceLock;
 use std::sync::{
     atomic::{AtomicI64, AtomicU64, Ordering},
-    Arc, Mutex, OnceLock,
+    Arc, Mutex,
 };
 use std::time::Duration;
 #[cfg(all(target_os = "macos", not(test)))]
@@ -14,6 +16,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::{oneshot, watch, Mutex as AsyncMutex};
 
 use super::format_timeout_duration;
+use crate::sidecar::services::server_log::{redact_sensitive_stderr_values, DiagnosticAttempt};
 
 type PendingMap = Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>;
 type StderrLines = Arc<Mutex<VecDeque<String>>>;
@@ -22,7 +25,6 @@ type StderrLines = Arc<Mutex<VecDeque<String>>>;
 const WINDOWS_CREATE_NO_WINDOW: u32 = 0x08000000;
 const STDERR_SUMMARY_MAX_LINES: usize = 3;
 const STDERR_SUMMARY_MAX_CHARS: usize = 240;
-const STDERR_REDACTED: &str = "[REDACTED]";
 #[cfg(all(target_os = "macos", not(test)))]
 const LOGIN_SHELL_PATH_TIMEOUT: Duration = Duration::from_millis(1500);
 
@@ -44,6 +46,7 @@ impl StdioClientTransport {
         cwd: Option<&str>,
         env: HashMap<String, String>,
         request_timeout: Duration,
+        diagnostics: DiagnosticAttempt,
     ) -> Result<Self, String> {
         let mut cmd = Command::new(command);
         cmd.args(args)
@@ -116,7 +119,7 @@ impl StdioClientTransport {
                     let mut stderr_lines = stderr_lines_clone.lock().unwrap();
                     record_stderr_line(&mut stderr_lines, &line);
                 }
-                tracing::warn!(target: "mcp::stdio::stderr", "{}", line);
+                diagnostics.stderr(&line);
             }
         });
 
@@ -303,36 +306,6 @@ fn summarize_stderr_line(line: &str) -> String {
 
 fn stderr_summary(lines: &VecDeque<String>) -> Option<String> {
     (!lines.is_empty()).then(|| lines.iter().cloned().collect::<Vec<_>>().join(" | "))
-}
-
-fn redact_sensitive_stderr_values(line: &str) -> String {
-    let redacted = sensitive_stderr_key_regex()
-        .replace_all(line, |caps: &regex_lite::Captures<'_>| {
-            format!("{}{}{}", &caps[1], &caps[2], STDERR_REDACTED)
-        });
-    authorization_stderr_regex()
-        .replace_all(&redacted, |caps: &regex_lite::Captures<'_>| {
-            format!("{}{}{}", &caps[1], &caps[2], STDERR_REDACTED)
-        })
-        .to_string()
-}
-
-fn sensitive_stderr_key_regex() -> &'static regex_lite::Regex {
-    static REGEX: OnceLock<regex_lite::Regex> = OnceLock::new();
-    REGEX.get_or_init(|| {
-        regex_lite::Regex::new(
-            r"(?i)\b([A-Za-z0-9_-]*(?:token|password|secret|api[_-]?(?:key|token)|cookie)[A-Za-z0-9_-]*)\b(\s*[:=]\s*)([^\s,;]+)",
-        )
-        .expect("sensitive stderr key regex should compile")
-    })
-}
-
-fn authorization_stderr_regex() -> &'static regex_lite::Regex {
-    static REGEX: OnceLock<regex_lite::Regex> = OnceLock::new();
-    REGEX.get_or_init(|| {
-        regex_lite::Regex::new(r"(?i)\b(authorization)\b(\s*[:=]\s*)([^,;]+)")
-            .expect("authorization stderr regex should compile")
-    })
 }
 
 /// Build the environment for stdio MCP server processes.
@@ -718,6 +691,21 @@ mod tests {
             Some(
                 "token=[REDACTED] password: [REDACTED] apiKey=[REDACTED] authorization: [REDACTED]; cookie=[REDACTED]"
             )
+        );
+    }
+
+    #[test]
+    fn stderr_summary_redacts_url_userinfo() {
+        let mut lines = VecDeque::new();
+
+        record_stderr_line(
+            &mut lines,
+            "connect https://user:pass@example.com/db then postgres://key@host:5432",
+        );
+
+        assert_eq!(
+            stderr_summary(&lines).as_deref(),
+            Some("connect https://[REDACTED]@example.com/db then postgres://[REDACTED]@host:5432")
         );
     }
 }

@@ -3,10 +3,14 @@
 //! 封装 Profile 持久化和领域事件发射,让路由层只负责 HTTP 形状。
 
 use crate::sidecar::db::profile_repo::{
-    Profile, ProfileDetailServer, ProfileRepository, ProfileServerState, RemoveResult,
+    Profile, ProfileDetailServer, ProfileRepository, ProfileServerState, ProfileServerUpsertInput,
+    RemoveResult,
 };
+use crate::sidecar::db::server_repo::ServerRepository;
 use crate::sidecar::db::Database;
 use crate::sidecar::services::event_bus::{EventBus, Evt};
+use crate::sidecar::services::tool_catalog::{ProfileToolGroup, ToolCatalogService};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 pub struct ProfileService;
@@ -143,6 +147,94 @@ impl ProfileService {
             });
         }
         Ok(state)
+    }
+
+    /// 批量治理写入。与单条接口共用 ProfileRepository 的合并语义，
+    /// 并在目标 profile 处于激活态时按服务器发出目录变更事件。
+    pub fn upsert_profile_servers_batch(
+        db: &Database,
+        event_bus: &Arc<EventBus>,
+        profile_id: &str,
+        items: &[ProfileServerUpsertInput],
+    ) -> Result<(), ProfileServiceError> {
+        let repo = ProfileRepository::new(db);
+        repo.find_by_id(profile_id)
+            .map_err(ProfileServiceError::Internal)?
+            .ok_or_else(|| ProfileServiceError::NotFound("Profile not found".into()))?;
+        if items.is_empty() {
+            return Ok(());
+        }
+        let server_ids: Vec<String> = items.iter().map(|item| item.server_id.clone()).collect();
+        Self::ensure_servers_exist(db, &server_ids)?;
+        // 先读激活态：放在写入之后会把「已落库但读激活态失败」误报为整体失败。
+        let active_profile_id = repo
+            .find_active_id()
+            .map_err(ProfileServiceError::Internal)?;
+        repo.upsert_profile_servers_batch(profile_id, items)
+            .map_err(ProfileServiceError::Internal)?;
+
+        if active_profile_id.as_deref() == Some(profile_id) {
+            let mut emitted: HashSet<&str> = HashSet::new();
+            for server_id in &server_ids {
+                if emitted.insert(server_id.as_str()) {
+                    event_bus.emit(Evt::ServerTools {
+                        server_id: server_id.clone(),
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// 克隆 profile（含服务器绑定与工具禁用态），新 profile 恒为非激活。
+    pub fn clone_profile(
+        db: &Database,
+        source_id: &str,
+        name: &str,
+    ) -> Result<Profile, ProfileServiceError> {
+        if name.trim().is_empty() {
+            return Err(ProfileServiceError::Validation("name is required".into()));
+        }
+        ProfileRepository::new(db)
+            .clone_profile(source_id, name)
+            .map_err(ProfileServiceError::Internal)?
+            .ok_or_else(|| ProfileServiceError::NotFound("Profile not found".into()))
+    }
+
+    /// 治理面板的分组工具矩阵。profile 不存在时返回 NotFound。
+    pub fn get_profile_tool_groups(
+        db: &Database,
+        profile_id: &str,
+    ) -> Result<Vec<ProfileToolGroup>, ProfileServiceError> {
+        ProfileRepository::new(db)
+            .find_by_id(profile_id)
+            .map_err(ProfileServiceError::Internal)?
+            .ok_or_else(|| ProfileServiceError::NotFound("Profile not found".into()))?;
+        Ok(ToolCatalogService::get_profile_tool_groups(db, profile_id))
+    }
+
+    /// 批量写入前统一校验服务器存在，避免部分写入后才发现无效 id。
+    fn ensure_servers_exist(
+        db: &Database,
+        server_ids: &[String],
+    ) -> Result<(), ProfileServiceError> {
+        let known: HashSet<String> = ServerRepository::new(db)
+            .find_by_ids(server_ids)
+            .map_err(ProfileServiceError::Internal)?
+            .into_iter()
+            .map(|server| server.id)
+            .collect();
+        let missing: Vec<&str> = server_ids
+            .iter()
+            .filter(|id| !known.contains(*id))
+            .map(|id| id.as_str())
+            .collect();
+        if !missing.is_empty() {
+            return Err(ProfileServiceError::Validation(format!(
+                "unknown server ids: {missing:?}"
+            )));
+        }
+        Ok(())
     }
 }
 

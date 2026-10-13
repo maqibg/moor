@@ -9,6 +9,10 @@ use tokio::sync::broadcast;
 /// 事件名常量集中在 [Evt::name],是事件词汇表的单一事实来源。
 #[derive(Debug, Clone)]
 pub enum Evt {
+    /// 主动探活结果快照。
+    ServerHealth {
+        snapshot: super::server_manager::ServerHealthSnapshot,
+    },
     /// 服务器状态变更(stopped/starting/running/error)。
     ServerStatus {
         server_id: String,
@@ -27,6 +31,7 @@ impl Evt {
     /// 还原 SSE 事件名字符串。前端按这个值分发处理函数。
     pub fn name(&self) -> &'static str {
         match self {
+            Evt::ServerHealth { .. } => "server:health",
             Evt::ServerStatus { .. } => "server:status",
             Evt::ServerTools { .. } => "server:tools",
             Evt::ProfileActivated { .. } => "profile:activated",
@@ -37,6 +42,13 @@ impl Evt {
     /// 序列化载荷成 SSE data 字段。
     pub fn payload(&self) -> Value {
         match self {
+            Evt::ServerHealth { snapshot } => serde_json::json!({
+                "serverId": snapshot.server_id,
+                "status": snapshot.health.status,
+                "checkedAt": snapshot.health.checked_at,
+                "consecutiveFailures": snapshot.health.consecutive_failures,
+                "errorMessage": snapshot.health.error_message,
+            }),
             Evt::ServerStatus {
                 server_id,
                 status,
@@ -74,7 +86,7 @@ impl EventBus {
             Evt::ServerStatus { .. } | Evt::ServerTools { .. } | Evt::ProfileActivated { .. } => {
                 self.catalog_generation.fetch_add(1, Ordering::AcqRel);
             }
-            Evt::SettingsChanged { .. } => {}
+            Evt::ServerHealth { .. } | Evt::SettingsChanged { .. } => {}
         }
         let _ = self.sender.send(event);
     }

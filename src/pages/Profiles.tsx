@@ -1,12 +1,21 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { useProfiles } from "@/hooks/useProfiles";
 import { Plus, Trash2, Check, Code, FlaskConical, User, Home } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
+import { NO_TEMPLATE, resolveCreateProfileIntent } from "@/lib/profile-create";
 import type { Profile } from "@moor/types";
 import { useI18n } from "@/hooks/useI18n";
 
@@ -33,18 +42,42 @@ const profileAccents = [
 ];
 
 export function Profiles() {
-  const { profiles, createProfile, activateProfile, deleteProfile } = useProfiles();
+  const { profiles, createProfile, cloneProfile, activateProfile, deleteProfile } = useProfiles();
   const { t } = useI18n();
   const [newName, setNewName] = useState("");
+  const [templateId, setTemplateId] = useState(NO_TEMPLATE);
   const [creating, setCreating] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
   const displayProfiles = getProfilesForDisplay(profiles);
 
-  const handleCreate = async () => {
-    if (!newName.trim()) return;
-    await createProfile(newName.trim());
-    setNewName("");
+  const resetCreateForm = () => {
     setCreating(false);
+    setNewName("");
+    setTemplateId(NO_TEMPLATE);
+  };
+
+  const handleCreate = async () => {
+    const intent = resolveCreateProfileIntent(newName, templateId);
+    if (!intent) return;
+    setSubmitting(true);
+    try {
+      if (intent.kind === "clone") {
+        await cloneProfile({ sourceId: intent.sourceId, name: intent.name });
+      } else {
+        await createProfile(intent.name);
+      }
+    } catch (err) {
+      // 失败保留表单输入，错误必须可见（不静默失败）
+      toast.error(
+        t(intent.kind === "clone" ? "Failed to clone profile" : "Failed to create profile"),
+        { description: getErrorMessage(err) },
+      );
+      return;
+    } finally {
+      setSubmitting(false);
+    }
+    resetCreateForm();
   };
 
   return (
@@ -64,25 +97,41 @@ export function Profiles() {
       {/* Create Form */}
       {creating && (
         <Card className="animate-scale-in border-cursor-orange/20">
-          <CardContent className="p-4 flex items-center gap-3">
-            <Input
-              placeholder={t("Profile name")}
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-              autoFocus
-              className="max-w-sm"
-            />
-            <Button onClick={handleCreate}>{t("Create")}</Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setCreating(false);
-                setNewName("");
-              }}
-            >
-              {t("Cancel")}
-            </Button>
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <Input
+                placeholder={t("Profile name")}
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void handleCreate();
+                }}
+                autoFocus
+                className="max-w-sm"
+              />
+              <Select value={templateId} onValueChange={setTemplateId}>
+                <SelectTrigger className="w-[220px]">
+                  <SelectValue placeholder={t("Start from scratch")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_TEMPLATE}>{t("Start from scratch")}</SelectItem>
+                  {profiles.map((profile) => (
+                    <SelectItem key={profile.id} value={profile.id}>
+                      {t("Copy of {{name}}", { name: profile.name })}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button onClick={() => void handleCreate()} disabled={!newName.trim() || submitting}>
+                {t(submitting ? "Saving..." : "Create")}
+              </Button>
+              <Button variant="outline" onClick={resetCreateForm} disabled={submitting}>
+                {t("Cancel")}
+              </Button>
+            </div>
+            <p className="font-body text-xs text-[var(--fg-45)]">
+              {t("Cloned profiles start inactive.")}
+            </p>
           </CardContent>
         </Card>
       )}

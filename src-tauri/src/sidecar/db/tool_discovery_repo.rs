@@ -52,6 +52,12 @@ impl<'a> ToolDiscoveryRepository<'a> {
         )
     }
 
+    /// 治理面板需要按 server 分组展示全部已发现工具。
+    pub fn find_all(&self) -> Result<Vec<ToolDiscovery>, String> {
+        self.db
+            .query_all("SELECT * FROM tool_discoveries", &[], map_tool_discovery)
+    }
+
     pub fn replace_tools_for_server(
         &self,
         server_id: &str,

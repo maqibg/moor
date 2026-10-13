@@ -19,3 +19,35 @@ export interface LogStats {
   topTools: Array<{ toolName: string; count: number; avgDuration: number }>;
   topServers: Array<{ serverId: string; count: number }>;
 }
+
+export interface ToolInsight {
+  toolName: string;
+  serverId: string | null;
+  serverName: string | null;
+  callCount: number;
+  errorCount: number;
+  errorRate: number;
+  avgDurationMs: number | null;
+  p50Ms: number | null;
+  p95Ms: number | null;
+  lastCalledAt: string | null;
+}
+
+export interface ServerInsight {
+  serverId: string;
+  serverName: string | null;
+  callCount: number;
+  errorCount: number;
+  errorRate: number;
+  avgDurationMs: number | null;
+  lastCalledAt: string | null;
+}
+
+export interface LogInsights {
+  totalCalls: number;
+  errorCalls: number;
+  errorRate: number;
+  avgDurationMs: number | null;
+  tools: ToolInsight[];
+  servers: ServerInsight[];
+}

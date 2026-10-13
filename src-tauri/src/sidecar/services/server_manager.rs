@@ -9,8 +9,10 @@ use crate::sidecar::mcp::transport::stdio_client::{
     build_stdio_environment_async, find_executable_on_path,
 };
 use crate::sidecar::services::event_bus::{EventBus, Evt};
+use crate::sidecar::services::server_log::{DiagnosticAttempt, ServerDiagnostics};
 use crate::sidecar::services::settings::{self, Settings, SettingsCache};
 use crate::sidecar::services::tool_catalog::{ToolCatalogEntry, ToolCatalogService, ToolDetail};
+use futures::StreamExt;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -33,6 +35,11 @@ pub trait McpSession: Send + Sync {
         args: Value,
     ) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>>;
     fn disconnect(&self) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>>;
+    /// 轻量存活探测；返回 Err 时错误消息用于健康状态归类。
+    fn ping(
+        &self,
+        timeout: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>>;
     fn set_request_timeout_ms(&self, request_timeout_ms: u32);
     fn alive_receiver(&self) -> Option<tokio::sync::watch::Receiver<bool>>;
 }
@@ -52,6 +59,7 @@ pub trait McpConnector: Send + Sync {
         &'a self,
         config: &'a StoredServerConfig,
         timeouts: ServerTimeouts,
+        diagnostics: DiagnosticAttempt,
     ) -> BoxedConnectFuture<'a>;
 }
 
@@ -64,6 +72,7 @@ struct ServerSlot {
     start_deadline: Option<Instant>,
     start_timeout_ms: Option<u32>,
     session: Option<Arc<dyn McpSession>>,
+    health: HealthState,
 }
 
 impl ServerSlot {
@@ -77,6 +86,7 @@ impl ServerSlot {
             start_deadline: None,
             start_timeout_ms: None,
             session: None,
+            health: HealthState::default(),
         }
     }
 
@@ -108,6 +118,195 @@ impl ServerStatus {
     }
 }
 
+/// 主动探活状态。Unknown = 尚未探测或服务未运行。
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HealthStatus {
+    #[default]
+    Unknown,
+    Healthy,
+    Unhealthy,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HealthState {
+    pub status: HealthStatus,
+    pub checked_at: Option<String>,
+    pub consecutive_failures: u32,
+    pub error_message: Option<String>,
+}
+
+impl HealthState {
+    fn record(&mut self, result: Result<(), String>, manual: bool) {
+        self.checked_at = Some(chrono::Utc::now().to_rfc3339());
+        match result {
+            Ok(()) => {
+                self.status = HealthStatus::Healthy;
+                self.consecutive_failures = 0;
+                self.error_message = None;
+            }
+            Err(message) if is_unsupported_method_error(&message) => {
+                // 服务不支持 ping 不算故障，避免持续误报。
+                self.status = HealthStatus::Unsupported;
+                self.consecutive_failures = 0;
+                self.error_message = None;
+            }
+            Err(message) => {
+                self.consecutive_failures = self.consecutive_failures.saturating_add(1);
+                self.error_message = Some(
+                    crate::sidecar::services::server_log::redact_sensitive_stderr_values(&message),
+                );
+                if manual || self.consecutive_failures >= HEALTH_UNHEALTHY_THRESHOLD {
+                    self.status = HealthStatus::Unhealthy;
+                }
+            }
+        }
+    }
+}
+
+/// 连续失败达到该次数才判定不健康；手动探测立即反映结果。
+const HEALTH_UNHEALTHY_THRESHOLD: u32 = 3;
+const HEALTH_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// 本地 transport 把 JSON-RPC 错误压成消息字符串（不保留 code），因此按
+/// 方法未实现的惯用消息归类为 Unsupported。
+fn is_unsupported_method_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("-32601") || lower.contains("method not found")
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerHealthSnapshot {
+    pub server_id: String,
+    #[serde(flatten)]
+    pub health: HealthState,
+}
+
+#[derive(Debug)]
+pub enum HealthCheckError {
+    NotFound,
+    NotRunning,
+    Changed,
+}
+
+impl ServerManager {
+    pub async fn health_snapshots(&self) -> Vec<ServerHealthSnapshot> {
+        self.slots
+            .lock()
+            .await
+            .iter()
+            .map(|(id, slot)| ServerHealthSnapshot {
+                server_id: id.clone(),
+                health: if matches!(slot.status(), ServerStatus::Running) {
+                    slot.health.clone()
+                } else {
+                    HealthState::default()
+                },
+            })
+            .collect()
+    }
+
+    pub async fn check_health(
+        &self,
+        id: &str,
+        manual: bool,
+    ) -> Result<ServerHealthSnapshot, HealthCheckError> {
+        let (session, token) = {
+            let slots = self.slots.lock().await;
+            let slot = slots.get(id).ok_or(HealthCheckError::NotFound)?;
+            if !matches!(slot.status(), ServerStatus::Running) {
+                return Err(HealthCheckError::NotRunning);
+            }
+            (
+                slot.session.clone().ok_or(HealthCheckError::NotRunning)?,
+                slot.start_token,
+            )
+        };
+
+        let result = session.ping(HEALTH_PROBE_TIMEOUT).await;
+
+        let snapshot = {
+            let mut slots = self.slots.lock().await;
+            let slot = slots.get_mut(id).ok_or(HealthCheckError::Changed)?;
+            // 重启或停止后的旧结果不能污染新会话。
+            if slot.start_token != token || !matches!(slot.status(), ServerStatus::Running) {
+                return Err(HealthCheckError::Changed);
+            }
+            let previous = slot.health.status;
+            slot.health.record(result, manual);
+            if slot.health.status == HealthStatus::Unhealthy && previous != HealthStatus::Unhealthy {
+                tracing::warn!(
+                    server_id = id,
+                    error = ?slot.health.error_message,
+                    "MCP health check failed"
+                );
+            }
+            ServerHealthSnapshot {
+                server_id: id.to_string(),
+                health: slot.health.clone(),
+            }
+        };
+
+        self.event_bus.emit(Evt::ServerHealth {
+            snapshot: snapshot.clone(),
+        });
+        Ok(snapshot)
+    }
+
+    /// 后台探活：默认关闭。必须在 Tokio 运行时内启动（Tauri 主线程没有运行时）。
+    pub fn spawn_health_checker(self: &Arc<Self>) {
+        let manager = self.clone();
+        let mut events = self.event_bus.subscribe();
+        tokio::spawn(async move {
+            loop {
+                // 读内存缓存而不是同步查库：设置写路径会 apply_settings 刷新缓存，
+                // 且本循环会被 SettingsChanged 唤醒重算周期，因此不会读到陈旧值。
+                let config = manager.settings_cache().snapshot();
+                let interval = Duration::from_secs(
+                    config.advanced.mcp_health_check_interval_seconds as u64,
+                );
+                let deadline = tokio::time::Instant::now() + interval;
+                if config.advanced.mcp_health_checks_enabled {
+                    let ids: Vec<String> = manager
+                        .slots
+                        .lock()
+                        .await
+                        .iter()
+                        .filter(|(_, slot)| {
+                            matches!(slot.status(), ServerStatus::Running)
+                                && slot.health.status != HealthStatus::Unsupported
+                        })
+                        .map(|(id, _)| id.clone())
+                        .collect();
+                    futures::stream::iter(ids)
+                        .for_each_concurrent(4, |id| {
+                            let manager = manager.clone();
+                            async move {
+                                let _ = manager.check_health(&id, false).await;
+                            }
+                        })
+                        .await;
+                }
+                loop {
+                    tokio::select! {
+                        _ = tokio::time::sleep_until(deadline), if config.advanced.mcp_health_checks_enabled => break,
+                        event = events.recv() => match event {
+                            Ok(Evt::SettingsChanged { .. }) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => break,
+                            // 新会话刚就绪：立即重新评估并探测，不等满一个周期。
+                            Ok(Evt::ServerStatus { status, .. }) if status == "running" => break,
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                            _ => {}
+                        },
+                    }
+                }
+            }
+        });
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ManagedServer {
     pub status: String,
@@ -118,6 +317,7 @@ pub struct ServerManager {
     db: Arc<Database>,
     event_bus: Arc<EventBus>,
     connector: Arc<dyn McpConnector>,
+    diagnostics: ServerDiagnostics,
     settings_cache: Arc<SettingsCache>,
     catalog_cache: Mutex<Option<CachedToolCatalog>>,
 }
@@ -165,9 +365,28 @@ impl ServerManager {
             db,
             event_bus,
             connector,
+            diagnostics: ServerDiagnostics::default(),
             settings_cache: Arc::new(SettingsCache::new(initial_settings)),
             catalog_cache: Mutex::new(None),
         }
+    }
+
+    /// 生产入口:开启 per-server 日志(<logs_dir>/<server_id>.log),测试默认关闭。
+    pub fn with_logs_dir(mut self, logs_dir: std::path::PathBuf) -> Self {
+        self.diagnostics = ServerDiagnostics::new(logs_dir);
+        self
+    }
+
+    /// 把一次新启动尝试挂到 per-server 日志上;写入失败由 server_log 内部吞掉。
+    fn begin_log_attempt(
+        &self,
+        id: &str,
+        config: Option<&StoredServerConfig>,
+    ) -> DiagnosticAttempt {
+        let command_line = config
+            .map(StoredServerConfig::command_line)
+            .unwrap_or_else(|| "<config unavailable>".to_string());
+        self.diagnostics.begin_attempt(id, &command_line)
     }
 
     pub async fn load_from_db(&self) {
@@ -253,7 +472,8 @@ impl ServerManager {
 
     pub async fn start_server(&self, id: &str) -> Result<(), String> {
         let timeouts = self.get_timeout_settings();
-        let (should_wait, start_token, start_deadline, start_timeout_ms) = {
+        let config = self.get_stored_config(id);
+        let (should_wait, start_token, start_deadline, start_timeout_ms, diagnostics) = {
             let mut slots = self.slots.lock().await;
             let Some(slot) = slots.get_mut(id) else {
                 return Err(format!("Server {id} not found"));
@@ -265,10 +485,13 @@ impl ServerManager {
                     slot.start_token,
                     slot.start_deadline,
                     slot.start_timeout_ms,
+                    None,
                 ),
                 _ => {
                     slot.set_status(ServerStatus::Starting);
                     slot.start_token = slot.start_token.wrapping_add(1);
+                    // 新会话从零开始判定健康。
+                    slot.health = HealthState::default();
                     let wait_deadline = Instant::now()
                         + Duration::from_millis(timeouts.start_ms as u64)
                         + Duration::from_secs(1);
@@ -279,6 +502,7 @@ impl ServerManager {
                         slot.start_token,
                         slot.start_deadline,
                         slot.start_timeout_ms,
+                        Some(self.begin_log_attempt(id, config.as_ref().ok())),
                     )
                 }
             }
@@ -292,10 +516,16 @@ impl ServerManager {
 
         self.persist_server_status(id, "starting", None);
 
+        let diagnostics = diagnostics.expect("A new start must have a diagnostic attempt");
+
         let result =
             match tokio::time::timeout(Duration::from_millis(timeouts.start_ms as u64), async {
-                match self.get_stored_config(id) {
-                    Ok(config) => self.connector.connect(&config, timeouts).await,
+                match config {
+                    Ok(config) => {
+                        self.connector
+                            .connect(&config, timeouts, diagnostics.clone())
+                            .await
+                    }
                     Err(err) => Err(err),
                 }
             })
@@ -341,7 +571,7 @@ impl ServerManager {
                 }
                 self.cache_tools(id, &tools);
                 self.persist_server_status(id, "running", None);
-                self.spawn_death_watcher(id.to_string(), start_token, alive_rx);
+                self.spawn_death_watcher(id.to_string(), start_token, alive_rx, diagnostics);
                 Ok(())
             }
             Err(e) => {
@@ -364,6 +594,7 @@ impl ServerManager {
                         false
                     }
                 };
+                diagnostics.append_event(&format!("Start failed: {public_msg}"));
                 if should_persist {
                     self.persist_server_status(id, "error", Some(&public_msg));
                     Err(e)
@@ -431,6 +662,7 @@ impl ServerManager {
             slot.start_token = slot.start_token.wrapping_add(1);
             slot.start_deadline = None;
             slot.start_timeout_ms = None;
+            slot.health = HealthState::default();
             slot.session.take()
         };
 
@@ -614,6 +846,7 @@ impl ServerManager {
         server_id: String,
         start_token: u64,
         alive_rx: Option<tokio::sync::watch::Receiver<bool>>,
+        diagnostics: DiagnosticAttempt,
     ) {
         let Some(mut rx) = alive_rx else { return };
         let slots = self.slots.clone();
@@ -641,6 +874,7 @@ impl ServerManager {
                     }
                     let repo = ServerRepository::new(&db);
                     let _ = repo.update_status(&server_id, "error", Some(&msg));
+                    diagnostics.append_event(&msg);
                     event_bus.emit(Evt::ServerStatus {
                         server_id: server_id.clone(),
                         status: "error".into(),
@@ -731,6 +965,30 @@ pub(crate) struct StoredServerConfig {
     working_dir: Option<String>,
 }
 
+impl StoredServerConfig {
+    /// 仅供 Server Diagnostics 脱敏后写入的启动描述。
+    fn command_line(&self) -> String {
+        if self.connection_type == "stdio" {
+            let args = self
+                .args
+                .as_ref()
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .unwrap_or_default();
+            format!("{} {}", self.command.as_deref().unwrap_or(""), args)
+                .trim()
+                .to_string()
+        } else {
+            self.url.clone().unwrap_or_default()
+        }
+    }
+}
+
 fn verify_command_available(command: &str, env: &HashMap<String, String>) -> Result<(), String> {
     let path = std::path::Path::new(command);
     if path.is_absolute() {
@@ -801,10 +1059,11 @@ impl McpConnector for StdioHttpConnector {
         &'a self,
         config: &'a StoredServerConfig,
         timeouts: ServerTimeouts,
+        diagnostics: DiagnosticAttempt,
     ) -> BoxedConnectFuture<'a> {
         Box::pin(async move {
             match config.connection_type.as_str() {
-                "stdio" => Self::connect_stdio(config, timeouts).await,
+                "stdio" => Self::connect_stdio(config, timeouts, diagnostics).await,
                 "http" => Self::connect_http(config, timeouts).await,
                 other => Err(format!("Unknown connection type: {other}")),
             }
@@ -816,6 +1075,7 @@ impl StdioHttpConnector {
     async fn connect_stdio(
         config: &StoredServerConfig,
         timeouts: ServerTimeouts,
+        diagnostics: DiagnosticAttempt,
     ) -> Result<(Vec<ToolInsert>, Box<dyn McpSession>), String> {
         let command = config
             .command
@@ -849,6 +1109,7 @@ impl StdioHttpConnector {
             cwd: config.working_dir.clone(),
             env,
             request_timeout_ms: timeouts.start_ms,
+            diagnostics,
         })
         .await?;
 
@@ -1703,6 +1964,12 @@ process.stdin.on("data", (chunk) => {{
                 Ok(())
             })
         }
+        fn ping(
+            &self,
+            _timeout: Duration,
+        ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+            Box::pin(async move { Ok(()) })
+        }
         fn set_request_timeout_ms(&self, _ms: u32) {
             self.timeout_calls
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -1747,6 +2014,13 @@ process.stdin.on("data", (chunk) => {{
             Box::pin(async { Ok(()) })
         }
 
+        fn ping(
+            &self,
+            _timeout: Duration,
+        ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+            Box::pin(async { Ok(()) })
+        }
+
         fn set_request_timeout_ms(&self, _request_timeout_ms: u32) {}
 
         fn alive_receiver(&self) -> Option<tokio::sync::watch::Receiver<bool>> {
@@ -1779,6 +2053,7 @@ process.stdin.on("data", (chunk) => {{
             &'a self,
             _config: &'a StoredServerConfig,
             _timeouts: ServerTimeouts,
+            _diagnostics: DiagnosticAttempt,
         ) -> BoxedConnectFuture<'a> {
             self.connect_calls
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -1934,6 +2209,95 @@ process.stdin.on("data", (chunk) => {{
             .await
             .expect("server present");
         assert_eq!(stopped.status, "stopped");
+
+        let _ = std::fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn health_state_needs_three_failures_but_manual_failure_is_immediate() {
+        let mut state = HealthState::default();
+        state.record(Ok(()), false);
+        assert_eq!(state.status, HealthStatus::Healthy);
+
+        for _ in 0..2 {
+            state.record(Err("timeout".into()), false);
+        }
+        assert_eq!(state.status, HealthStatus::Healthy, "transient failures stay healthy");
+        assert_eq!(state.consecutive_failures, 2);
+
+        state.record(Err("timeout".into()), false);
+        assert_eq!(state.status, HealthStatus::Unhealthy);
+
+        state.record(Ok(()), false);
+        assert_eq!(state.status, HealthStatus::Healthy);
+        assert_eq!(state.consecutive_failures, 0);
+        assert!(state.error_message.is_none());
+
+        let mut manual = HealthState::default();
+        manual.record(Err("boom".into()), true);
+        assert_eq!(manual.status, HealthStatus::Unhealthy);
+        assert_eq!(manual.consecutive_failures, 1);
+    }
+
+    #[test]
+    fn unsupported_ping_is_not_a_failure_and_errors_are_redacted() {
+        let mut state = HealthState::default();
+        state.record(Err("Method not found (-32601)".into()), false);
+        assert_eq!(state.status, HealthStatus::Unsupported);
+        assert_eq!(state.consecutive_failures, 0);
+        assert!(state.error_message.is_none());
+
+        let mut secret = HealthState::default();
+        secret.record(Err("failed with token=supersecret".into()), true);
+        assert_eq!(secret.status, HealthStatus::Unhealthy);
+        let message = secret.error_message.expect("error message recorded");
+        assert!(message.contains("[REDACTED]"), "unexpected message: {message}");
+        assert!(!message.contains("supersecret"));
+    }
+
+    #[tokio::test]
+    async fn health_snapshots_track_running_servers_and_manual_checks() {
+        let data_dir = temp_data_dir("health-check");
+        std::fs::create_dir_all(&data_dir).expect("failed to create temp dir");
+        let (connector, _calls) = FakeConnector::new();
+        let (db, manager) = build_manager_with_fake_connector(&data_dir, Arc::new(connector));
+
+        let server_id = uuid::Uuid::new_v4().to_string();
+        insert_stdio_server(&db, &server_id, "health", "unused".into(), false, 0);
+        manager.load_from_db().await;
+
+        assert!(manager.check_health("missing", true).await.is_err());
+        assert!(manager.check_health(&server_id, true).await.is_err());
+
+        manager
+            .start_server(&server_id)
+            .await
+            .expect("start should succeed via fake connector");
+
+        let snapshot = manager
+            .check_health(&server_id, true)
+            .await
+            .expect("running server should be probeable");
+        assert_eq!(snapshot.health.status, HealthStatus::Healthy);
+        assert!(snapshot.health.checked_at.is_some());
+
+        let snapshots = manager.health_snapshots().await;
+        let health = snapshots
+            .iter()
+            .find(|entry| entry.server_id == server_id)
+            .expect("snapshot for started server");
+        assert_eq!(health.health.status, HealthStatus::Healthy);
+
+        manager
+            .stop_server(&server_id)
+            .await
+            .expect("stop should succeed");
+        let after_stop = manager.health_snapshots().await;
+        let health = after_stop
+            .iter()
+            .find(|entry| entry.server_id == server_id)
+            .expect("snapshot for stopped server");
+        assert_eq!(health.health.status, HealthStatus::Unknown);
 
         let _ = std::fs::remove_dir_all(data_dir);
     }

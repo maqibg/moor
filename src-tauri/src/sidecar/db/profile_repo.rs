@@ -19,6 +19,36 @@ pub struct ProfileServerState {
     pub disabled_tools: Vec<String>,
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileServerUpsertInput {
+    pub server_id: String,
+    pub enabled: Option<bool>,
+    pub disabled_tools: Option<Vec<String>>,
+}
+
+/// upsert 合并语义的唯一实现：enabled 与 disabled_tools 是相互独立的可选补丁，
+/// 缺省方保留现有值；新行缺省 enabled=true / 空禁用表。单条与批量接口共用，
+/// 两处语义分叉会让治理面板与单点编辑互相覆盖。
+fn resolve_profile_server_state(
+    existing: Option<(i64, String)>,
+    enabled: Option<bool>,
+    disabled_tools: Option<&Vec<String>>,
+) -> (i64, String) {
+    let tools_json =
+        |tools: &Vec<String>| serde_json::to_string(tools).unwrap_or_else(|_| "[]".into());
+    match (existing, enabled, disabled_tools) {
+        (Some(_), Some(en), Some(tools)) => (en as i64, tools_json(tools)),
+        (Some((_, t)), Some(en), None) => (en as i64, t),
+        (Some((e, _)), None, Some(tools)) => (e, tools_json(tools)),
+        (Some((e, t)), None, None) => (e, t),
+        (None, _, _) => (
+            enabled.unwrap_or(true) as i64,
+            disabled_tools.map_or_else(|| "[]".to_string(), tools_json),
+        ),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileDetailServer {
@@ -189,25 +219,8 @@ impl<'a> ProfileRepository<'a> {
             |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
         )?;
 
-        let (final_enabled, final_tools) = match (&existing, enabled, disabled_tools) {
-            (Some(_), Some(en), Some(tools)) => (
-                en as i64,
-                serde_json::to_string(tools).unwrap_or_else(|_| "[]".into()),
-            ),
-            (Some((_, t)), Some(en), None) => (en as i64, t.clone()),
-            (Some((e, _)), None, Some(tools)) => (
-                *e,
-                serde_json::to_string(tools).unwrap_or_else(|_| "[]".into()),
-            ),
-            (Some((e, t)), None, None) => (*e, t.clone()),
-            (None, _, _) => (
-                enabled.unwrap_or(true) as i64,
-                disabled_tools.map_or_else(
-                    || "[]".to_string(),
-                    |t| serde_json::to_string(t).unwrap_or_else(|_| "[]".into()),
-                ),
-            ),
-        };
+        let (final_enabled, final_tools) =
+            resolve_profile_server_state(existing.clone(), enabled, disabled_tools);
 
         if existing.is_some() {
             self.db.run(
@@ -225,6 +238,73 @@ impl<'a> ProfileRepository<'a> {
             enabled: final_enabled != 0,
             disabled_tools: serde_json::from_str(&final_tools).unwrap_or_default(),
         })
+    }
+
+    /// 批量治理写入：每项的 enabled / disabled_tools 都是独立可选补丁。
+    pub fn upsert_profile_servers_batch(
+        &self,
+        profile_id: &str,
+        items: &[ProfileServerUpsertInput],
+    ) -> Result<(), String> {
+        self.db.transaction(|conn| {
+            for item in items {
+                let existing = match conn.query_row(
+                    "SELECT enabled, disabled_tools FROM profile_servers WHERE profile_id = ?1 AND server_id = ?2",
+                    rusqlite::params![profile_id, item.server_id],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                ) {
+                    Ok(row) => Some(row),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                    Err(error) => return Err(error.to_string()),
+                };
+                let (final_enabled, final_tools) = resolve_profile_server_state(
+                    existing,
+                    item.enabled,
+                    item.disabled_tools.as_ref(),
+                );
+                conn.execute(
+                    "INSERT INTO profile_servers (profile_id, server_id, enabled, disabled_tools) VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(profile_id, server_id) DO UPDATE SET enabled = excluded.enabled, disabled_tools = excluded.disabled_tools",
+                    rusqlite::params![profile_id, item.server_id, final_enabled, final_tools],
+                )
+                .map_err(|error| error.to_string())?;
+            }
+            Ok(())
+        })
+    }
+
+    /// 克隆 profile：复制全部 profile_servers（enabled + disabled_tools），
+    /// 新 profile 恒为非激活。源不存在时返回 None。
+    pub fn clone_profile(
+        &self,
+        source_id: &str,
+        new_name: &str,
+    ) -> Result<Option<Profile>, String> {
+        let source = self.db.query_one(
+            "SELECT id FROM profiles WHERE id = ?1",
+            &[&source_id],
+            |row| row.get::<_, String>(0),
+        )?;
+        if source.is_none() {
+            return Ok(None);
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        self.db.transaction(|conn| {
+            conn.execute(
+                "INSERT INTO profiles (id, name, is_active, created_at, updated_at) VALUES (?1, ?2, 0, ?3, ?3)",
+                rusqlite::params![&id, &new_name, &now],
+            )
+            .map_err(|error| error.to_string())?;
+            conn.execute(
+                "INSERT INTO profile_servers (profile_id, server_id, enabled, disabled_tools)
+                 SELECT ?1, server_id, enabled, disabled_tools FROM profile_servers WHERE profile_id = ?2",
+                rusqlite::params![&id, &source_id],
+            )
+            .map_err(|error| error.to_string())?;
+            Ok(())
+        })?;
+        self.find_by_id(&id)
     }
 
     pub fn find_active_profile_server_ids(&self) -> Result<Vec<String>, String> {
@@ -330,5 +410,116 @@ mod tests {
 
         assert_eq!(repo.find_active_id().unwrap(), Some(first.id));
         let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+    }
+
+    fn temp_repo(test_name: &str) -> (ProfileRepository<'static>, std::path::PathBuf) {
+        let db_path = temp_db_path(test_name);
+        std::fs::create_dir_all(db_path.parent().unwrap()).expect("failed to create temp db dir");
+        let db = Box::leak(Box::new(Database::open(&db_path).expect("failed to open temp db")));
+        db.run_migrations().expect("failed to migrate temp db");
+        (
+            ProfileRepository::new(db),
+            db_path.parent().unwrap().to_path_buf(),
+        )
+    }
+
+    /// profile_servers.server_id 有外键约束，绑定前必须先有真实服务器。
+    fn insert_server(repo: &ProfileRepository<'_>, id: &str) {
+        use crate::sidecar::db::server_repo::{ServerInsertInput, ServerRepository};
+        ServerRepository::new(repo.db)
+            .insert_one_with_id(
+                id,
+                0,
+                &ServerInsertInput {
+                    name: id.into(),
+                    connection_type: "stdio".into(),
+                    command: Some("node".into()),
+                    args: None,
+                    url: None,
+                    env: None,
+                    headers: None,
+                    working_dir: None,
+                    auto_start: false,
+                },
+            )
+            .expect("failed to insert server");
+    }
+
+    #[test]
+    fn clone_profile_copies_server_states_and_stays_inactive() {
+        let (repo, dir) = temp_repo("clone");
+        let source = repo.create("Work").expect("failed to create profile");
+        repo.activate(&source.id).expect("failed to activate");
+        insert_server(&repo, "srv-a");
+        repo.upsert_profile_server(&source.id, "srv-a", Some(false), Some(&vec!["t1".into()]))
+            .expect("failed to set state");
+
+        let cloned = repo
+            .clone_profile(&source.id, "Work copy")
+            .expect("clone should succeed")
+            .expect("source exists");
+
+        assert_eq!(cloned.name, "Work copy");
+        assert!(!cloned.is_active);
+        assert_eq!(cloned.server_count, Some(1));
+        assert_eq!(
+            repo.find_active_id().unwrap(),
+            Some(source.id),
+            "cloning must not steal the active profile"
+        );
+        let state = repo
+            .upsert_profile_server(&cloned.id, "srv-a", None, None)
+            .expect("read back cloned state");
+        assert!(!state.enabled);
+        assert_eq!(state.disabled_tools, vec!["t1".to_string()]);
+
+        assert!(repo
+            .clone_profile("missing", "nope")
+            .expect("clone should not fail")
+            .is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn batch_upsert_merges_enabled_and_disabled_tools_independently() {
+        let (repo, dir) = temp_repo("batch-upsert");
+        let profile = repo.create("Work").expect("failed to create profile");
+        insert_server(&repo, "srv-a");
+        insert_server(&repo, "srv-b");
+        repo.upsert_profile_server(&profile.id, "srv-a", Some(true), Some(&vec!["old".into()]))
+            .expect("failed to seed state");
+
+        repo.upsert_profile_servers_batch(
+            &profile.id,
+            &[
+                // Only the enabled flag is patched: disabled tools must survive.
+                ProfileServerUpsertInput {
+                    server_id: "srv-a".into(),
+                    enabled: Some(false),
+                    disabled_tools: None,
+                },
+                // New row with no patches defaults to enabled with no disabled tools.
+                ProfileServerUpsertInput {
+                    server_id: "srv-b".into(),
+                    enabled: None,
+                    disabled_tools: None,
+                },
+            ],
+        )
+        .expect("batch upsert should succeed");
+
+        let a = repo
+            .upsert_profile_server(&profile.id, "srv-a", None, None)
+            .expect("read back srv-a");
+        assert!(!a.enabled);
+        assert_eq!(a.disabled_tools, vec!["old".to_string()]);
+
+        let b = repo
+            .upsert_profile_server(&profile.id, "srv-b", None, None)
+            .expect("read back srv-b");
+        assert!(b.enabled);
+        assert!(b.disabled_tools.is_empty());
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
