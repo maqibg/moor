@@ -2,9 +2,8 @@ import { HealthSettings } from "@/components/shared/HealthSettings";
 import { UpdateCheck } from "@/components/shared/UpdateCheck";
 import { useTranslation } from "@/contexts/LocaleContext";
 import { useState, useEffect, useCallback } from "react";
-import { cn, createErrorWithCause, getErrorMessage } from "@/lib/utils";
-import { getApiRuntime, resetRuntime } from "@/lib/api/runtime";
-import { syncRuntimeSettings, applyLoginAutostartSetting } from "@/lib/tauri";
+import { cn, getErrorMessage } from "@/lib/utils";
+import { getApiRuntime } from "@/lib/api/runtime";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ErrorBanner } from "@/components/shared/ErrorBanner";
 import { useSettings } from "@/hooks/useSettings";
@@ -19,7 +18,6 @@ import type { GeneralSettings, SettingsGroup, SidecarInfo, LocalePreference } fr
 import { CopyButton } from "@/components/shared/CopyButton";
 import {
   getAdvancedPortStatus,
-  getGeneralSettingRuntimeAction,
   getPortBannerState,
   getSettingsPageLoadState,
   parseIdleTtlSecondsInput,
@@ -168,29 +166,7 @@ function GeneralSection({ onError }: { onError: (message: string | null) => void
       const general: Partial<GeneralSettings> = { [key]: value };
       try {
         onError(null);
-        const action = getGeneralSettingRuntimeAction(key);
-        if (action === "loginAutostart") {
-          await applyLoginAutostartSetting(value);
-          try {
-            await updateSettings({ general });
-          } catch (err) {
-            try {
-              await applyLoginAutostartSetting(!value);
-            } catch (rollbackErr) {
-              throw createErrorWithCause(
-                `${getErrorMessage(err, "Failed to save login auto-start setting")}. Rollback failed: ${getErrorMessage(rollbackErr, "unknown error")}`,
-                rollbackErr,
-              );
-            }
-            throw err;
-          }
-          return;
-        }
-
         await updateSettings({ general });
-        if (action === "windowRuntime") {
-          await syncRuntimeSettings();
-        }
       } catch (err) {
         onError(getErrorMessage(err, "Failed to update runtime settings"));
       }
@@ -618,16 +594,7 @@ export function SettingsPage() {
     if (!window.confirm("Reset all settings to their default values?")) return;
     try {
       setErrorMessage(null);
-      const previousAutoStartOnLogin = settings.general.autoStartOnLogin;
-      await applyLoginAutostartSetting(false);
-      try {
-        await resetSettings();
-      } catch (err) {
-        await applyLoginAutostartSetting(previousAutoStartOnLogin);
-        throw err;
-      }
-      await syncRuntimeSettings();
-      resetRuntime();
+      await resetSettings();
       await refreshRuntimeInfo();
       setPortChangeApplied(false);
       setLanAccessChangeApplied(false);

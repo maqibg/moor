@@ -13,6 +13,10 @@ export async function getServerLogPath(serverId: string): Promise<string> {
   return invoke<string>("get_server_log_path", { serverId });
 }
 
+export async function openServerLog(serverId: string): Promise<void> {
+  await invoke("open_server_log", { serverId });
+}
+
 export async function syncRuntimeSettings(locale?: "zh-CN" | "en"): Promise<void> {
   if (!isTauriRuntime()) return;
   await invoke("sync_runtime_settings", { locale });

@@ -259,6 +259,8 @@ export const messages = {
   "The server changed during the check. Try again.": "检查期间服务器发生变更，请重试。",
   "Unable to check for updates.": "无法检查更新。",
   "Unable to save the server order.": "无法保存服务器顺序。",
+  "Unable to save settings or restore login auto-start.": "保存设置和恢复登录自启均失败。",
+  "Settings were saved, but applying runtime settings failed.": "设置已保存，但应用到运行时失败。",
   "The configuration is too large.": "配置内容过大。",
   "Unable to connect to Moor. Check that it is running.": "无法连接 Moor，请确认应用正在运行。",
   "Name is required.": "名称不能为空。",

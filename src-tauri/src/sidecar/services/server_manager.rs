@@ -1,4 +1,4 @@
-// Server Runtime 聚合根:registry + 启停状态机 + 会话监护 + 工具刷新。
+// Server Runtime 聚合根:registry + 启停状态机 + 会话监护 + 工具调用与审计。
 // 域内自包含块分域:status(状态类型)/ session(连接 seam)/ errors(脱敏)。
 mod errors;
 mod health;
@@ -16,6 +16,7 @@ use crate::sidecar::db::profile_repo::ProfileRepository;
 use crate::sidecar::db::server_repo::{Server, ServerRepository};
 use crate::sidecar::db::tool_discovery_repo::{ToolDiscoveryRepository, ToolInsert};
 use crate::sidecar::db::Database;
+use crate::sidecar::services::audit_recorder::{AuditRecorder, ToolCallRecord};
 use crate::sidecar::services::event_bus::{EventBus, Evt};
 use crate::sidecar::services::server_log::{DiagnosticAttempt, ServerDiagnostics};
 use crate::sidecar::services::settings;
@@ -41,6 +42,20 @@ struct ServerSlot {
 #[derive(Debug, Clone)]
 pub struct ManagedServer {
     pub status: String,
+}
+
+#[derive(Debug)]
+pub enum ToolCallError {
+    InvalidTool(String),
+    Execution(String),
+}
+
+impl std::fmt::Display for ToolCallError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidTool(message) | Self::Execution(message) => formatter.write_str(message),
+        }
+    }
 }
 
 pub struct ServerManager {
@@ -388,27 +403,67 @@ impl ServerManager {
         }
     }
 
-    pub async fn call_tool(&self, exposed_name: &str, args: Value) -> Result<Value, String> {
-        let catalog = self.get_tool_catalog(None).await;
-        let owner = catalog
-            .iter()
-            .find(|t| t.exposed_name == exposed_name)
-            .ok_or_else(|| format!("Tool \"{exposed_name}\" not found or disabled"))?;
+    pub async fn call_tool(
+        &self,
+        exposed_name: &str,
+        args: Value,
+        agent_info: Option<&str>,
+    ) -> Result<Value, ToolCallError> {
+        // Profile 只解析一次；没有 Active Profile 时不回退到后续激活的 Profile。
+        let profile_id = ProfileRepository::new(&self.db)
+            .find_active_id()
+            .ok()
+            .flatten();
+        let callable_ids = self.get_callable_server_ids().await;
+        let owner = profile_id.as_deref().and_then(|id| {
+            ToolCatalogService::get_tool_catalog(&self.db, Some(id), Some(&callable_ids))
+                .into_iter()
+                .find(|tool| tool.exposed_name == exposed_name)
+        });
 
-        let session_arc = {
-            let slots = self.slots.lock().await;
-            let slot = slots
-                .get(&owner.server_id)
-                .ok_or_else(|| format!("Server \"{}\" is not running", owner.server_name))?;
-            slot.session
-                .clone()
-                .ok_or_else(|| format!("Server \"{}\" is not running", owner.server_name))
-        }?;
+        let start_time = Instant::now();
+        let result = match owner.as_ref() {
+            Some(owner) => async {
+                let session_arc = {
+                    let slots = self.slots.lock().await;
+                    let slot = slots.get(&owner.server_id).ok_or_else(|| {
+                        format!("Server \"{}\" is not running", owner.server_name)
+                    })?;
+                    slot.session
+                        .clone()
+                        .ok_or_else(|| format!("Server \"{}\" is not running", owner.server_name))
+                }?;
 
-        let request_timeout_ms = self.get_timeout_settings().request_ms;
-        let mut client = session_arc.lock().await;
-        client.set_request_timeout_ms(request_timeout_ms);
-        client.call_tool(&owner.tool_name, args).await
+                let request_timeout_ms = self.get_timeout_settings().request_ms;
+                let mut client = session_arc.lock().await;
+                client.set_request_timeout_ms(request_timeout_ms);
+                client.call_tool(&owner.tool_name, args.clone()).await
+            }
+            .await
+            .map_err(ToolCallError::Execution),
+            None => Err(ToolCallError::InvalidTool(format!(
+                "Tool \"{exposed_name}\" not found or disabled"
+            ))),
+        };
+        let error = result.as_ref().err().map(ToString::to_string);
+        AuditRecorder::record(
+            &self.db,
+            ToolCallRecord {
+                profile_id: profile_id.as_deref(),
+                server_id: owner.as_ref().map(|tool| tool.server_id.as_str()),
+                tool_name: exposed_name,
+                arguments: &args,
+                result: result.as_ref().ok(),
+                error: error.as_deref(),
+                duration_ms: if owner.is_some() {
+                    start_time.elapsed().as_millis() as i64
+                } else {
+                    0
+                },
+                agent_info,
+            },
+        );
+        result
     }
 
     pub async fn get_tool_catalog(
@@ -951,13 +1006,13 @@ process.stdin.on("data", (chunk) => {{
 
         let err = tokio::time::timeout(
             std::time::Duration::from_millis(6_500),
-            manager.call_tool("phase__echo", serde_json::json!({})),
+            manager.call_tool("phase__echo", serde_json::json!({}), None),
         )
         .await
         .expect("tool call should return before the outer timeout")
         .expect_err("runtime requests should restore the configured request timeout");
         assert!(
-            err.contains("timed out after 5s"),
+            err.to_string().contains("timed out after 5s"),
             "unexpected request error: {err}"
         );
 

@@ -3,7 +3,6 @@ import {
   MCP_TIMEOUT_MS_MIN,
   MCP_SESSION_IDLE_TTL_MS_MAX,
   MCP_SESSION_IDLE_TTL_MS_MIN,
-  type GeneralSettings,
   type SidecarInfo,
 } from "@moor/types";
 import { getErrorMessage } from "@/lib/utils";
@@ -16,8 +15,6 @@ export type SettingsPageLoadState =
 export type PortBannerState = { kind: "restart" };
 
 export type AdvancedPortStatus = { kind: "mismatch"; currentPort: number; configuredPort: number };
-
-export type GeneralSettingRuntimeAction = "loginAutostart" | "settingsOnly" | "windowRuntime";
 
 export type TimeoutSecondsInputState =
   | { valid: true; milliseconds: number }
@@ -96,18 +93,6 @@ export function getAdvancedPortStatus({
     return null;
   }
   return { kind: "mismatch", currentPort: runtimeInfo.port, configuredPort };
-}
-
-export function getGeneralSettingRuntimeAction(
-  key: keyof GeneralSettings,
-): GeneralSettingRuntimeAction {
-  if (key === "autoStartOnLogin") {
-    return "loginAutostart";
-  }
-  if (key === "autoStartServersOnLaunch") {
-    return "settingsOnly";
-  }
-  return "windowRuntime";
 }
 
 export function parseTimeoutSecondsInput(value: string): TimeoutSecondsInputState {

@@ -2,11 +2,11 @@ import { describe, expect, it } from "vite-plus/test";
 import type { GeneralSettings, SidecarInfo } from "@moor/types";
 import {
   getAdvancedPortStatus,
-  getGeneralSettingRuntimeAction,
   getPortBannerState,
   getSettingsPageLoadState,
   parseTimeoutSecondsInput,
 } from "./settings-state";
+import { getGeneralSettingRuntimeAction } from "@/hooks/useSettings";
 import { MCP_TIMEOUT_MS_MAX, MCP_TIMEOUT_MS_MIN } from "@moor/types";
 
 const runtimeInfo = (port: number): SidecarInfo => ({

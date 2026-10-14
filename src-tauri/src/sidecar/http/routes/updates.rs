@@ -13,5 +13,7 @@ async fn check(State(state): State<Arc<AppState>>) -> Result<Json<UpdateCheck>, 
     check_update(&state.version)
         .await
         .map(Json)
-        .map_err(|error| AppError::upstream("UPDATE_CHECK_FAILED", error))
+        .map_err(|error| {
+            AppError::upstream("UPDATE_CHECK_FAILED", error.message, error.client_message)
+        })
 }

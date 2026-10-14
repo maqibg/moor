@@ -200,9 +200,11 @@ impl<'a> AuditLogRepository<'a> {
         let timestamp = normalize_timestamp(timestamp)?;
         let args_json = arguments.map(|v| serde_json::to_string(v).unwrap_or_default());
         let result_json = result.map(|v| serde_json::to_string(v).unwrap_or_default());
+        // 同次写入解析失效关联，避免调用结束前删除归属导致整条审计丢失。
         self.db.run(
             "INSERT INTO audit_logs (id, timestamp, profile_id, server_id, tool_name, arguments, result, error, duration_ms, agent_info)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             VALUES (?1, ?2, (SELECT id FROM profiles WHERE id = ?3),
+                     (SELECT id FROM mcp_servers WHERE id = ?4), ?5, ?6, ?7, ?8, ?9, ?10)",
             &[&id, &timestamp, &profile_id, &server_id, &tool_name, &args_json, &result_json, &error, &duration_ms, &agent_info],
         )
     }

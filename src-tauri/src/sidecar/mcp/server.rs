@@ -1,6 +1,6 @@
 use super::jsonrpc;
 use crate::sidecar::http::AppState;
-use crate::sidecar::services::audit_recorder::{AuditRecorder, ToolCallRecord};
+use crate::sidecar::services::server_manager::ToolCallError;
 use std::sync::Arc;
 
 /// Handle an incoming MCP JSON-RPC request and produce a response.
@@ -75,65 +75,16 @@ async fn handle_tools_call(
         .cloned()
         .unwrap_or(serde_json::json!({}));
 
-    let catalog = state.server_manager.get_tool_catalog(None).await;
-    let owner = match catalog
-        .iter()
-        .find(|t| t.exposed_name == tool_name)
-        .cloned()
-    {
-        Some(t) => t,
-        None => {
-            let error = format!("Tool \"{tool_name}\" not found or disabled");
-            AuditRecorder::record(
-                &state.db,
-                ToolCallRecord {
-                    server_id: None,
-                    tool_name,
-                    arguments: &arguments,
-                    result: None,
-                    error: Some(&error),
-                    duration_ms: 0,
-                    agent_info,
-                },
-            );
-            return jsonrpc::make_error(id, jsonrpc::INVALID_PARAMS, &error);
-        }
-    };
-
-    let start_time = std::time::Instant::now();
     match state
         .server_manager
-        .call_tool(tool_name, arguments.clone())
+        .call_tool(tool_name, arguments, agent_info)
         .await
     {
-        Ok(result) => {
-            AuditRecorder::record(
-                &state.db,
-                ToolCallRecord {
-                    server_id: Some(&owner.server_id),
-                    tool_name,
-                    arguments: &arguments,
-                    result: Some(&result),
-                    error: None,
-                    duration_ms: start_time.elapsed().as_millis() as i64,
-                    agent_info,
-                },
-            );
-            jsonrpc::make_response(id, result)
+        Ok(result) => jsonrpc::make_response(id, result),
+        Err(ToolCallError::InvalidTool(err)) => {
+            jsonrpc::make_error(id, jsonrpc::INVALID_PARAMS, &err)
         }
-        Err(err) => {
-            AuditRecorder::record(
-                &state.db,
-                ToolCallRecord {
-                    server_id: Some(&owner.server_id),
-                    tool_name,
-                    arguments: &arguments,
-                    result: None,
-                    error: Some(&err),
-                    duration_ms: start_time.elapsed().as_millis() as i64,
-                    agent_info,
-                },
-            );
+        Err(ToolCallError::Execution(err)) => {
             jsonrpc::make_error(id, jsonrpc::INTERNAL_ERROR, &err)
         }
     }

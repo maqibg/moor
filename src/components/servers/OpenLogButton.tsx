@@ -1,10 +1,9 @@
 import { useTranslation } from "@/contexts/LocaleContext";
 import { useEffect, useState } from "react";
-import { open } from "@tauri-apps/plugin-shell";
 import { FolderOpen } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { getServerLogPath } from "@/lib/tauri";
+import { getServerLogPath, openServerLog } from "@/lib/tauri";
 import { getNoticeErrorMessage } from "@/lib/utils";
 
 interface OpenLogButtonProps {
@@ -37,9 +36,11 @@ export function OpenLogButton({ serverId }: OpenLogButtonProps) {
       return;
     }
     try {
-      await open(logPath);
+      await openServerLog(serverId);
     } catch (err) {
-      toast.error(t("Failed to open log file"), { description: getNoticeErrorMessage(err) });
+      toast.error(t("Failed to open log file"), {
+        description: getNoticeErrorMessage(typeof err === "string" ? new Error(err) : err),
+      });
     }
   };
 

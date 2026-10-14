@@ -110,6 +110,30 @@ fn get_server_log_path(app: tauri::AppHandle, server_id: String) -> Result<Strin
     )
 }
 
+#[tauri::command]
+async fn open_server_log(app: tauri::AppHandle, server_id: String) -> Result<(), String> {
+    let log_path = PathBuf::from(get_server_log_path(app.clone(), server_id)?);
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_shell::ShellExt;
+
+        let logs_dir = log_path
+            .parent()
+            .ok_or("Invalid log path")?
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        let log_path = log_path.canonicalize().map_err(|error| error.to_string())?;
+        if !log_path.starts_with(logs_dir) || !log_path.is_file() {
+            return Err("Invalid server log file".to_string());
+        }
+        // 复用现有插件，仅打开校验后的日志，避免扩大 WebView 的 shell 权限。
+        #[allow(deprecated)]
+        let result = app.shell().open(log_path.to_string_lossy(), None);
+        result.map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 fn apply_autostart_setting(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
     login_autostart::validate_login_autostart_enable(enabled)?;
@@ -270,6 +294,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_sidecar_info,
             get_server_log_path,
+            open_server_log,
             sync_runtime_settings,
             apply_login_autostart_setting,
         ])

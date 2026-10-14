@@ -15,8 +15,12 @@ The single Profile in effect for all Agents at a time; its server/tool toggles d
 _Avoid_: current profile, selected profile.
 
 **Hot-Swap**:
-Changing the Active Profile without disconnecting Agents; the next `tools/list` reflects the change. Affects exposed Tools only, never a Server's run status. Activation emits `profile:activated`; the frontend invalidates its caches on it (contract test: `profile_service` tests).
+变更 Active Profile 而不主动断开 Agent；后续 `tools/list` 和新接受的 `tools/call` 使用新 Profile。已解析的调用保留原 Tool Call Context。只影响暴露的 Tool，不改变 Server 的运行状态。激活时发送 `profile:activated`，前端据此使缓存失效。
 _Avoid_: reload, switch.
+
+**Tool Call Context**:
+一次 Tool 调用解析时固定的 Profile、Server 与原始 `tool_name`。执行和 Audit Log 共用该归属，不在完成时重新读取 Active Profile；日志中的 Tool 名称保留 Agent 使用的 exposed name。固定归属不改变 Server 现有的停止与重启规则。
+_Avoid_: 完成时的活动方案、重复解析 Tool 归属。
 
 **exposed name**:
 The name a Tool is published under to Agents, derived from the server slug and `tool_name`, with a short server-id suffix on collision. Distinct from `tool_name` (the backend MCP server's own name).
@@ -55,7 +59,7 @@ Detecting servers from a known client's config file (registry-driven — see `cl
 _Avoid_: discover (reserve for ToolDiscovery).
 
 **Audit Log**:
-The record of every `tools/call`: profile, server, tool, redacted arguments, result/error, duration, agent.
+审计开启时记录 `tools/call` 的 Profile、Server、Tool、脱敏参数、结果或错误、耗时与 Agent。使用 Tool Call Context 中的归属；写入时关联已删除则仅将该关联设为 NULL，保留记录。审计失败不影响调用结果。
 _Avoid_: history, trace.
 
 ## Modules (architecture)
@@ -63,8 +67,12 @@ _Avoid_: history, trace.
 Names for deepened modules from the 2026-05-29 architecture review, updated for the single-Rust decision (ADR-0001).
 
 **Server Runtime**:
-The one deep module owning a Server's full lifecycle — registry, status state machine, sessions, and tool catalog. Canonical implementation: Rust `server_manager.rs` (the aggregate root) with in-domain files `server_manager/{status,session,errors}.rs`; the 14-method public interface is unchanged. The Node `server-manager` / `server-service` / `server-lifecycle` / `session-manager` split was removed, not collapsed.
+管理 Server 完整生命周期的 deep module，统一 registry、状态机、会话、Tool 清单、Tool 调用与审计归属。规范实现为 Rust `server_manager.rs` 及域内文件 `server_manager/{status,session,errors,health}.rs`。`call_tool(exposed_name, arguments, agent_info)` interface 一次解析 Tool Call Context，完成执行、计时与审计，区分 Tool 不可用和执行失败；MCP 协议层只负责参数校验与响应编码。
 _Avoid_: ServerManager, ServerService (the split).
+
+**Settings**:
+管理设置读取、更新与重置的 deep module，规范实现为 `src/hooks/useSettings.ts`。`updateSettings(payload)` 与 `resetSettings()` interface 在同一 QueryClient 内串行执行；涉及登录自启时读取执行前已保存的值作为补偿基线。保存失败则恢复登录自启，补偿失败保留两种错误；保存成功立即更新缓存，运行时应用失败明确报告部分成功，不撤销已保存设置。页面负责交互确认与状态展示，语言上下文负责语言同步。
+_Avoid_: 页面内登录自启补偿、调用方自行同步运行时。
 
 **Config Import**:
 The deep module covering scan / preview / execute / convert. Deepened 2026-08-18: the Client Dialect seam — `clients.rs` registry (single client list, `gateway_entry_name`) + `formatters.rs` `json_dialect` table (entry shapes) + loud `no formatter` error (guard test `every_registered_client_has_a_formatter`). The frontend derives its client list from snippets, no hardcoded copies.

@@ -15,9 +15,12 @@ impl AppError {
         Self::new(StatusCode::CONFLICT, code, message)
     }
 
-    pub fn upstream(code: &'static str, message: impl Into<String>) -> Self {
-        Self::new(StatusCode::BAD_GATEWAY, code, message)
-            .with_client_message("Unable to check for updates".to_string())
+    pub fn upstream(
+        code: &'static str,
+        message: impl Into<String>,
+        client_message: impl Into<String>,
+    ) -> Self {
+        Self::new(StatusCode::BAD_GATEWAY, code, message).with_client_message(client_message)
     }
     pub fn not_found(msg: impl Into<String>) -> Self {
         Self::new(StatusCode::NOT_FOUND, "NOT_FOUND", msg)
