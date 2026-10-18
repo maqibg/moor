@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { json } from "@codemirror/lang-json";
 import { lintGutter, linter, type Diagnostic } from "@codemirror/lint";
+import { Prec } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import {
   formatJsonDiagnostic,
@@ -28,72 +29,77 @@ function toCodeMirrorDiagnostic(content: string, diagnostic: ImportDiagnostic): 
   };
 }
 
-const moorEditorTheme = EditorView.theme(
-  {
-    "&": {
-      backgroundColor: "transparent",
-      color: "#26251e",
-      fontSize: "12px",
-      height: "100%",
-    },
-    ".cm-scroller": {
-      fontFamily:
-        "var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-      lineHeight: "1.65",
-      overflow: "auto",
-    },
-    ".cm-content": {
-      caretColor: "#f54e00",
-      minHeight: "260px",
-      padding: "12px 0",
-    },
-    ".cm-line": {
-      padding: "0 12px",
-    },
-    ".cm-gutters": {
-      backgroundColor: "rgba(38, 37, 30, 0.035)",
-      borderRight: "1px solid var(--fg-08)",
-      color: "rgba(38, 37, 30, 0.36)",
-      fontFamily:
-        "var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-    },
-    ".cm-activeLine": {
-      backgroundColor: "rgba(245, 78, 0, 0.045)",
-    },
-    ".cm-activeLineGutter": {
-      backgroundColor: "rgba(245, 78, 0, 0.07)",
-      color: "#26251e",
-    },
-    ".cm-foldPlaceholder": {
-      backgroundColor: "var(--fg-06)",
-      border: "1px solid var(--fg-10)",
-      color: "var(--fg-55)",
-    },
-    ".cm-tooltip": {
-      backgroundColor: "#e6e5e0",
-      border: "1px solid var(--fg-12)",
-      color: "#26251e",
-      fontFamily: "var(--font-headline), system-ui, sans-serif",
-    },
-    ".cm-tooltip-lint": {
-      borderRadius: "8px",
-      padding: "6px 8px",
-    },
-    ".cm-diagnosticText": {
-      color: "#cf2d56",
-    },
-    ".cm-placeholder": {
-      color: "var(--fg-35)",
-    },
-    ".cm-selectionBackground": {
-      backgroundColor: "rgba(245, 78, 0, 0.16) !important",
-    },
-    "&.cm-focused": {
-      outline: "none",
-    },
+// 颜色一律走主题变量，编辑器外观随 data-theme 在明暗之间切换。
+const moorEditorTheme = EditorView.theme({
+  "&": {
+    backgroundColor: "transparent",
+    color: "var(--foreground)",
+    fontSize: "12px",
+    height: "100%",
   },
-  { dark: false },
-);
+  ".cm-scroller": {
+    fontFamily:
+      "var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    lineHeight: "1.65",
+    overflow: "auto",
+  },
+  ".cm-content": {
+    caretColor: "var(--color-cursor-orange)",
+    minHeight: "260px",
+    padding: "12px 0",
+  },
+  ".cm-content ::selection": {
+    color: "var(--foreground)",
+  },
+  ".cm-line": {
+    padding: "0 12px",
+  },
+  ".cm-gutters": {
+    backgroundColor: "var(--fg-04)",
+    borderRight: "1px solid var(--fg-08)",
+    color: "var(--fg-70)",
+    fontFamily:
+      "var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+  },
+  ".cm-activeLine": {
+    backgroundColor: "rgba(245, 78, 0, 0.045)",
+  },
+  ".cm-activeLineGutter": {
+    backgroundColor: "rgba(245, 78, 0, 0.07)",
+    color: "var(--foreground)",
+  },
+  ".cm-foldPlaceholder": {
+    backgroundColor: "var(--fg-06)",
+    border: "1px solid var(--fg-10)",
+    color: "var(--fg-70)",
+  },
+  ".cm-tooltip": {
+    backgroundColor: "var(--popover)",
+    border: "1px solid var(--fg-12)",
+    color: "var(--popover-foreground)",
+    fontFamily: "var(--font-headline), system-ui, sans-serif",
+  },
+  ".cm-tooltip-lint": {
+    borderRadius: "8px",
+    padding: "6px 8px",
+  },
+  ".cm-diagnosticText": {
+    color: "color-mix(in srgb, var(--destructive), var(--foreground) 20%)",
+  },
+  ".cm-placeholder": {
+    color: "var(--fg-70)",
+  },
+  ".cm-selectionBackground": {
+    backgroundColor: "rgba(245, 78, 0, 0.16) !important",
+  },
+  "&.cm-focused": {
+    outline: "none",
+  },
+});
+
+function isDocumentInDarkTheme(): boolean {
+  return document.documentElement.dataset.theme === "dark";
+}
 
 export function JsonImportEditor({
   value,
@@ -101,6 +107,18 @@ export function JsonImportEditor({
   diagnostics,
   onChange,
 }: JsonImportEditorProps) {
+  // 主题是 useTheme 写在 documentElement 上的 data-theme，这里只跟随它。
+  const [isDarkTheme, setIsDarkTheme] = useState(isDocumentInDarkTheme);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const syncTheme = () => setIsDarkTheme(root.dataset.theme === "dark");
+    const observer = new MutationObserver(syncTheme);
+    observer.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+    syncTheme();
+    return () => observer.disconnect();
+  }, []);
+
   const extensions = useMemo(
     () => [
       json(),
@@ -111,7 +129,8 @@ export function JsonImportEditor({
         );
       }),
       lintGutter(),
-      moorEditorTheme,
+      // 保留 Moor 的布局与背景，优先于内置暗色主题。
+      Prec.high(moorEditorTheme),
     ],
     [],
   );
@@ -129,7 +148,7 @@ export function JsonImportEditor({
           lineNumbers: true,
         }}
         extensions={extensions}
-        theme="none"
+        theme={isDarkTheme ? "dark" : "none"}
         onChange={onChange}
       />
       {diagnostics.length > 0 && (
@@ -137,7 +156,7 @@ export function JsonImportEditor({
           {diagnostics.map((diagnostic) => (
             <p
               key={`${diagnostic.offset ?? "root"}:${diagnostic.message}`}
-              className="font-mono text-[11px] leading-relaxed text-error-warm"
+              className="font-mono text-[11px] leading-relaxed text-[color-mix(in_srgb,var(--destructive),var(--foreground)_20%)]"
             >
               {formatJsonDiagnostic(diagnostic)}
             </p>
