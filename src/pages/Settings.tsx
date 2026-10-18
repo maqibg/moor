@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { cn, createErrorWithCause, getErrorMessage } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 import { getApiRuntime, resetRuntime } from "@/lib/api/runtime";
-import { syncRuntimeSettings, applyLoginAutostartSetting } from "@/lib/tauri";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ErrorBanner } from "@/components/shared/ErrorBanner";
 import { useSettings } from "@/hooks/useSettings";
@@ -16,7 +15,6 @@ import type { GeneralSettings, SettingsGroup, SidecarInfo } from "@moor/types";
 import { CopyButton } from "@/components/shared/CopyButton";
 import {
   getAdvancedPortStatus,
-  getGeneralSettingRuntimeAction,
   getPortBannerState,
   getSettingsPageLoadState,
   parseTimeoutSecondsInput,
@@ -123,32 +121,10 @@ function GeneralSection({ onError }: { onError: (message: string | null) => void
 
   const handleSwitch = useCallback(
     async (key: keyof GeneralSettings, value: boolean) => {
-      const general: Partial<GeneralSettings> = { [key]: value };
       try {
         onError(null);
-        const action = getGeneralSettingRuntimeAction(key);
-        if (action === "loginAutostart") {
-          await applyLoginAutostartSetting(value);
-          try {
-            await updateSettings({ general });
-          } catch (err) {
-            try {
-              await applyLoginAutostartSetting(!value);
-            } catch (rollbackErr) {
-              throw createErrorWithCause(
-                `${getErrorMessage(err, t("Failed to save login auto-start setting"))}. Rollback failed: ${getErrorMessage(rollbackErr, t("unknown error"))}`,
-                rollbackErr,
-              );
-            }
-            throw err;
-          }
-          return;
-        }
-
-        await updateSettings({ general });
-        if (action === "windowRuntime") {
-          await syncRuntimeSettings();
-        }
+        // 登录自启、运行期窗口同步与失败回滚都由 useSettings 统一处理。
+        await updateSettings({ general: { [key]: value } });
       } catch (err) {
         onError(getErrorMessage(err, t("Failed to update runtime settings")));
       }
@@ -744,15 +720,8 @@ export function SettingsPage() {
     if (!window.confirm(t("Reset all settings to their default values?"))) return;
     try {
       setErrorMessage(null);
-      const previousAutoStartOnLogin = settings.general.autoStartOnLogin;
-      await applyLoginAutostartSetting(false);
-      try {
-        await resetSettings();
-      } catch (err) {
-        await applyLoginAutostartSetting(previousAutoStartOnLogin);
-        throw err;
-      }
-      await syncRuntimeSettings();
+      // 恢复默认同样走 useSettings：登录自启、运行期同步与失败回滚都在那里统一处理。
+      await resetSettings();
       resetRuntime();
       await refreshRuntimeInfo();
       setPortChangeApplied(false);
