@@ -1,5 +1,17 @@
 # moor
 
+## 0.8.3
+
+### Patch Changes
+
+- Fix dark-mode readability and theme synchronization in the JSON import editor (#75).
+  - Apply theme-aware text, JSON syntax highlighting, line numbers, placeholders, selections, and diagnostic colors while preserving edits during theme changes.
+  - Serialize settings changes, restore the previous login auto-start state when saving fails, and report runtime synchronization failures without reverting saved settings.
+  - Keep tool calls and audit records associated with the profile and server resolved when each call starts, including calls that overlap a profile switch.
+  - Preserve audit records when a referenced profile or server has been deleted, and improve error feedback when opening server logs.
+
+  Known limitation: secondary selections in multiple-cursor or rectangular-selection mode can still fall below the 4.5:1 text-contrast target in dark mode.
+
 ## 0.8.2
 
 ### 补丁更新
